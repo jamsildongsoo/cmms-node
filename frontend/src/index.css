@@ -1,0 +1,98 @@
+@import "tailwindcss";
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css");
+
+@theme {
+  --color-primary: #1e293b; /* slate-800 */
+  --color-secondary: #0f172a; /* slate-900 */
+  --color-brand: #1e40af; /* blue-800 */
+  --color-accent: #2563eb; /* blue-600 */
+  --font-sans: "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Pretendard 웹폰트 로드 */
+
+/* 전역 레이아웃 초기화 */
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  font-family: var(--font-sans);
+  background-color: var(--color-slate-950);
+  color: var(--color-slate-200);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* 라이트 모드 색상 반전 정의 (Tailwind v4 CSS 변수 오버라이드) */
+html.light {
+  --color-slate-950: #f8fafc; /* bg-slate-950 -> slate-50 */
+  --color-slate-900: #ffffff; /* bg-slate-900 -> white */
+  --color-slate-850: #f1f5f9; /* bg-slate-850 -> slate-100 */
+  --color-slate-800: #e2e8f0; /* border-slate-800 -> slate-200 */
+  --color-slate-750: #cbd5e1; /* border-slate-750 -> slate-300 */
+  --color-slate-700: #94a3b8; /* slate-700 -> slate-400 */
+  --color-slate-600: #64748b; /* slate-600 -> slate-500 */
+  --color-slate-500: #475569; /* slate-500 -> slate-600 */
+  --color-slate-400: #334155; /* slate-400 -> slate-700 */
+  --color-slate-300: #1e293b; /* slate-300 -> slate-800 */
+  --color-slate-200: #0f172a; /* slate-200 -> slate-900 */
+  --color-slate-100: #020617; /* slate-100 -> slate-950 */
+  --color-slate-5: #0f172a;
+}
+
+/* 터치 타겟 태블릿용 최소 높이 클래스 */
+.touch-target {
+  min-height: 44px;
+}
+
+/* ==========================================================================
+   인쇄 공통 정책 (8단계 통일) — named page 방식 (Edge/Chrome)
+   - 목록(가로): 출력 영역에 .print-landscape + 공통 <PrintHeader/> 부착
+   - 문서(세로): 기본값이 portrait이므로 별도 클래스 불필요(필요 시 .print-portrait)
+   - 여백: 상단 14mm = PrintHeader 워터마크 밴드(position:fixed가 모든 페이지 상단에 반복).
+     좌우·하단 10mm = 내용 인셋. ※ 페이지마다 헤더 반복을 위해 상단 밴드가 필요하므로 margin 0 불가
+     → 브라우저 머리글/바닥글은 인쇄 대화상자에서 해제 권장.
+   ========================================================================== */
+@page { size: A4; margin: 14mm 10mm 10mm 10mm; }
+@page portrait { size: A4 portrait; margin: 14mm 10mm 10mm 10mm; }
+@page landscape { size: A4 landscape; margin: 14mm 10mm 10mm 10mm; }
+
+@media print {
+  body {
+    background-color: white !important;
+    color: black !important;
+  }
+
+  /* 인쇄 시 비노출 대상 */
+  .no-print,
+  nav,
+  header,
+  aside,
+  button,
+  .btn,
+  .actions {
+    display: none !important;
+  }
+
+  /* 빈 페이지 방지 — 높이/오버플로 제약 해제 */
+  html, body, #root, main, div {
+    height: auto !important;
+    overflow: visible !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+
+  /* 출력 방향 (named page) — 목록은 landscape, 문서는 기본 portrait */
+  .print-portrait { page: portrait; }
+  .print-landscape { page: landscape; }
+
+  /* 강제 페이지 줄바꿈 및 테두리 고대비화 */
+  .print-page-break {
+    page-break-before: always;
+    break-before: page;
+  }
+
+  table {
+    border-color: #000000 !important;
+  }
+}
