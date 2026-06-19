@@ -13,7 +13,7 @@
    - 환경변수 STORAGE_* 그대로 재활용 (cmms-agy와 동일)
    ========================================================================= */
 import {
-  Injectable, Inject, BadRequestException, NotFoundException,
+  Injectable, Inject, BadRequestException, NotFoundException, ForbiddenException,
 } from '@nestjs/common';
 import {
   S3Client,
@@ -25,6 +25,8 @@ import {
 import { createHash, randomUUID } from 'crypto';
 import { DataSource } from 'typeorm';
 import { getTenantContext } from '../../common/context/tenant.context';
+import { AppModule } from '../../common/constants/module.constants';
+import type { PermAction } from '../../common/constants/permission.constants';
 import { S3_CLIENT, STORAGE_SETTINGS, StorageSettings } from './storage.config';
 
 export interface FileItemResponse {
@@ -70,20 +72,26 @@ export class FileStorageService {
     try {
       // 1. 그룹 조회 또는 생성
       let gno: number;
+      let effectiveModule: AppModule;
       if (groupNo) {
         const rows = await qr.query(
-          `SELECT group_no FROM file_attachment
+          `SELECT group_no, ref_module FROM file_attachment
            WHERE company_id=$1 AND group_no=$2 AND delete_yn='N'`,
           [companyId, groupNo],
         ) as any[];
         if (!rows || !rows.length) throw new NotFoundException('첨부 그룹을 찾을 수 없습니다.');
         gno = groupNo;
+        effectiveModule = this.parseAppModule(rows[0].ref_module);
+        await this.assertModulePermission(effectiveModule, ['U']);
       } else {
+        effectiveModule = this.parseAppModule(refModule);
+        await this.assertModulePermission(effectiveModule, ['C', 'U']);
+
         // IDENTITY PK: INSERT RETURNING으로 group_no 즉시 획득
         const inserted = await qr.query(
           `INSERT INTO file_attachment (company_id, ref_module, ref_no, delete_yn, created_by, updated_by)
            VALUES ($1,$2,$3,'N',$4,$4) RETURNING group_no`,
-          [companyId, refModule ?? null, refNo ?? null, userId],
+          [companyId, effectiveModule, refNo ?? null, userId],
         ) as any[];
         gno = inserted[0]?.group_no;
       }
@@ -98,7 +106,7 @@ export class FileStorageService {
       let nextItemNo = (maxRow?.max ?? 0) + 1;
 
       const result: FileItemResponse[] = [];
-      const moduleSeg = this.sanitizeSegment(refModule ?? 'common');
+      const moduleSeg = this.sanitizeSegment(effectiveModule);
 
       for (const file of files) {
         this.validate(file);
@@ -157,6 +165,9 @@ export class FileStorageService {
   // =========================================================================
   async list(groupNo: number): Promise<FileItemResponse[]> {
     const { companyId } = getTenantContext();
+    const module = await this.getGroupModule(companyId, groupNo);
+    await this.assertModulePermission(module, ['R']);
+
     const rows = await this.dataSource.query<any[]>(
       `SELECT item_no, original_file_name, file_extension, mime_type, file_size
        FROM file_attachment_item
@@ -178,6 +189,9 @@ export class FileStorageService {
   // =========================================================================
   async download(groupNo: number, itemNo: number) {
     const { companyId } = getTenantContext();
+    const module = await this.getGroupModule(companyId, groupNo);
+    await this.assertModulePermission(module, ['R']);
+
     const item = await this.getItemOwned(companyId, groupNo, itemNo);
 
     const response = await this.s3.send(new GetObjectCommand({
@@ -198,6 +212,9 @@ export class FileStorageService {
   // =========================================================================
   async delete(groupNo: number, itemNo: number): Promise<void> {
     const { companyId } = getTenantContext();
+    const module = await this.getGroupModule(companyId, groupNo);
+    await this.assertModulePermission(module, ['U', 'D']);
+
     const item = await this.getItemOwned(companyId, groupNo, itemNo);
 
     await this.dataSource.query(
@@ -256,6 +273,61 @@ export class FileStorageService {
   // =========================================================================
   // 유틸
   // =========================================================================
+  private parseAppModule(value: string | null | undefined): AppModule {
+    const module = value?.trim().toUpperCase();
+    if (!module || !Object.values(AppModule).includes(module as AppModule)) {
+      throw new BadRequestException('유효하지 않은 파일 참조 모듈입니다.');
+    }
+    return module as AppModule;
+  }
+
+  private async getGroupModule(companyId: string, groupNo: number): Promise<AppModule> {
+    const rows = await this.dataSource.query<{ ref_module: string | null }[]>(
+      `SELECT ref_module FROM file_attachment
+       WHERE company_id=$1 AND group_no=$2 AND delete_yn='N'`,
+      [companyId, groupNo],
+    );
+    if (!rows.length) throw new NotFoundException('첨부 그룹을 찾을 수 없습니다.');
+    return this.parseAppModule(rows[0].ref_module);
+  }
+
+  private async assertModulePermission(module: AppModule, actions: PermAction[]): Promise<void> {
+    const { companyId, userId, roleId } = getTenantContext();
+
+    if (companyId === 'SYSTEM' && roleId?.toUpperCase() === 'SYSTEM') {
+      const rows = await this.dataSource.query<{ role_id: string }[]>(
+        `SELECT role_id FROM users
+         WHERE company_id='SYSTEM' AND id=$1 AND use_yn='Y' AND delete_yn='N'`,
+        [userId],
+      );
+      if (rows.length > 0 && rows[0].role_id?.toUpperCase() === 'SYSTEM') return;
+    }
+
+    if (!roleId) throw new ForbiddenException('파일 접근 권한이 없습니다.');
+
+    const rows = await this.dataSource.query<any[]>(
+      `SELECT perm_c, perm_r, perm_u, perm_d, perm_a
+       FROM role_detail
+       WHERE company_id=$1 AND role_id=$2 AND module_detail=$3`,
+      [companyId, roleId, module],
+    );
+    const row = rows[0];
+    if (!row) throw new ForbiddenException('파일 접근 권한이 없습니다.');
+
+    const allowed = actions.some((action) => {
+      switch (action) {
+        case 'C': return row.perm_c === 'Y';
+        case 'R': return row.perm_r === 'Y';
+        case 'U': return row.perm_u === 'Y';
+        case 'D': return row.perm_d === 'Y';
+        case 'A': return row.perm_a === 'Y';
+        default: return false;
+      }
+    });
+
+    if (!allowed) throw new ForbiddenException('파일 접근 권한이 없습니다.');
+  }
+
   private async getItemOwned(companyId: string, groupNo: number, itemNo: number) {
     const rows = await this.dataSource.query<any[]>(
       `SELECT * FROM file_attachment_item

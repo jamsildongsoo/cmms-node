@@ -3,8 +3,10 @@ import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import { getCommonStatusLabel as getStatusLabel, getCommonStatusClass as getStatusClass } from '../constants/status';
 import { formatDateTime, nowLocalInput, utcToInput, inputToUtc } from '../utils/datetime';
+import { getApiErrorMessage } from '../utils/apiError';
 import PrintHeader from '../components/PrintHeader';
 import WorkPermitPrint from '../components/WorkPermitPrint';
+import ApprovalSubmitModal from '../components/ApprovalSubmitModal';
 import { 
   ClipboardList, Edit2, Trash2, Printer, X, Plus, Download, CheckSquare, Square, ChevronDown, ChevronUp 
 } from 'lucide-react';
@@ -144,9 +146,9 @@ export default function WorkPermit() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [approvalRef, setApprovalRef] = useState<{ refNo: string; title: string } | null>(null);
 
-  // Authority check
-  const canDirectConfirm = user?.roleId === 'ADMIN' || user?.roleId === 'MANAGER';
+  const canDirectConfirm = user?.permissions?.WP?.A === 'Y';
 
   const fetchData = async () => {
     try {
@@ -164,7 +166,7 @@ export default function WorkPermit() {
       setWorkOrders(woRes.data);
     } catch (err) {
       console.error(err);
-      setMessage({ type: 'error', text: '목록을 불러오지 못했습니다.' });
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '목록을 불러오지 못했습니다.') });
     }
   };
 
@@ -291,7 +293,7 @@ export default function WorkPermit() {
 
       setIsFormOpen(true);
     } catch (err) {
-      alert('작업허가서 상세 기록을 불러오지 못했습니다.');
+      alert(getApiErrorMessage(err, '작업허가서 상세 기록을 불러오지 못했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -304,7 +306,7 @@ export default function WorkPermit() {
       setMessage({ type: 'success', text: '작업허가서가 삭제되었습니다.' });
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: '삭제 실패.' });
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '삭제 실패.') });
     }
   };
 
@@ -316,6 +318,7 @@ export default function WorkPermit() {
     setIsLoading(true);
     setMessage(null);
     try {
+      const saveStatus = submitStatus === 'P' ? 'T' : submitStatus;
       const payload = {
         id: wpNo || null,
         plantId,
@@ -342,22 +345,27 @@ export default function WorkPermit() {
         refNo: refNo || null,
         refModule: refModule || null,
         approvalId: approvalId || null,
-        status: submitStatus
+        status: saveStatus
       };
 
-      await axiosInstance.post('/work-permit', payload);
+      const response = await axiosInstance.post('/work-permit', payload);
+      if (submitStatus === 'P') {
+        const savedId = response.data.id;
+        setWpNo(savedId);
+        setStatus('T');
+        setApprovalRef({ refNo: savedId, title: `[작업허가서] ${title}` });
+        return;
+      }
       setMessage({ 
         type: 'success', 
         text: submitStatus === 'T' 
           ? '임시저장 되었습니다.' 
-          : submitStatus === 'S' 
-            ? '안전작업허가서가 직접 확정 발급 완료되었습니다.'
-            : '결재 상신(대기) 처리되었습니다.' 
+          : '안전작업허가서가 직접 확정 발급 완료되었습니다.'
       });
       setIsFormOpen(false);
       fetchData();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.response?.data?.message || '저장 중 오류가 발생했습니다.' });
+    } catch (err) {
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '저장 중 오류가 발생했습니다.') });
     } finally {
       setIsLoading(false);
     }
@@ -913,6 +921,23 @@ export default function WorkPermit() {
           </div>
         </div>
       )}
+      <ApprovalSubmitModal
+        open={!!approvalRef}
+        refModule="WP"
+        refNo={approvalRef?.refNo || ''}
+        defaultTitle={approvalRef?.title || ''}
+        users={usersList}
+        currentUserId={user?.id}
+        onClose={() => setApprovalRef(null)}
+        onSubmitted={(newApprovalId) => {
+          setApprovalId(newApprovalId);
+          setStatus('P');
+          setApprovalRef(null);
+          setIsFormOpen(false);
+          setMessage({ type: 'success', text: '작업허가서 결재 문서가 상신되었습니다.' });
+          fetchData();
+        }}
+      />
     </div>
   );
 }

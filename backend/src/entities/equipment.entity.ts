@@ -46,6 +46,6 @@ export class Equipment extends BaseEntity {
   fileGroupId!: string | number | null;
 
   // Transient fields (DB 컬럼에 없음, API 응답으로 채워짐)
-  lastCheckDate?: Date | string | null;
-  nextCheckDate?: Date | string | null;
+  lastCheckDate?: string | null;
+  nextCheckDate?: string | null;
 }

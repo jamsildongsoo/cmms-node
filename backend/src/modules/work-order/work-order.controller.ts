@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { WorkOrderService, WorkOrderSaveRequest } from './work-order.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { PermissionGuard, Permission } from '../../common/guards/permission.guard';
+import { PermissionGuard, Permission, PermissionSave } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
@@ -38,7 +38,7 @@ export class WorkOrderController {
   }
 
   @Post()
-  @Permission(AppModule.WO, 'C')
+  @PermissionSave(AppModule.WO, 'workOrder.status')
   async saveWorkOrder(@Body() request: WorkOrderSaveRequest): Promise<any> {
     const { companyId, userId } = getTenantContext();
     return this.workOrderService.saveWorkOrder(companyId, request, userId);

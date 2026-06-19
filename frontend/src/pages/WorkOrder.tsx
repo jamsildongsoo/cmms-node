@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import { getCommonStatusLabel as getStatusLabel, getCommonStatusClass as getStatusClass } from '../constants/status';
-import { todayLocal } from '../utils/datetime';
+import { formatDateOnly, todayLocal } from '../utils/datetime';
+import { getApiErrorMessage } from '../utils/apiError';
 import PrintHeader from '../components/PrintHeader';
 import WorkOrderPrint from '../components/WorkOrderPrint';
+import ApprovalSubmitModal from '../components/ApprovalSubmitModal';
 import { 
   ClipboardList, Edit2, Trash2, Printer, X, Plus, Trash, Download 
 } from 'lucide-react';
@@ -72,9 +74,9 @@ export default function WorkOrder() {
   const [workItems, setWorkItems] = useState<WorkOrderItemModel[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [approvalRef, setApprovalRef] = useState<{ refNo: string; title: string } | null>(null);
 
-  // Authority check
-  const canDirectConfirm = user?.roleId === 'ADMIN' || user?.roleId === 'MANAGER';
+  const canDirectConfirm = user?.permissions?.WO?.A === 'Y';
 
   const fetchData = async () => {
     try {
@@ -84,13 +86,16 @@ export default function WorkOrder() {
         axiosInstance.get('/mdm/departments'),
         axiosInstance.get('/mdm/users')
       ]);
-      setWorkOrders(woRes.data);
+      setWorkOrders((woRes.data || []).map((workOrder: WorkOrderModel) => ({
+        ...workOrder,
+        workDate: formatDateOnly(workOrder.workDate) || null,
+      })));
       setEquipments(eqRes.data);
       setDepts(deptRes.data);
       setUsersList(userRes.data);
     } catch (err) {
       console.error(err);
-      setMessage({ type: 'error', text: '목록을 불러오지 못했습니다.' });
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '목록을 불러오지 못했습니다.') });
     }
   };
 
@@ -137,7 +142,7 @@ export default function WorkOrder() {
       setWoTypeCode(w.woTypeCode);
       setDepartmentId(w.departmentId);
       setWorkerId(w.workerId || '');
-      setWorkDate(w.workDate || '');
+      setWorkDate(formatDateOnly(w.workDate));
       setCost(w.cost || 0);
       setManHours(w.manHours || 0);
       setManHoursUnit(w.manHoursUnit || 'H');
@@ -150,7 +155,7 @@ export default function WorkOrder() {
       
       setIsFormOpen(true);
     } catch (err) {
-      alert('작업지시 상세 기록을 불러오지 못했습니다.');
+      alert(getApiErrorMessage(err, '작업지시 상세 기록을 불러오지 못했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -163,7 +168,7 @@ export default function WorkOrder() {
       setMessage({ type: 'success', text: '작업지시가 삭제되었습니다.' });
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: '삭제 실패.' });
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '삭제 실패.') });
     }
   };
 
@@ -197,6 +202,7 @@ export default function WorkOrder() {
     setIsLoading(true);
     setMessage(null);
     try {
+      const saveStatus = submitStatus === 'P' ? 'T' : submitStatus;
       const payload = {
         workOrder: {
           id: woNo || null,
@@ -215,24 +221,29 @@ export default function WorkOrder() {
           refNo: refNo || null,
           refModule: refModule || null,
           approvalId: approvalId || null,
-          status: submitStatus
+          status: saveStatus
         },
         workItems
       };
 
-      await axiosInstance.post('/work-order', payload);
+      const response = await axiosInstance.post('/work-order', payload);
+      if (submitStatus === 'P') {
+        const savedId = response.data.id;
+        setWoNo(savedId);
+        setStatus('T');
+        setApprovalRef({ refNo: savedId, title: `[작업지시] ${title}` });
+        return;
+      }
       setMessage({ 
         type: 'success', 
         text: submitStatus === 'T' 
           ? '임시저장 되었습니다.' 
-          : submitStatus === 'S' 
-            ? '작업지시가 직접 확정 완료되었습니다.'
-            : '결재 상신(대기) 처리되었습니다.' 
+          : '작업지시가 직접 확정 완료되었습니다.'
       });
       setIsFormOpen(false);
       fetchData();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.response?.data?.message || '저장 중 오류가 발생했습니다.' });
+    } catch (err) {
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '저장 중 오류가 발생했습니다.') });
     } finally {
       setIsLoading(false);
     }
@@ -791,6 +802,23 @@ export default function WorkOrder() {
           </div>
         </div>
       )}
+      <ApprovalSubmitModal
+        open={!!approvalRef}
+        refModule="WO"
+        refNo={approvalRef?.refNo || ''}
+        defaultTitle={approvalRef?.title || ''}
+        users={usersList}
+        currentUserId={user?.id}
+        onClose={() => setApprovalRef(null)}
+        onSubmitted={(newApprovalId) => {
+          setApprovalId(newApprovalId);
+          setStatus('P');
+          setApprovalRef(null);
+          setIsFormOpen(false);
+          setMessage({ type: 'success', text: '작업지시 결재 문서가 상신되었습니다.' });
+          fetchData();
+        }}
+      />
     </div>
   );
 }

@@ -5,7 +5,7 @@
      - 금액 정밀도: Decimal.js (BigDecimal 대응)
      - 데드락 방지: (warehouse_id, inventory_id) 기준 정렬 잠금
    ========================================================================= */
-import { Injectable, ConflictException } from '@nestjs/common';
+import { Injectable, ConflictException, BadRequestException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import Decimal from 'decimal.js';
 import { SequenceService, AppModule } from '../../common/sequence/sequence.service';
@@ -87,6 +87,7 @@ export class InventoryTxService {
 
       // 6. 비즈니스 로직 순차 수행
       for (const item of request.items) {
+        this.validateTxItem(item);
         const txDate = item.txDate ?? new Date();
         switch (item.txTypeCode.toUpperCase()) {
           case TxType.IN:
@@ -186,23 +187,27 @@ export class InventoryTxService {
     const currentAmount = new Decimal(status?.amount ?? '0');
     const qty = new Decimal(item.qty);
 
+    if (!status || currentQty.lt(qty)) {
+      throw new BadRequestException(
+        `재고가 부족합니다. 창고=${item.warehouseId}, 자재=${item.inventoryId}, 현재고=${currentQty.toFixed(4)}, 요청수량=${qty.toFixed(4)}`,
+      );
+    }
+
     // 현재 평균단가
     const avgPrice = currentQty.gt(0)
       ? currentAmount.div(currentQty).toDecimalPlaces(4)
       : new Decimal(0);
 
     const amount = qty.mul(avgPrice);
-    const newQty = Decimal.max(currentQty.sub(qty), 0);
-    const newAmount = Decimal.max(currentAmount.sub(amount), 0);
+    const newQty = currentQty.sub(qty);
+    const newAmount = currentAmount.sub(amount);
 
-    if (status) {
-      await qr.query(
-        `UPDATE inventory_status SET qty=$1, amount=$2, updated_by=$3
-         WHERE company_id=$4 AND warehouse_id=$5 AND inventory_id=$6`,
-        [newQty.toFixed(4), newAmount.toFixed(4), operator,
-         companyId, item.warehouseId, item.inventoryId],
-      );
-    }
+    await qr.query(
+      `UPDATE inventory_status SET qty=$1, amount=$2, updated_by=$3
+       WHERE company_id=$4 AND warehouse_id=$5 AND inventory_id=$6`,
+      [newQty.toFixed(4), newAmount.toFixed(4), operator,
+       companyId, item.warehouseId, item.inventoryId],
+    );
 
     await qr.query(
       `INSERT INTO inventory_history
@@ -227,6 +232,13 @@ export class InventoryTxService {
     txDate: Date,
     operator: string,
   ) {
+    if (!item.targetWarehouseId) {
+      throw new BadRequestException('이동 처리에는 대상 창고가 필요합니다.');
+    }
+    if (item.warehouseId === item.targetWarehouseId) {
+      throw new BadRequestException('이동 출고 창고와 대상 창고가 같을 수 없습니다.');
+    }
+
     // 출고 처리
     await this.executeOut(qr, companyId, item, statusMap, txDate, operator);
     // 입고 처리 (targetWarehouseId로 변환)
@@ -266,12 +278,26 @@ export class InventoryTxService {
     const newQty = new Decimal(status?.qty ?? '0').add(adjQty);
     const newAmount = new Decimal(status?.amount ?? '0').add(adjAmount);
 
+    if (newQty.lt(0)) {
+      throw new BadRequestException(
+        `조정 후 재고가 음수가 될 수 없습니다. 창고=${item.warehouseId}, 자재=${item.inventoryId}, 현재고=${new Decimal(status?.qty ?? '0').toFixed(4)}, 조정수량=${adjQty.toFixed(4)}`,
+      );
+    }
+
     if (status) {
       await qr.query(
         `UPDATE inventory_status SET qty=$1, amount=$2, updated_by=$3
          WHERE company_id=$4 AND warehouse_id=$5 AND inventory_id=$6`,
         [newQty.toFixed(4), newAmount.toFixed(4), operator,
          companyId, item.warehouseId, item.inventoryId],
+      );
+    } else {
+      await qr.query(
+        `INSERT INTO inventory_status
+           (company_id, warehouse_id, inventory_id, qty, amount, delete_yn, created_by, updated_by)
+         VALUES ($1,$2,$3,$4,$5,'N',$6,$6)`,
+        [companyId, item.warehouseId, item.inventoryId,
+         newQty.toFixed(4), newAmount.toFixed(4), operator],
       );
     }
     await qr.query(
@@ -374,6 +400,30 @@ export class InventoryTxService {
   // -----------------------------------------------------------------------
   // 유틸
   // -----------------------------------------------------------------------
+  private validateTxItem(item: TxItem): void {
+    const txType = item.txTypeCode?.toUpperCase();
+    if (![TxType.IN, TxType.OUT, TxType.MOVE, TxType.ADJ].includes(txType as TxType)) {
+      throw new BadRequestException(`유효하지 않은 수불 유형입니다: ${item.txTypeCode}`);
+    }
+    if (!item.warehouseId) throw new BadRequestException('창고는 필수입니다.');
+    if (!item.inventoryId) throw new BadRequestException('자재는 필수입니다.');
+
+    let qty: Decimal;
+    try {
+      qty = new Decimal(item.qty);
+    } catch {
+      throw new BadRequestException('수량 형식이 올바르지 않습니다.');
+    }
+
+    if (!qty.isFinite() || qty.isZero()) {
+      throw new BadRequestException('수량은 0이 아닌 숫자여야 합니다.');
+    }
+
+    if (txType !== TxType.ADJ && qty.lte(0)) {
+      throw new BadRequestException('입고, 출고, 이동 수량은 0보다 커야 합니다.');
+    }
+  }
+
   private extractSortedKeys(items: TxItem[]): { warehouseId: string; inventoryId: string }[] {
     const keySet = new Set<string>();
     for (const item of items) {

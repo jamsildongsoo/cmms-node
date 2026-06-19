@@ -40,6 +40,16 @@ export function formatDate(value?: string | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/** date-only 값 → 'YYYY-MM-DD'. 시간대 변환 없이 날짜 부분만 사용한다. */
+export function formatDateOnly(value?: string | null): string {
+  if (!value) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+
+  const date = new Date(value);
+  if (isNaN(date.getTime())) return value;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 /** UTC ISO → datetime-local 입력값 'YYYY-MM-DDTHH:mm' (로컬, 편집 로드용) */
 export function utcToInput(value?: string | null): string {
   if (!value) return '';

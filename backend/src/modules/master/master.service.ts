@@ -5,8 +5,8 @@ import { Equipment } from '../../entities/equipment.entity';
 import { EquipmentCheckItem } from '../../entities/equipment-check-item.entity';
 import { EquipmentCheckCycle } from '../../entities/equipment-check-cycle.entity';
 import { Inventory } from '../../entities/inventory.entity';
-import { addDays, addWeeks, addMonths, addYears } from 'date-fns';
 import { resolveActivePlantId } from '../../common/utils/plant.util';
+import { toDateOnly } from '../../common/utils/date-only.util';
 
 export interface EquipmentSaveRequest {
   equipment: Partial<Equipment>;
@@ -59,15 +59,15 @@ export class MasterService {
         const lastDates = cycles
           .map(c => c.lastCheckDate)
           .filter(d => d !== null && d !== undefined)
-          .map(d => new Date(d!));
-        const last = lastDates.length > 0 ? new Date(Math.max(...lastDates.map(d => d.getTime()))) : null;
+          .map(d => toDateOnly(d!));
+        const last = lastDates.length > 0 ? lastDates.sort().at(-1)! : null;
 
         // nextCheckDate 최소값 추출
         const nextDates = cycles
           .map(c => c.nextCheckDate)
           .filter(d => d !== null && d !== undefined)
-          .map(d => new Date(d!));
-        const next = nextDates.length > 0 ? new Date(Math.min(...nextDates.map(d => d.getTime()))) : null;
+          .map(d => toDateOnly(d!));
+        const next = nextDates.length > 0 ? nextDates.sort()[0] : null;
 
         eq.lastCheckDate = last;
         eq.nextCheckDate = next;
@@ -162,30 +162,19 @@ export class MasterService {
     }
 
     if (request.checkCycles) {
-      const newCycles = request.checkCycles.map(cycle => {
-        let next: Date | null = null;
-        if (cycle.lastCheckDate && cycle.cycleVal && cycle.cycleUnit) {
-          const base = new Date(cycle.lastCheckDate);
-          const val = Number(cycle.cycleVal);
-          switch (cycle.cycleUnit.toUpperCase()) {
-            case 'D': next = addDays(base, val); break;
-            case 'W': next = addWeeks(base, val); break;
-            case 'Y': next = addYears(base, val); break;
-            default:  next = addMonths(base, val); break; // M
-          }
-        }
-
-        return this.checkCycleRepo.create({
+      const newCycles = request.checkCycles.map(cycle =>
+        this.checkCycleRepo.create({
           ...cycle,
+          lastCheckDate: cycle.lastCheckDate ? toDateOnly(cycle.lastCheckDate) : null,
+          nextCheckDate: cycle.nextCheckDate ? toDateOnly(cycle.nextCheckDate) : null,
           companyId,
           plantId: activePlantId,
           equipmentId: reqEq.id,
           deleteYn: 'N',
-          nextCheckDate: next,
           createdBy: operator,
           updatedBy: operator,
-        });
-      });
+        }),
+      );
       await this.checkCycleRepo.save(newCycles);
     }
 
@@ -260,7 +249,7 @@ export class MasterService {
     csv += '설비코드,설비명,플랜트,설치위치,설비타입,설치일자,작업허가대상,제조사,모델,일련번호,비고,지난점검일,다음점검일\n';
 
     for (const eq of list) {
-      csv += `${this.escapeCsv(eq.id)},${this.escapeCsv(eq.name)},${this.escapeCsv(eq.plantId)},${this.escapeCsv(eq.location)},${this.escapeCsv(eq.eqTypeCode)},${eq.installDate ? eq.installDate.toString() : ''},${this.escapeCsv(eq.workPermitYn)},${this.escapeCsv(eq.makerName)},${this.escapeCsv(eq.model)},${this.escapeCsv(eq.serialNumber)},${this.escapeCsv(eq.remarks)},${eq.lastCheckDate ? this.formatDate(eq.lastCheckDate) : ''},${eq.nextCheckDate ? this.formatDate(eq.nextCheckDate) : ''}\n`;
+      csv += `${this.escapeCsv(eq.id)},${this.escapeCsv(eq.name)},${this.escapeCsv(eq.plantId)},${this.escapeCsv(eq.location)},${this.escapeCsv(eq.eqTypeCode)},${eq.installDate ? this.formatDate(eq.installDate) : ''},${this.escapeCsv(eq.workPermitYn)},${this.escapeCsv(eq.makerName)},${this.escapeCsv(eq.model)},${this.escapeCsv(eq.serialNumber)},${this.escapeCsv(eq.remarks)},${eq.lastCheckDate ? this.formatDate(eq.lastCheckDate) : ''},${eq.nextCheckDate ? this.formatDate(eq.nextCheckDate) : ''}\n`;
     }
     return csv;
   }
@@ -282,9 +271,6 @@ export class MasterService {
   }
 
   private formatDate(date: Date | string): string {
-    if (date instanceof Date) {
-      return date.toISOString().split('T')[0];
-    }
-    return date.split('T')[0];
+    return toDateOnly(date);
   }
 }

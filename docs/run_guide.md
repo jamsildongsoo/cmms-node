@@ -1,99 +1,112 @@
 # CMMS-NODE 서버 기동 가이드
 
-이 문서는 `cmms-node` (NestJS 백엔드 + React 프론트엔드 + Nginx 프록시) 프로젝트를 개발 환경에서 기동하기 위한 절차를 설명합니다.
+`cmms-node`는 NestJS 백엔드, React/Vite 프론트엔드, Nginx 프록시로 구성됩니다.
 
 ---
 
-## 1. 개발 환경 요구사항
+## 1. 개발 서버 절차
 
-서버를 가동하기 전에 로컬 PC에 다음 도구들이 설치되어 있어야 합니다.
+### 설정값
 
-* **Node.js**: 22.x LTS 이상
-* **Docker & Docker Compose**: Nginx 프록시 컨테이너 구동용
+개발 환경은 루트의 `.env` 파일을 사용합니다. `.env`는 실제 DB 접속 정보와 시크릿을 포함하므로 `.gitignore`에 의해 커밋에서 제외됩니다. 키 목록은 [.env.template](../.env.template)를 참고합니다.
 
----
-
-## 2. 초기 설정
-
-### 2.1 환경변수 파일 설정
-프로젝트 루트 디렉토리에 `.env` 파일을 생성하고 필요한 값을 입력합니다. `.env.template` 파일을 복사하여 사용할 수 있습니다.
-
-```bash
-# 템플릿 복사
-cp .env.template .env
+```env
+NODE_ENV=development
+PORT=8080
+DB_SYNCHRONIZE=true
+DB_URL=postgresql://...
+JWT_SECRET=...
 ```
 
-`.env` 파일 내부의 주요 설정 항목:
-* `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD`: 개발/운영 대상 PostgreSQL(Supabase) 데이터베이스 정보
-* `DB_MIGRATION_ENABLED`: 개발 단계이므로 `false`로 설정합니다.
-* `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`: Supabase Storage(S3 호환) 접속 정보
+주요 값:
+- `DB_SYNCHRONIZE=true`: 개발 DB에 TypeORM 엔티티 기준으로 스키마를 자동 반영합니다.
+- `DB_URL` 또는 `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USERNAME`/`DB_PASSWORD`: PostgreSQL 접속 정보입니다.
+- `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, `STORAGE_BUCKET`: 첨부파일 저장소를 사용할 때 필요합니다.
 
----
-
-## 3. 개발용 DB 스키마 구성 (Flyway 배제)
-
-**현재 개발 단계에서는 백엔드 구동 시 Flyway 마이그레이션이 자동으로 작동하지 않습니다.** (설계 정책 반영)
-
-따라서 최초 1회 또는 스키마 리셋 시, 다음 순서로 직접 개발 DB의 스키마를 구성해야 합니다.
-
-1. `backend/db/migrations/` 폴더 아래의 기존 SQL 파일 확인:
-   * `V1__init.sql` (초기 테이블 스키마)
-   * `V2__seed_data.sql` (초기 마스터 데이터 및 롤 정보)
-   * `V3__password_policy.sql` (비밀번호 정책)
-   * `V4__procurement.sql` (구매 도메인 관련 변경 스크립트)
-2. Supabase Dashboard의 **SQL Editor** 또는 DB GUI 툴(DBeaver 등)을 활용해 위 SQL 파일들의 쿼리를 `V1` -> `V2` -> `V3` -> `V4` 순서대로 복사하여 실행합니다.
-3. 개발 진행 중에 테이블 구조나 칼럼을 변경할 경우 SQL Editor로 수동 변경하며 개발을 진행합니다.
-
----
-
-## 4. 서버 기동 절차
-
-### 4.1 일괄 기동 (권장)
-루트 디렉토리에 위치한 개발 기동 스크립트를 사용하면 **Nginx 프록시, NestJS 백엔드, React 프론트엔드**를 하나의 터미널에서 동시에 구동할 수 있습니다.
+### 기동
 
 ```bash
-# 개발 기동 스크립트 실행
 ./scripts/dev.sh
 ```
 
-**스크립트 내부 작동 흐름:**
-1. `.env` 환경 변수 파일 로드 및 내보내기
-2. `backend/node_modules` 및 `frontend/node_modules` 디렉토리 존재 여부 검사 및 미설치 시 자동 `npm install` 실행
-3. Docker Compose를 통한 Nginx 리버스 프록시 컨테이너 백그라운드 기동
-4. NestJS 백엔드 기동 (`npm run start:dev` 실행)
-5. Vite React 프론트엔드 기동 (`npm run dev -- --host` 실행)
-6. `Ctrl-C` 입력 시 구동된 모든 백그라운드 프로세스 및 Nginx 컨테이너를 안전하게 일괄 종료(cleanup)
+접속 주소는 `http://localhost`입니다.
 
----
+최초 빈 DB에서는 백엔드 기동으로 스키마를 생성한 뒤 SYSTEM 계정을 1회 시드합니다.
 
-### 4.2 개별 기동 (선택)
-특정 컴포넌트만 개별적으로 띄우거나 테스트하고 싶을 때 사용합니다.
-
-#### 1) Nginx 프록시 컨테이너 구동
-```bash
-docker compose -f docker-compose.dev.yml up -d
-```
-
-#### 2) NestJS 백엔드 구동
 ```bash
 cd backend
-npm install       # 최초 실행 시
-npm run start:dev # watch 모드로 가동
+npm run seed:system
 ```
 
-#### 3) Vite 프론트엔드 구동
-```bash
-cd frontend
-npm install       # 최초 실행 시
-npm run dev -- --host
-```
+기본 로그인 정보는 회사코드 `SYSTEM`, 아이디 `system`, 비밀번호 `system1234`입니다.
+
+SYSTEM으로 로그인해 회사를 생성하면 해당 회사의 기본 롤, 권한 매트릭스, 기본 공통코드가 함께 생성됩니다.
+
+### 주의사항
+
+- 파일명은 개발/운영 모두 `.env`로 통일하되, 서버별 값은 별도로 관리합니다.
+- `DB_SYNCHRONIZE=true`는 개발 전용입니다. 운영에서는 코드상 강제로 비활성화됩니다.
+- 스키마를 초기화한 경우 백엔드를 다시 기동해 테이블을 재생성한 뒤 `npm run seed:system`을 다시 실행합니다.
 
 ---
 
-## 5. 접속 및 종료 정보
+## 2. 운영 서버 절차
 
-* **접속 주소**: [http://localhost:8082](http://localhost:8082)
-  * Nginx 프록시(8082)가 자동으로 다음과 같이 라우팅을 매핑합니다.
-    * `/api/*` -> NestJS 백엔드 (8080)
-    * `/*` (정적 파일 및 HMR) -> Vite 프론트엔드 (5173)
-* **종료 방법**: `./scripts/dev.sh`가 실행 중인 터미널에서 **`Ctrl + C`**를 누르면 백엔드, 프론트엔드 및 Nginx 프록시 도커 컨테이너가 한 번에 정지하고 정상 회수됩니다.
+### 설정값
+
+운영 환경도 파일명은 루트 `.env`를 사용합니다. [.env.template](../.env.template)는 키 목록 참고용이며, 실제 운영 값은 운영 서버에서 별도 관리합니다.
+
+```env
+NODE_ENV=production
+PORT=8080
+DB_SYNCHRONIZE=false
+DB_URL=postgresql://...
+JWT_SECRET=...
+IMAGE_REGISTRY=...
+IMAGE_TAG=...
+```
+
+주요 값:
+- `NODE_ENV=production`: TypeORM synchronize를 강제로 비활성화합니다.
+- `IMAGE_REGISTRY`, `IMAGE_TAG`: 운영 Docker 이미지 pull 대상입니다.
+- `JWT_SECRET`, DB 접속 정보, Storage 접속 정보는 운영 환경별 Secret로 관리합니다.
+
+### 기동
+
+일반 운영 배포 또는 재기동은 seed 없이 이미지 pull 후 서비스를 기동합니다.
+
+```bash
+./scripts/prod.sh deploy
+```
+
+최초 운영 DB 구축 시에는 애플리케이션 기동 전에 스키마를 먼저 적용하고, 이후 API 이미지 one-off 컨테이너로 SYSTEM 계정을 1회 시드합니다.
+운영에서는 `synchronize=false`를 유지하므로 빈 DB에 앱을 기동해도 테이블이 자동 생성되지 않습니다.
+
+운영 스키마 적용 방식은 차후 확정합니다.
+- migration 파일 기반 적용
+- 확정 schema SQL 1회 적용
+- 운영 전용 bootstrap job 구성
+
+SYSTEM seed는 운영 서버에 소스를 checkout하지 않고, pull 받은 API 이미지로 실행합니다. 운영에서는 기본 비밀번호를 사용하지 말고 강한 임시 비밀번호를 지정해야 합니다.
+
+```bash
+./scripts/prod.sh seed '강한-임시-비밀번호'
+```
+
+스키마 적용이 완료된 최초 구축에서는 pull, seed, 기동을 한 번에 실행할 수도 있습니다.
+
+```bash
+./scripts/prod.sh bootstrap '강한-임시-비밀번호'
+```
+
+이후 SYSTEM으로 로그인해 실제 운영 회사를 생성합니다.
+
+### 주의사항
+
+- 운영 DB 스키마는 synchronize로 변경하지 않습니다. 운영 DDL은 별도 마이그레이션 절차로 적용합니다.
+- 현재 운영 migration/schema SQL 적용 절차는 미확정입니다. 운영 배포 전 별도 검토가 필요합니다.
+- 일반 운영 배포는 `./scripts/prod.sh deploy`만 실행합니다. 기존 운영 DB에는 seed를 반복 실행하지 않습니다.
+- 운영 seed는 API 이미지 one-off 컨테이너로만 실행합니다. 운영 서버에서 `cd backend && npm run seed:system` 방식은 사용하지 않습니다.
+- 운영 시크릿은 이미지에 포함하지 않습니다.
+- 운영 서버의 `.env`는 실제 값 파일이므로 커밋하지 않습니다.
+- SYSTEM 부트스트랩 계정은 회사 생성 이후 비밀번호를 교체하거나 접근을 엄격히 제한합니다.

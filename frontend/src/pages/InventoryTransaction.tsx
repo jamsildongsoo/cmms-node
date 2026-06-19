@@ -3,7 +3,8 @@ import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import PrintHeader from '../components/PrintHeader';
 import SlipPrint from '../components/SlipPrint';
-import { todayLocal, thisMonthLocal } from '../utils/datetime';
+import { formatDateOnly, todayLocal, thisMonthLocal } from '../utils/datetime';
+import { getApiErrorMessage } from '../utils/apiError';
 import {
   Plus, Trash, Download, Printer, X, Layers, Settings
 } from 'lucide-react';
@@ -75,11 +76,15 @@ export default function InventoryTransaction() {
         axiosInstance.get('/master/inventories')
       ]);
       setStatusList(statusRes.data);
-      setHistoryList(historyRes.data);
+      setHistoryList((historyRes.data || []).map((history: InventoryHistoryModel) => ({
+        ...history,
+        txDate: formatDateOnly(history.txDate),
+      })));
       setWarehouses(whRes.data);
       setInventories(invRes.data);
     } catch (err) {
       console.error(err);
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '재고 데이터를 불러오지 못했습니다.') });
     }
   };
 
@@ -137,8 +142,8 @@ export default function InventoryTransaction() {
       setMessage({ type: 'success', text: '재고 처리가 완료되었습니다.' });
       setIsTxModalOpen(false);
       fetchData();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.response?.data?.message || '처리 오류 발생' });
+    } catch (err) {
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '처리 오류 발생') });
     } finally {
       setIsLoading(false);
     }
@@ -156,8 +161,8 @@ export default function InventoryTransaction() {
       setMessage({ type: 'success', text: `${closingYm.substring(0, 4)}년 ${closingYm.substring(4, 6)}월 재고 마감이 처리되었습니다.` });
       setIsClosingModalOpen(false);
       fetchData();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.response?.data?.message || '마감 처리 오류' });
+    } catch (err) {
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '마감 처리 오류') });
     } finally {
       setIsLoading(false);
     }

@@ -15,6 +15,7 @@ interface User {
   multiPlant: 'Y' | 'N';            // 역할에서 resolve, 셀렉터 표시 여부
   mustChangePassword?: boolean;
   passwordExpired?: boolean;
+  permissions: Record<string, { C: string; R: string; U: string; D: string; A: string }>;
 }
 
 const SESSION_MS = 1800 * 1000; // 30분 (서버 JWT 만료와 동일)
@@ -68,6 +69,7 @@ export const useAuthStore = create<AuthState>()(
             multiPlant: data.multiPlant === 'Y' ? 'Y' : 'N',
             mustChangePassword: data.mustChangePassword,
             passwordExpired: data.passwordExpired,
+            permissions: data.permissions || {},
           };
 
           const token = data.accessToken;

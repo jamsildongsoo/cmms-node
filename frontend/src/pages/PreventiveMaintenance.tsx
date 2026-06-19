@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react';
 import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import { getCommonStatusLabel as getStatusLabel, getCommonStatusClass as getStatusClass } from '../constants/status';
-import { todayLocal } from '../utils/datetime';
+import { formatDateOnly, todayLocal } from '../utils/datetime';
+import { getApiErrorMessage } from '../utils/apiError';
 import PrintHeader from '../components/PrintHeader';
 import PmReportPrint from '../components/PmReportPrint';
+import ApprovalSubmitModal from '../components/ApprovalSubmitModal';
 import { 
-  ClipboardList, Edit2, Trash2, Printer, X, Calendar, ClipboardCheck, ArrowRight, User 
+  ClipboardList, Edit2, Trash2, Printer, X, Calendar, ClipboardCheck, ArrowRight, User, Plus
 } from 'lucide-react';
 
 interface PmSchedule {
@@ -48,6 +50,12 @@ interface PmRecordItem {
   checkValue: number | null;
 }
 
+interface EquipmentOption {
+  id: string;
+  plantId: string;
+  name: string;
+}
+
 export default function PreventiveMaintenance() {
   const user = useAuthStore((s) => s.user);
   const [activeSubTab, setActiveSubTab] = useState<'schedule' | 'history'>('schedule');
@@ -55,9 +63,12 @@ export default function PreventiveMaintenance() {
   const [schedules, setSchedules] = useState<PmSchedule[]>([]);
   const [records, setRecords] = useState<PmRecord[]>([]);
   const [depts, setDepts] = useState<{ id: string; name: string }[]>([]);
+  const [equipments, setEquipments] = useState<EquipmentOption[]>([]);
+  const [usersList, setUsersList] = useState<{ id: string; name: string }[]>([]);
 
   // Form states
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isManualEntry, setIsManualEntry] = useState(false);
   
   // Fields for PM
   const [pmNo, setPmNo] = useState(''); // Empty for new
@@ -79,27 +90,86 @@ export default function PreventiveMaintenance() {
   const [checkItems, setCheckItems] = useState<PmRecordItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [approvalRef, setApprovalRef] = useState<{ refNo: string; title: string } | null>(null);
 
-  // Authority check: USER는 perm_a가 없음(결재 승인 권한 없음), ADMIN/MANAGER는 직접확정(S) 가능
-  const canDirectConfirm = user?.roleId === 'ADMIN' || user?.roleId === 'MANAGER';
+  const canDirectConfirm = user?.permissions?.PM?.A === 'Y';
 
   const fetchData = async () => {
     try {
-      const [schedRes, recordRes, deptRes] = await Promise.all([
+      const [schedRes, recordRes, deptRes, equipmentRes, userRes] = await Promise.all([
         axiosInstance.get('/pm/schedules'),
         axiosInstance.get('/pm/records'),
-        axiosInstance.get('/mdm/departments')
+        axiosInstance.get('/mdm/departments'),
+        axiosInstance.get('/master/equipments'),
+        axiosInstance.get('/mdm/users')
       ]);
-      setSchedules(schedRes.data);
-      setRecords(recordRes.data);
+      setSchedules((schedRes.data || []).map((schedule: PmSchedule) => ({
+        ...schedule,
+        lastCheckDate: formatDateOnly(schedule.lastCheckDate) || null,
+        nextCheckDate: formatDateOnly(schedule.nextCheckDate),
+      })));
+      setRecords((recordRes.data || []).map((record: PmRecord) => ({
+        ...record,
+        workDate: formatDateOnly(record.workDate),
+        certExpireDate: formatDateOnly(record.certExpireDate) || null,
+      })));
       setDepts(deptRes.data);
+      setEquipments(equipmentRes.data);
+      setUsersList(userRes.data);
     } catch (err) {
       console.error(err);
-      setMessage({ type: 'error', text: '목록을 불러오지 못했습니다.' });
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '목록을 불러오지 못했습니다.') });
     }
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  const resetNewRecord = () => {
+    setPmNo('');
+    setPlantId('');
+    setEquipmentId('');
+    setEquipmentName('');
+    setDepartmentId(user?.departmentId || (depts.length > 0 ? depts[0].id : ''));
+    setCheckTypeCode('');
+    setWorkDate(todayLocal());
+    setWorkerId(user?.id || '');
+    setJudgeCode('OK');
+    setRemarks('');
+    setCertNumber('');
+    setCertExpireDate('');
+    setCertAgency('');
+    setApprovalId('');
+    setStatus('T');
+    setCheckItems([]);
+  };
+
+  const handleOpenManualEntry = () => {
+    resetNewRecord();
+    setIsManualEntry(true);
+    setIsFormOpen(true);
+  };
+
+  const handleManualEquipmentChange = async (value: string) => {
+    const selected = equipments.find((equipment) => `${equipment.plantId}:${equipment.id}` === value);
+    if (!selected) {
+      setPlantId('');
+      setEquipmentId('');
+      setEquipmentName('');
+      setCheckItems([]);
+      return;
+    }
+
+    setPlantId(selected.plantId);
+    setEquipmentId(selected.id);
+    setEquipmentName(selected.name);
+    try {
+      const itemRes = await axiosInstance.get(`/pm/records/initial-items?plantId=${selected.plantId}&equipmentId=${selected.id}`);
+      setCheckItems(itemRes.data || []);
+    } catch (err) {
+      setCheckItems([]);
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '설비 점검 항목을 불러오지 못했습니다.') });
+    }
+  };
 
   const handleOpenCreateFromSchedule = async (sched: PmSchedule) => {
     setIsLoading(true);
@@ -107,6 +177,7 @@ export default function PreventiveMaintenance() {
       // Fetch initial check items from equipment template
       const itemRes = await axiosInstance.get(`/pm/records/initial-items?plantId=${sched.plantId}&equipmentId=${sched.equipmentId}`);
       
+      setIsManualEntry(false);
       setPmNo('');
       setPlantId(sched.plantId);
       setEquipmentId(sched.equipmentId);
@@ -126,7 +197,7 @@ export default function PreventiveMaintenance() {
       
       setIsFormOpen(true);
     } catch (err) {
-      alert('설비 점검 항목을 불러오지 못했습니다.');
+      alert(getApiErrorMessage(err, '설비 점검 항목을 불러오지 못했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -135,6 +206,7 @@ export default function PreventiveMaintenance() {
   const handleOpenEdit = async (record: PmRecord) => {
     setIsLoading(true);
     try {
+      setIsManualEntry(false);
       const res = await axiosInstance.get(`/pm/records/details?plantId=${record.plantId}&id=${record.id}`);
       const data = res.data;
       const r = data.pmRecord;
@@ -152,12 +224,12 @@ export default function PreventiveMaintenance() {
       setEquipmentName(eqName);
       setDepartmentId(r.departmentId);
       setCheckTypeCode(r.checkTypeCode);
-      setWorkDate(r.workDate);
+      setWorkDate(formatDateOnly(r.workDate));
       setWorkerId(r.workerId);
       setJudgeCode(r.judgeCode);
       setRemarks(r.remarks || '');
       setCertNumber(r.certNumber || '');
-      setCertExpireDate(r.certExpireDate || '');
+      setCertExpireDate(formatDateOnly(r.certExpireDate));
       setCertAgency(r.certAgency || '');
       setApprovalId(r.approvalId || '');
       setStatus(r.status);
@@ -165,7 +237,7 @@ export default function PreventiveMaintenance() {
       
       setIsFormOpen(true);
     } catch (err) {
-      alert('점검 상세 기록을 불러오지 못했습니다.');
+      alert(getApiErrorMessage(err, '점검 상세 기록을 불러오지 못했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -178,7 +250,7 @@ export default function PreventiveMaintenance() {
       setMessage({ type: 'success', text: '점검 기록이 삭제되었습니다.' });
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: '삭제 실패.' });
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '삭제 실패.') });
     }
   };
 
@@ -195,9 +267,14 @@ export default function PreventiveMaintenance() {
   };
 
   const handleSave = async (submitStatus: 'T' | 'S' | 'P') => {
+    if (!plantId || !equipmentId || !checkTypeCode || !workDate || !departmentId) {
+      setMessage({ type: 'error', text: '설비, 점검유형, 점검일자, 부서는 필수입니다.' });
+      return;
+    }
     setIsLoading(true);
     setMessage(null);
     try {
+      const saveStatus = submitStatus === 'P' ? 'T' : submitStatus;
       const payload = {
         pmRecord: {
           id: pmNo || null,
@@ -213,24 +290,29 @@ export default function PreventiveMaintenance() {
           certExpireDate: certExpireDate || null,
           certAgency: certAgency || null,
           approvalId: approvalId || null,
-          status: submitStatus
+          status: saveStatus
         },
         checkItems
       };
 
-      await axiosInstance.post('/pm/records', payload);
+      const response = await axiosInstance.post('/pm/records', payload);
+      if (submitStatus === 'P') {
+        const savedId = response.data.id;
+        setPmNo(savedId);
+        setStatus('T');
+        setApprovalRef({ refNo: savedId, title: `[예방점검] ${equipmentName || equipmentId}` });
+        return;
+      }
       setMessage({ 
         type: 'success', 
         text: submitStatus === 'T' 
           ? '임시저장 되었습니다.' 
-          : submitStatus === 'S' 
-            ? '점검이 직접 확정 및 완료 처리되었습니다. (차기 스케줄 갱신됨)'
-            : '결재 상신(대기) 처리되었습니다.' 
+          : '점검이 직접 확정 및 완료 처리되었습니다. (차기 스케줄 갱신됨)'
       });
       setIsFormOpen(false);
       fetchData();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.response?.data?.message || '저장 중 오류가 발생했습니다.' });
+    } catch (err) {
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '저장 중 오류가 발생했습니다.') });
     } finally {
       setIsLoading(false);
     }
@@ -261,6 +343,15 @@ export default function PreventiveMaintenance() {
           >
             <Printer size={14} />
             가로 목록 인쇄
+          </button>
+        )}
+        {activeSubTab === 'schedule' && (
+          <button
+            onClick={handleOpenManualEntry}
+            className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border-0"
+          >
+            <Plus size={14} />
+            입력
           </button>
         )}
         {/* Subtab control */}
@@ -475,13 +566,28 @@ export default function PreventiveMaintenance() {
                   <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-5 print:bg-white print:border-slate-300">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                       <div>
-                        <label className="block text-slate-400 mb-1.5 print:text-slate-600">대상 설비</label>
-                        <input
-                          type="text"
-                          disabled
-                          value={equipmentName}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-slate-200 outline-none disabled:opacity-80 print:bg-white print:border-slate-300 print:text-slate-800"
-                        />
+                        <label className="block text-slate-400 mb-1.5 print:text-slate-600">대상 설비 <span className="text-rose-500 print:hidden">*</span></label>
+                        {isManualEntry && !pmNo ? (
+                          <select
+                            value={plantId && equipmentId ? `${plantId}:${equipmentId}` : ''}
+                            onChange={(e) => handleManualEquipmentChange(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none"
+                          >
+                            <option value="">-- 설비 선택 --</option>
+                            {equipments.map((equipment) => (
+                              <option key={`${equipment.plantId}:${equipment.id}`} value={`${equipment.plantId}:${equipment.id}`}>
+                                {equipment.name} ({equipment.id})
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type="text"
+                            disabled
+                            value={equipmentName}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-slate-200 outline-none disabled:opacity-80 print:bg-white print:border-slate-300 print:text-slate-800"
+                          />
+                        )}
                       </div>
                       <div>
                         <label className="block text-slate-400 mb-1.5 print:text-slate-600">점검자 ID</label>
@@ -508,6 +614,22 @@ export default function PreventiveMaintenance() {
                   </h4>
                   <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-5 print:bg-white print:border-slate-300">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                      {isManualEntry && !pmNo && (
+                        <div>
+                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">점검 유형 <span className="text-rose-500 print:hidden">*</span></label>
+                          <select
+                            value={checkTypeCode}
+                            onChange={(e) => setCheckTypeCode(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none"
+                          >
+                            <option value="">-- 점검 유형 선택 --</option>
+                            <option value="INSPECT">예방점검</option>
+                            <option value="PATROL">순회점검</option>
+                            <option value="REPLACE">소모품교체</option>
+                            <option value="LEGAL">정기법정검사</option>
+                          </select>
+                        </div>
+                      )}
                       <div>
                         <label className="block text-slate-400 mb-1.5 print:text-slate-600">점검 일자 <span className="text-rose-500 print:hidden">*</span></label>
                         <input
@@ -704,6 +826,23 @@ export default function PreventiveMaintenance() {
           </div>
         </div>
       )}
+      <ApprovalSubmitModal
+        open={!!approvalRef}
+        refModule="PM"
+        refNo={approvalRef?.refNo || ''}
+        defaultTitle={approvalRef?.title || ''}
+        users={usersList}
+        currentUserId={user?.id}
+        onClose={() => setApprovalRef(null)}
+        onSubmitted={(newApprovalId) => {
+          setApprovalId(newApprovalId);
+          setStatus('P');
+          setApprovalRef(null);
+          setIsFormOpen(false);
+          setMessage({ type: 'success', text: '예방점검 결재 문서가 상신되었습니다.' });
+          fetchData();
+        }}
+      />
     </div>
   );
 }

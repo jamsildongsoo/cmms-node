@@ -1,112 +1,181 @@
-# CMMS-AGY 데이터베이스 구조 정의서 (DB Structure)
+# CMMS-NODE 데이터베이스 구조 정의서
 
-본 정의서는 시스템의 데이터베이스 아키텍처 및 테이블 릴레이션을 명세합니다. 스키마 세부 필드와 타입 정보는 단일 소스 원칙(Single Source of Truth)을 따르기 위해 백엔드의 실제 TypeORM 엔티티 클래스 파일을 직접 참조하도록 링크로 연결합니다.
-
----
-
-## 0. 스키마 관리 전략 (Schema Management)
-
-스키마의 **단일 소스는 TypeORM 엔티티**(`backend/src/entities/*.entity.ts`)이며, 환경별로 적용 방식이 다르다.
-
-| 환경 | 방식 | 설정 | 비고 |
-|------|------|------|------|
-| **개발** | TypeORM `synchronize` | `DB_SYNCHRONIZE=true` (`.env`) | 엔티티 변경 시 부팅마다 DDL 자동 반영. **이력 없음**. |
-| **운영** | **마이그레이션(migration)** | `NODE_ENV=production` 시 synchronize 강제 OFF | 엔티티 변경 → 마이그레이션 생성·검토·적용. **변경 이력 보존**. |
-
-- 운영 적용 시점에 도입 예정이며, **권장은 TypeORM migrations**(엔티티 diff로 SQL 자동 생성 + `migrations` 테이블 이력)다. cmms-node 엔티티는 원본(cmms-agy)에서 이미 분기되어(예: `timestamp`→`timestamptz`) 있어, 원본 Flyway SQL 재사용보다 **현재 엔티티에서 생성**하는 편이 dev/운영 스키마 드리프트가 없다.
-- `synchronize`는 운영에서 컬럼 삭제 → 데이터 유실 위험이 있어 **운영에서는 코드가 강제로 비활성**(`data-source.config.ts`)한다.
-- **주의**: `synchronize`/migration 모두 **엔티티에 정의된 테이블만** 다룬다. raw SQL로만 쓰는 테이블도 전부 엔티티로 선언되어야 한다(채번 `sequence_generator`, `login_history`, `file_attachment`, `file_attachment_item` 포함 — 현재 모두 엔티티화 완료).
+세부 컬럼, 타입, PK 구성은 백엔드 TypeORM 엔티티(`backend/src/entities/*.entity.ts`)를 기준으로 합니다. 본 문서는 테이블 목록, 역할, 설계 주의사항만 요약합니다.
 
 ---
 
-## 1. 데이터베이스 설계 원칙
+## 1. 스키마 관리
 
-### 1.1 멀티테넌트 물리 격리 구조 (`company_id`)
-*   모든 트랜잭션 및 마스터 테이블은 복합 PK 또는 일반 컬럼의 맨 처음에 **`company_id`**를 가집니다.
-*   모든 쿼리 실행 시 `company_id` 필터링이 누락되지 않도록 백엔드 `TenantInterceptor`가 제공하는 `TenantContext`를 의무적으로 사용합니다.
+| 환경 | 방식 | 설정 | 주의사항 |
+|------|------|------|----------|
+| 개발 | TypeORM `synchronize` | `.env`의 `NODE_ENV=development`, `DB_SYNCHRONIZE=true` | 엔티티 기준으로 DDL 자동 반영. 변경 이력은 남지 않음. |
+| 운영 | 마이그레이션 | `NODE_ENV=production` | 코드상 synchronize 강제 비활성. 운영 DDL은 별도 마이그레이션 절차로 적용. |
 
-### 1.2 공통 필드 및 소프트 삭제 (`BaseEntity`)
-대부분의 엔티티는 [base.entity.ts](file:///home/polknet/projects/cmms-node/backend/src/entities/base.entity.ts)를 상속받아 아래의 공통 컬럼을 유지합니다:
-*   `created_at`: 레코드 생성 일시 (`timestamptz` 마이그레이션 대상)
-*   `created_by`: 생성자 ID
-*   `updated_at`: 레코드 최종 수정 일시
-*   `updated_by`: 수정자 ID
-*   `delete_yn`: 삭제 여부 (`Y`/`N` 소프트 삭제 처리용)
-
----
-
-## 2. 테이블 목록 및 엔티티 매핑
-
-각 테이블의 물리 테이블명과 대응되는 백엔드 소스 파일 링크입니다. 세부 속성은 링크된 엔티티 코드를 참고하세요.
-
-### 2.1 기준 정보 (MDM) 및 사용자 권한
-*   **회사 정보**:
-    *   *테이블*: `companies` (향후 🔴 C2 복구 시 추가 대상)
-*   **사용자 및 조직**:
-    *   사용자 마스터: [users](file:///home/polknet/projects/cmms-node/backend/src/entities/user.entity.ts) (사용자 계정 정보, 패스워드 해시, 계정 잠금일시 등 관리)
-    *   부서 마스터: [departments](file:///home/polknet/projects/cmms-node/backend/src/entities/department.entity.ts) (조직 트리 정보 구조)
-    *   공장 마스터: [plants](file:///home/polknet/projects/cmms-node/backend/src/entities/plant.entity.ts) (소속 공장 단위)
-*   **역할 및 인가 권한 매트릭스**:
-    *   역할 마스터: [roles](file:///home/polknet/projects/cmms-node/backend/src/entities/role.entity.ts) (`ADMIN`, `MANAGER` 등 역할 그룹)
-    *   역할별 권한 매핑: [role_detail](file:///home/polknet/projects/cmms-node/backend/src/entities/role-detail.entity.ts) (모듈별 C/R/U/D/A 권한 플래그값 보관)
-*   **창고 및 공통 코드**:
-    *   자재 보관 창고: [warehouses](file:///home/polknet/projects/cmms-node/backend/src/entities/warehouse.entity.ts)
-    *   공통코드 그룹: [code_groups](file:///home/polknet/projects/cmms-node/backend/src/entities/code-group.entity.ts)
-    *   공통코드 세부항목: [code_items](file:///home/polknet/projects/cmms-node/backend/src/entities/code-item.entity.ts)
-
-### 2.2 자산 및 정비 마스터
-*   **설비 자산**:
-    *   설비 정보: [equipments](file:///home/polknet/projects/cmms-node/backend/src/entities/equipment.entity.ts)
-*   **예방 정비 기준 설정**:
-    *   설비별 정기 점검 주기: [equipment_check_cycles](file:///home/polknet/projects/cmms-node/backend/src/entities/equipment-check-cycle.entity.ts)
-    *   점검 항목 및 상한/하한값 세부 기준: [equipment_check_items](file:///home/polknet/projects/cmms-node/backend/src/entities/equipment-check-item.entity.ts)
-
-### 2.3 재고 수불 및 마감 (Inventory)
-*   **재고 정보**:
-    *   자재 품목 정보: [inventories](file:///home/polknet/projects/cmms-node/backend/src/entities/inventory.entity.ts)
-    *   창고별 실시간 재고량/단가 현황: [inventory_status](file:///home/polknet/projects/cmms-node/backend/src/entities/inventory-status.entity.ts)
-*   **수불 이력 및 마감**:
-    *   자재 입출고 수불 히스토리: [inventory_history](file:///home/polknet/projects/cmms-node/backend/src/entities/inventory-history.entity.ts)
-    *   자재 월말 마감 대장: [inventory_monthly_closings](file:///home/polknet/projects/cmms-node/backend/src/entities/inventory-monthly-closing.entity.ts)
-
-### 2.4 설비 정비 및 보전 업무 (Maintenance & Safety)
-*   **작업 오더 (Work Order)**:
-    *   작업 오더 헤더: [work_orders](file:///home/polknet/projects/cmms-node/backend/src/entities/work-order.entity.ts) (정비 비용, 공수시간 집계)
-    *   작업 오더 내 소요 품목 세부: [work_order_items](file:///home/polknet/projects/cmms-node/backend/src/entities/work-order-item.entity.ts)
-*   **예방 정비 기록 (PM)**:
-    *   예방 정비 점검 기록 헤더: [pm_records](file:///home/polknet/projects/cmms-node/backend/src/entities/pm-record.entity.ts)
-    *   점검 항목별 계측치 실적: [pm_record_items](file:///home/polknet/projects/cmms-node/backend/src/entities/pm-record-item.entity.ts)
-*   **안전 작업 및 LOTO (Safety)**:
-    *   안전 작업 허가서 및 LOTO 이력: [work_permits](file:///home/polknet/projects/cmms-node/backend/src/entities/work-permit.entity.ts)
-
-### 2.5 구매 의뢰 (Procurement)
-*   구매 요청서 헤더: [purchase_requests](file:///home/polknet/projects/cmms-node/backend/src/entities/purchase-request.entity.ts)
-*   구매 요청 품목 세부: [purchase_request_items](file:///home/polknet/projects/cmms-node/backend/src/entities/purchase-request-item.entity.ts)
-
-### 2.6 전자 결재 (E-Approval)
-*   결재문서 마스터: [approvals](file:///home/polknet/projects/cmms-node/backend/src/entities/approval.entity.ts)
-*   결재 단계별 진행선/결과: [approval_steps](file:///home/polknet/projects/cmms-node/backend/src/entities/approval-step.entity.ts)
-
-### 2.7 커뮤니티 및 게시판
-*   게시글 정보: [boards](file:///home/polknet/projects/cmms-node/backend/src/entities/board.entity.ts)
-*   게시글 댓글: [board_comments](file:///home/polknet/projects/cmms-node/backend/src/entities/board-comment.entity.ts)
+주의사항:
+- 스키마의 단일 소스는 TypeORM 엔티티입니다.
+- 운영 DB에서 `synchronize`를 사용하지 않습니다. 컬럼 삭제 등 데이터 유실 위험이 있습니다.
+- raw SQL로 접근하는 테이블도 반드시 엔티티로 선언되어야 합니다.
+- 실제 테이블명은 엔티티의 `@Entity(...)` 값을 기준으로 합니다.
 
 ---
 
-## 3. 핵심 관계 구조 (ERD 요약)
+## 2. 설계 원칙
+
+### 2.1 테넌트 격리
+- 업무 데이터는 `company_id` 기준으로 회사별 격리합니다.
+- 플랜트 단위 업무 데이터는 `plant_id`를 함께 사용합니다.
+- 서비스 쿼리는 `TenantContext`의 `companyId`를 기준으로 조회해야 합니다.
+- `company` 테이블은 최상위 테넌트 마스터이므로 `company_id`를 별도 컬럼으로 갖지 않습니다.
+
+### 2.2 공통 컬럼
+대부분의 마스터/업무 엔티티는 공통 컬럼을 가집니다.
+
+- `created_at`
+- `created_by`
+- `updated_at`
+- `updated_by`
+- `delete_yn`
+
+주의사항:
+- 조회 쿼리는 원칙적으로 `delete_yn = 'N'` 조건을 포함합니다.
+- 시간 컬럼은 `timestamptz` 기준으로 관리합니다.
+- 금액/수량 등 정밀 값은 `numeric`과 Decimal 처리를 기준으로 합니다.
+
+---
+
+## 3. 테이블 목록
+
+### 3.1 테넌트, 사용자, 권한
+
+| 테이블 | 설명 |
+|--------|------|
+| `company` | 회사/테넌트 마스터. `SYSTEM` 회사는 플랫폼 관리용 예외 테넌트입니다. |
+| `users` | 사용자 계정, 비밀번호 해시, 계정 잠금, 마지막 로그인 플랜트 정보. |
+| `login_history` | 로그인 성공/실패 이력. |
+| `plant` | 회사 내 공장/플랜트 마스터. |
+| `department` | 부서/조직 마스터. |
+| `role` | 회사별 권한 그룹. 일반 회사는 `ADMIN`, `MANAGER`, `PURCHASER`, `USER` 기본 생성. |
+| `role_detail` | 권한 그룹별 모듈 권한 매트릭스. `perm_c/r/u/d/a`를 저장. |
+
+주의사항:
+- `SYSTEM` 역할은 플랫폼 전용이며 일반 회사에 생성/할당하지 않습니다.
+- 권한 대상 모듈은 `AppModule` 상수가 단일 소스입니다. 모듈 코드를 `code_group`에 중복 저장하지 않습니다.
+- 신규 회사 생성 시 기본 Role과 `role_detail`이 자동 생성됩니다. 초기 권한은 모두 `Y`로 생성하고 회사 담당자가 권한관리에서 보정합니다.
+
+### 3.2 기준 정보와 공통 코드
+
+| 테이블 | 설명 |
+|--------|------|
+| `warehouse` | 자재 보관 창고. 플랜트 하위 또는 공통 창고로 사용할 수 있습니다. |
+| `code_group` | 회사별 업무 공통코드 그룹. |
+| `code_item` | 코드그룹별 코드 아이템. |
+| `equipment` | 설비 마스터. |
+| `equipment_check_cycle` | 설비별 예방점검 주기. |
+| `equipment_check_item` | 설비별 점검 항목과 기준값. |
+| `inventory` | 자재/품목 마스터. |
+
+주의사항:
+- 신규 회사 생성 시 기본 `code_group`/`code_item`이 자동 생성됩니다.
+- 기본 코드 예: `EQ_TYPE`, `ITEM_TYPE`, `PM_TYPE`, `PM_JUDGE`, `WO_TYPE`, `WP_TYPE`, `PR_TYPE`.
+- 업무 코드 값은 참조 무결성을 위해 쓰기 시 유효성 검증이 필요합니다.
+
+### 3.3 재고
+
+| 테이블 | 설명 |
+|--------|------|
+| `inventory_status` | 창고별 현재 재고 수량, 금액, 이동평균단가. |
+| `inventory_history` | 입고, 출고, 이동, 조정 이력. |
+| `inventory_monthly_closing` | 월말 재고 마감 결과. |
+
+주의사항:
+- 동일 창고-품목 수불은 비관적 락(`FOR UPDATE NOWAIT`) 기준으로 처리합니다.
+- 출고와 이동 출고 수량/금액은 음수로 기록합니다.
+- 월마감은 현재고 복사가 아니라 마감월 말일까지의 이력 합산으로 계산합니다.
+
+### 3.4 보전 업무
+
+| 테이블 | 설명 |
+|--------|------|
+| `work_order` | 작업지시서 헤더. |
+| `work_order_item` | 작업지시별 작업/소요 품목 상세. |
+| `pm_record` | 예방점검 실적 헤더. |
+| `pm_record_item` | 예방점검 항목별 측정값. |
+| `work_permit` | 안전작업허가서 및 LOTO 관련 체크 정보. |
+
+주의사항:
+- 보전 업무 테이블은 `company_id`와 `plant_id`를 함께 사용합니다.
+- 단일 플랜트 사용자는 `users.last_login_plant_id` 기준 플랜트만 접근해야 합니다.
+- 멀티 플랜트 사용자는 요청 플랜트 기준으로 접근합니다.
+
+### 3.5 구매
+
+| 테이블 | 설명 |
+|--------|------|
+| `purchase_request` | 구매요청 헤더. |
+| `purchase_request_item` | 구매요청 품목 상세. |
+
+주의사항:
+- 구매요청은 현재 결재 모듈과 직접 cascade 연계하지 않습니다.
+- 문서 상태(`status`)와 구매 진행상태(`proc_status`)는 별도 축입니다.
+- 입고 처리 시 재고 수불과 연결됩니다.
+
+### 3.6 전자결재
+
+| 테이블 | 설명 |
+|--------|------|
+| `approval` | 결재 문서 헤더. |
+| `approval_step` | 결재선, 결재자, 단계 결과. |
+
+주의사항:
+- 결재 상태 전이와 연계 문서 상태 전이는 같은 트랜잭션에서 처리합니다.
+- 현재 결재 cascade 대상은 `WO`, `WP`, `PM`입니다.
+- 구매요청(`PUR`)은 결재 cascade 대상이 아닙니다.
+
+### 3.7 게시판과 파일
+
+| 테이블 | 설명 |
+|--------|------|
+| `board` | 게시글. |
+| `board_comment` | 게시글 댓글. |
+| `file_attachment` | 파일 그룹/첨부 메타 헤더. |
+| `file_attachment_item` | 파일 개별 항목. |
+
+주의사항:
+- 게시글은 소프트 삭제합니다.
+- 첨부파일은 DB 메타데이터와 외부 Object Storage 객체의 정합성을 함께 고려해야 합니다.
+
+### 3.8 시스템 보조
+
+| 테이블 | 설명 |
+|--------|------|
+| `sequence_generator` | 모듈별 문서번호 채번 상태. |
+
+주의사항:
+- 문서번호는 DB 원자 연산 기준으로 생성해야 합니다.
+- 모듈 코드는 `AppModule` 상수를 기준으로 합니다.
+
+---
+
+## 4. 핵심 관계 요약
 
 ```mermaid
 erDiagram
-    users ||--o{ work_orders : "정비담당자"
-    roles ||--o{ users : "역할 할당"
-    roles ||--|{ role_detail : "권한 설정"
-    equipments ||--o{ work_orders : "정비 대상"
-    equipments ||--o{ equipment_check_cycles : "정기 점검 주기 매핑"
-    equipment_check_cycles ||--|{ equipment_check_items : "점검 상세 항목"
-    work_orders ||--|{ work_order_items : "소모성 자재 투입"
-    inventories ||--o{ inventory_status : "실시간 수량 보유"
-    warehouses ||--o{ inventory_status : "자재 적재 창고"
-    inventories ||--o{ inventory_history : "자재 수불 추적"
-    approvals ||--|{ approval_steps : "결재 라인 흐름"
-    boards ||--o{ board_comments : "게시글 댓글 피드백"
+    company ||--o{ users : "사용자"
+    company ||--o{ plant : "공장"
+    company ||--o{ department : "부서"
+    role ||--o{ users : "역할 할당"
+    role ||--|{ role_detail : "권한 설정"
+    plant ||--o{ equipment : "설비"
+    equipment ||--o{ equipment_check_cycle : "점검 주기"
+    equipment ||--o{ work_order : "정비 대상"
+    work_order ||--o{ work_order_item : "작업 상세"
+    equipment ||--o{ pm_record : "예방점검"
+    pm_record ||--o{ pm_record_item : "측정값"
+    warehouse ||--o{ inventory_status : "현재고"
+    inventory ||--o{ inventory_status : "품목 현재고"
+    inventory ||--o{ inventory_history : "수불 이력"
+    purchase_request ||--o{ purchase_request_item : "구매 품목"
+    approval ||--o{ approval_step : "결재선"
+    board ||--o{ board_comment : "댓글"
+    file_attachment ||--o{ file_attachment_item : "파일 항목"
 ```

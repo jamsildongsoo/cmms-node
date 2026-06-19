@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { PmService, PmSaveRequest, PmScheduleResponse } from './pm.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { PermissionGuard, Permission } from '../../common/guards/permission.guard';
+import { PermissionGuard, Permission, PermissionSave } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
@@ -58,7 +58,7 @@ export class PmController {
   }
 
   @Post('records')
-  @Permission(AppModule.PM, 'C')
+  @PermissionSave(AppModule.PM, 'pmRecord.status')
   async savePmRecord(@Body() request: PmSaveRequest): Promise<any> {
     const { companyId, userId } = getTenantContext();
     return this.pmService.savePmRecord(companyId, request, userId);

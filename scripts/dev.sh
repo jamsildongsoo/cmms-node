@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 개발 전체 기동(BE+FE+nginx)을 한 번에. 위치/구조는 운영(scripts/prod.sh)과 대칭.
 #   - 백엔드(NestJS/Node.js, host, profile=dev/development)  +  프론트(Vite, host, HMR)  +  nginx 프록시(컨테이너)
-#   - Ctrl-C 한 번으로 셋 다 종료.  접속: http://localhost:8082
+#   - Ctrl-C 한 번으로 셋 다 종료.  접속: http://localhost
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -42,7 +42,7 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 echo
-echo "  ✅ http://localhost:8082   (nginx:8082 → FE:5173 / BE:8080)"
+echo "  ✅ http://localhost   (nginx:80 → FE:5173 / BE:8080)"
 echo "  (Ctrl-C 로 BE·FE·nginx 일괄 종료)"
 echo
 wait

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import axiosInstance from '../api/axios';
+import { getApiErrorMessage } from '../utils/apiError';
 import { 
   Building2, FolderTree, 
   Plus, Edit2, Trash2, Check, X, Shield, Save 
@@ -101,7 +102,7 @@ function PlantManager({ notify }: { notify: (type: 'success' | 'error', t: strin
       const res = await axiosInstance.get('/mdm/plants');
       setPlants(res.data);
     } catch (err) {
-      notify('error', '플랜트 목록 조회에 실패했습니다.');
+      notify('error', getApiErrorMessage(err, '플랜트 목록 조회에 실패했습니다.'));
     }
   };
 
@@ -121,8 +122,8 @@ function PlantManager({ notify }: { notify: (type: 'success' | 'error', t: strin
       }
       setId(''); setName(''); setEditingId(null);
       fetchPlants();
-    } catch (err: any) {
-      notify('error', err.response?.data?.message || '저장에 실패했습니다.');
+    } catch (err) {
+      notify('error', getApiErrorMessage(err, '저장에 실패했습니다.'));
     }
   };
 
@@ -133,7 +134,7 @@ function PlantManager({ notify }: { notify: (type: 'success' | 'error', t: strin
       notify('success', '플랜트가 삭제되었습니다.');
       fetchPlants();
     } catch (err) {
-      notify('error', '삭제에 실패했습니다.');
+      notify('error', getApiErrorMessage(err, '삭제에 실패했습니다.'));
     }
   };
 
@@ -249,7 +250,7 @@ function DeptManager({ notify }: { notify: (type: 'success' | 'error', t: string
       const res = await axiosInstance.get('/mdm/departments');
       setDepts(res.data);
     } catch (err) {
-      notify('error', '부서 목록 조회에 실패했습니다.');
+      notify('error', getApiErrorMessage(err, '부서 목록 조회에 실패했습니다.'));
     }
   };
 
@@ -270,8 +271,8 @@ function DeptManager({ notify }: { notify: (type: 'success' | 'error', t: string
       }
       setId(''); setName(''); setParentId(''); setEditingId(null);
       fetchDepts();
-    } catch (err: any) {
-      notify('error', err.response?.data?.message || '저장에 실패했습니다.');
+    } catch (err) {
+      notify('error', getApiErrorMessage(err, '저장에 실패했습니다.'));
     }
   };
 
@@ -282,7 +283,7 @@ function DeptManager({ notify }: { notify: (type: 'success' | 'error', t: string
       notify('success', '부서가 삭제되었습니다.');
       fetchDepts();
     } catch (err) {
-      notify('error', '삭제에 실패했습니다.');
+      notify('error', getApiErrorMessage(err, '삭제에 실패했습니다.'));
     }
   };
 
@@ -447,7 +448,7 @@ function UserManager({ notify }: { notify: (type: 'success' | 'error', t: string
       setRoles(roleRes.data);
       setPlants(plantRes.data || []);
     } catch (err) {
-      notify('error', '데이터를 조회하는 도중 오류가 발생했습니다.');
+      notify('error', getApiErrorMessage(err, '데이터를 조회하는 도중 오류가 발생했습니다.'));
     }
   };
 
@@ -479,8 +480,8 @@ function UserManager({ notify }: { notify: (type: 'success' | 'error', t: string
       }
       resetForm();
       fetchData();
-    } catch (err: any) {
-      notify('error', err.response?.data?.message || '저장에 실패했습니다.');
+    } catch (err) {
+      notify('error', getApiErrorMessage(err, '저장에 실패했습니다.'));
     }
   };
 
@@ -491,7 +492,7 @@ function UserManager({ notify }: { notify: (type: 'success' | 'error', t: string
       notify('success', '사용자가 시스템에서 삭제되었습니다.');
       fetchData();
     } catch (err) {
-      notify('error', '삭제 실패.');
+      notify('error', getApiErrorMessage(err, '삭제 실패.'));
     }
   };
 
@@ -746,7 +747,7 @@ function RoleManager({ notify }: { notify: (type: 'success' | 'error', t: string
         setSelectedRoleId(res.data[0].id);
       }
     } catch (err) {
-      notify('error', '권한 목록 조회 실패.');
+      notify('error', getApiErrorMessage(err, '권한 목록 조회 실패.'));
     }
   };
 
@@ -755,7 +756,7 @@ function RoleManager({ notify }: { notify: (type: 'success' | 'error', t: string
       const res = await axiosInstance.get(`/mdm/roles/${roleId}/details`);
       setDetails(res.data);
     } catch (err) {
-      notify('error', '상세 권한 매트릭스를 불러오지 못했습니다.');
+      notify('error', getApiErrorMessage(err, '상세 권한 매트릭스를 불러오지 못했습니다.'));
     }
   };
 
@@ -770,8 +771,8 @@ function RoleManager({ notify }: { notify: (type: 'success' | 'error', t: string
       notify('success', '새로운 권한 그룹이 추가되었습니다.');
       setNewRoleId(''); setNewRoleName(''); setNewMultiPlant(false);
       fetchRoles();
-    } catch (err: any) {
-      notify('error', err.response?.data?.message || '권한 생성 실패.');
+    } catch (err) {
+      notify('error', getApiErrorMessage(err, '권한 생성 실패.'));
     }
   };
 
@@ -795,7 +796,7 @@ function RoleManager({ notify }: { notify: (type: 'success' | 'error', t: string
       notify('success', '권한 제어 매트릭스가 저장되었습니다.');
       fetchDetails(selectedRoleId);
     } catch (err) {
-      notify('error', '매트릭스 저장 중 오류가 발생했습니다.');
+      notify('error', getApiErrorMessage(err, '매트릭스 저장 중 오류가 발생했습니다.'));
     }
   };
 
@@ -955,7 +956,7 @@ function WarehouseManager({ notify }: { notify: (type: 'success' | 'error', t: s
       const res = await axiosInstance.get('/mdm/warehouses');
       setWarehouses(res.data);
     } catch (err) {
-      notify('error', '창고 목록 조회 실패.');
+      notify('error', getApiErrorMessage(err, '창고 목록 조회 실패.'));
     }
   };
   const fetchPlants = async () => {
@@ -979,8 +980,8 @@ function WarehouseManager({ notify }: { notify: (type: 'success' | 'error', t: s
       }
       setId(''); setName(''); setPlantId(''); setEditingId(null);
       fetchWarehouses();
-    } catch (err: any) {
-      notify('error', err.response?.data?.message || '저장 실패.');
+    } catch (err) {
+      notify('error', getApiErrorMessage(err, '저장 실패.'));
     }
   };
 
@@ -991,7 +992,7 @@ function WarehouseManager({ notify }: { notify: (type: 'success' | 'error', t: s
       notify('success', '창고가 삭제되었습니다.');
       fetchWarehouses();
     } catch (err) {
-      notify('error', '삭제 실패.');
+      notify('error', getApiErrorMessage(err, '삭제 실패.'));
     }
   };
 
@@ -1132,7 +1133,7 @@ function CodeManager({ notify }: { notify: (type: 'success' | 'error', t: string
         setSelectedGroupId(res.data[0].id);
       }
     } catch (err) {
-      notify('error', '공통코드 그룹 조회 실패.');
+      notify('error', getApiErrorMessage(err, '공통코드 그룹 조회 실패.'));
     }
   };
 
@@ -1141,7 +1142,7 @@ function CodeManager({ notify }: { notify: (type: 'success' | 'error', t: string
       const res = await axiosInstance.get(`/mdm/code-groups/${groupId}/items`);
       setItems(res.data);
     } catch (err) {
-      notify('error', '상세 코드 조회 실패.');
+      notify('error', getApiErrorMessage(err, '상세 코드 조회 실패.'));
     }
   };
 
@@ -1156,8 +1157,8 @@ function CodeManager({ notify }: { notify: (type: 'success' | 'error', t: string
       notify('success', '새 코드 그룹이 추가되었습니다.');
       setGrpId(''); setGrpName('');
       fetchGroups();
-    } catch (err: any) {
-      notify('error', err.response?.data?.message || '그룹 생성 실패.');
+    } catch (err) {
+      notify('error', getApiErrorMessage(err, '그룹 생성 실패.'));
     }
   };
 
@@ -1176,8 +1177,8 @@ function CodeManager({ notify }: { notify: (type: 'success' | 'error', t: string
       }
       resetItemForm();
       fetchItems(selectedGroupId);
-    } catch (err: any) {
-      notify('error', err.response?.data?.message || '저장 실패.');
+    } catch (err) {
+      notify('error', getApiErrorMessage(err, '저장 실패.'));
     }
   };
 
@@ -1188,7 +1189,7 @@ function CodeManager({ notify }: { notify: (type: 'success' | 'error', t: string
       notify('success', '코드가 삭제되었습니다.');
       fetchItems(selectedGroupId);
     } catch (err) {
-      notify('error', '삭제 실패.');
+      notify('error', getApiErrorMessage(err, '삭제 실패.'));
     }
   };
 

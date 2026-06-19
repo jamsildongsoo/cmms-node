@@ -16,19 +16,29 @@ import { Plant } from '../../entities/plant.entity';
 import { Department } from '../../entities/department.entity';
 import { Role } from '../../entities/role.entity';
 import { RoleDetail } from '../../entities/role-detail.entity';
-import { User } from '../../entities/user.entity';
+import { User } from '../../entities/users.entity';
 import { Warehouse } from '../../entities/warehouse.entity';
 import { CodeGroup } from '../../entities/code-group.entity';
 import { CodeItem } from '../../entities/code-item.entity';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionGuard, Permission } from '../../common/guards/permission.guard';
-import { AppModule } from '../../common/constants/module.constants';
+import { AppModule, AppModuleLabel } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
 @Controller('api/mdm')
 @UseGuards(JwtAuthGuard, PermissionGuard)
 export class MdmController {
   constructor(private readonly mdmService: MdmService) {}
+
+  private async validateSystemAdmin(companyId: string, roleId: string, userId: string): Promise<void> {
+    if (companyId !== 'SYSTEM' || roleId?.toUpperCase() !== 'SYSTEM') {
+      throw new ForbiddenException('SYSTEM 권한이 필요합니다.');
+    }
+    const isValid = await this.mdmService.validateSystemAdminUser(userId);
+    if (!isValid) {
+      throw new ForbiddenException('유효하지 않은 SYSTEM 사용자입니다.');
+    }
+  }
 
   // =========================================================================
   // 2. 플랜트 (Plant)
@@ -240,6 +250,12 @@ export class MdmController {
     return this.mdmService.getCodeItems(companyId, groupId);
   }
 
+  @Get('codes/items/:groupId')
+  async getCodeItemsForUse(@Param('groupId') groupId: string): Promise<CodeItem[]> {
+    const { companyId } = getTenantContext();
+    return this.mdmService.getCodeItems(companyId, groupId);
+  }
+
   @Post('code-groups/:groupId/items')
   @Permission(AppModule.MDM, 'C')
   async createCodeItem(
@@ -274,19 +290,27 @@ export class MdmController {
 
   @Get('companies')
   async getCompanies(): Promise<any[]> {
-    const { roleId } = getTenantContext();
-    if (roleId?.toUpperCase() !== 'SYSTEM') {
-      throw new ForbiddenException('SYSTEM 권한이 필요합니다.');
-    }
+    const { companyId, roleId, userId } = getTenantContext();
+    await this.validateSystemAdmin(companyId, roleId || '', userId);
     return this.mdmService.getCompanies();
   }
 
   @Post('companies')
   async createCompany(@Body() body: any): Promise<any> {
-    const { roleId, userId } = getTenantContext();
-    if (roleId?.toUpperCase() !== 'SYSTEM') {
-      throw new ForbiddenException('SYSTEM 권한이 필요합니다.');
-    }
+    const { companyId, roleId, userId } = getTenantContext();
+    await this.validateSystemAdmin(companyId, roleId || '', userId);
     return this.mdmService.createCompany(body, userId);
+  }
+}
+
+@Controller('api/meta')
+@UseGuards(JwtAuthGuard)
+export class MetaController {
+  @Get('modules')
+  async getModules(): Promise<{ code: string; label: string }[]> {
+    return Object.values(AppModule).map((code) => ({
+      code,
+      label: AppModuleLabel[code],
+    }));
   }
 }

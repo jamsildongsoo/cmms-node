@@ -1,13 +1,13 @@
 # 개발: api(NestJS)·web(Vite)는 호스트에서 실행(HMR/핫리로드), nginx만 컨테이너로 프록시.
 # 보통은 scripts/dev.sh 가 이 파일까지 포함해 BE+FE+nginx를 일괄 기동한다(권장).
 # 이 compose만 단독 실행 시: 백엔드/프론트는 호스트에서 따로 띄워야 함.
-#   → http://localhost:8082 접속  (DB·Storage는 외부 Supabase)
+#   → http://localhost 접속  (DB·Storage는 외부 Supabase)
 services:
   nginx:
     image: nginx:1.25-alpine
     container_name: cmms-node-nginx-dev
     ports:
-      - "80:80"
+      - "80:80"  # 호스트 80 → nginx(컨테이너) 80. 접속: http://localhost
     volumes:
       - ./docker/nginx/dev.conf:/etc/nginx/conf.d/default.conf:ro
     extra_hosts:

@@ -5,13 +5,125 @@ import { Plant } from '../../entities/plant.entity';
 import { Department } from '../../entities/department.entity';
 import { Role } from '../../entities/role.entity';
 import { RoleDetail } from '../../entities/role-detail.entity';
-import { User } from '../../entities/user.entity';
+import { User } from '../../entities/users.entity';
 import { Warehouse } from '../../entities/warehouse.entity';
 import { CodeGroup } from '../../entities/code-group.entity';
 import { CodeItem } from '../../entities/code-item.entity';
 import { CodeUtil } from '../../common/utils/code.util';
 import { AppModule } from '../../common/sequence/sequence.service';
 import * as bcrypt from 'bcryptjs';
+
+const DEFAULT_CODE_GROUPS = [
+  {
+    id: 'EQ_TYPE',
+    name: '설비 유형',
+    items: [
+      ['PUMP', '펌프'],
+      ['MOTOR', '모터'],
+      ['BOILER', '보일러'],
+      ['VALVE', '밸브'],
+      ['COMPRESSOR', '압축기'],
+      ['PANEL', '전기판넬'],
+      ['ETC', '기타 설비'],
+    ],
+  },
+  {
+    id: 'ITEM_TYPE',
+    name: '자재 유형',
+    items: [
+      ['ITEM_TYPE_01', '예비부품'],
+      ['ITEM_TYPE_02', '소모성 공구'],
+      ['ITEM_TYPE_03', '부자재'],
+    ],
+  },
+  {
+    id: 'PM_TYPE',
+    name: '예방점검 유형',
+    items: [
+      ['INSPECT', '예방점검'],
+      ['PATROL', '순회점검'],
+      ['REPLACE', '소모품교체'],
+      ['LEGAL', '정기법정검사'],
+    ],
+  },
+  {
+    id: 'PM_JUDGE',
+    name: '예방점검 판정',
+    items: [
+      ['OK', '양호'],
+      ['NG', '불량'],
+      ['OTHER', '기타'],
+    ],
+  },
+  {
+    id: 'WO_TYPE',
+    name: '작업지시 유형',
+    items: [
+      ['BM', '고장정비'],
+      ['PM', '예방보전'],
+      ['CM', '개조/개선'],
+      ['ETC', '기타 작업'],
+    ],
+  },
+  {
+    id: 'WO_STAGE',
+    name: '작업지시 단계',
+    items: [
+      ['P', '작업 계획/지시'],
+      ['R', '작업 실적/완료'],
+    ],
+  },
+  {
+    id: 'WP_TYPE',
+    name: '작업허가 유형',
+    items: [
+      ['GENERAL', '일반위험작업'],
+      ['FIRE', '화기작업'],
+      ['CONFINED', '밀폐공간출입'],
+      ['ELECTRIC', '정전작업'],
+      ['HIGH_PLACE', '고소작업'],
+      ['EXCAVATION', '굴착작업'],
+      ['HEAVY_LOAD', '중량물취급'],
+    ],
+  },
+  {
+    id: 'BOARD_TYPE',
+    name: '게시판 유형',
+    items: [
+      ['FREE', '자유게시판'],
+      ['NOTICE', '공지사항'],
+      ['WORK', '업무게시판'],
+    ],
+  },
+  {
+    id: 'PR_TYPE',
+    name: '구매요청 유형',
+    items: [
+      ['MATERIAL', '자재 구매'],
+      ['SPARE', '예비품 구매'],
+      ['SERVICE', '외주/서비스'],
+      ['ETC', '기타 구매'],
+    ],
+  },
+  {
+    id: 'CYCLE_UNIT',
+    name: '점검주기 단위',
+    items: [
+      ['D', '일'],
+      ['W', '주'],
+      ['M', '월'],
+      ['Y', '년'],
+    ],
+  },
+  {
+    id: 'MH_UNIT',
+    name: '공수 단위',
+    items: [
+      ['H', '시간'],
+      ['D', '일'],
+    ],
+  },
+] as const;
 
 @Injectable()
 export class MdmService {
@@ -145,7 +257,33 @@ export class MdmService {
   }
 
   async getRoleDetails(companyId: string, roleId: string): Promise<RoleDetail[]> {
-    return this.roleDetailRepo.find({ where: { companyId, roleId } });
+    const existing = await this.roleDetailRepo.find({ where: { companyId, roleId } });
+    const byModule = new Map(existing.map((detail) => [detail.moduleDetail, detail]));
+    const missing: RoleDetail[] = [];
+
+    for (const moduleDetail of Object.values(AppModule)) {
+      if (byModule.has(moduleDetail)) continue;
+      missing.push(this.roleDetailRepo.create({
+        companyId,
+        roleId,
+        moduleDetail,
+        permC: 'N',
+        permR: 'N',
+        permU: 'N',
+        permD: 'N',
+        permA: 'N',
+      }));
+    }
+
+    if (missing.length > 0) {
+      const saved = await this.roleDetailRepo.save(missing);
+      existing.push(...saved);
+    }
+
+    const moduleOrder = new Map(Object.values(AppModule).map((moduleDetail, idx) => [moduleDetail, idx]));
+    return existing
+      .filter((detail) => moduleOrder.has(detail.moduleDetail as AppModule))
+      .sort((a, b) => moduleOrder.get(a.moduleDetail as AppModule)! - moduleOrder.get(b.moduleDetail as AppModule)!);
   }
 
   async saveRole(companyId: string, roleDto: Partial<Role>, operator: string): Promise<Role> {
@@ -200,27 +338,40 @@ export class MdmService {
   }
 
   async saveRoleDetails(companyId: string, roleId: string, details: Partial<RoleDetail>[]): Promise<void> {
+    const validModules = new Set<string>(Object.values(AppModule));
+    const normalizePerm = (value?: string) => {
+      const normalized = value === 'Y' ? 'Y' : 'N';
+      return normalized;
+    };
+
     for (const detail of details) {
       const moduleDetail = detail.moduleDetail;
       if (!moduleDetail) continue;
+      if (!validModules.has(moduleDetail)) {
+        throw new BadRequestException(`유효하지 않은 모듈 코드입니다: ${moduleDetail}`);
+      }
 
       const existing = await this.roleDetailRepo.findOne({
         where: { companyId, roleId, moduleDetail },
       });
 
       if (existing) {
-        existing.permC = detail.permC || 'N';
-        existing.permR = detail.permR || 'N';
-        existing.permU = detail.permU || 'N';
-        existing.permD = detail.permD || 'N';
-        existing.permA = detail.permA || 'N';
+        existing.permC = normalizePerm(detail.permC);
+        existing.permR = normalizePerm(detail.permR);
+        existing.permU = normalizePerm(detail.permU);
+        existing.permD = normalizePerm(detail.permD);
+        existing.permA = normalizePerm(detail.permA);
         await this.roleDetailRepo.save(existing);
       } else {
         const newDetail = this.roleDetailRepo.create({
-          ...detail,
           companyId,
           roleId,
           moduleDetail,
+          permC: normalizePerm(detail.permC),
+          permR: normalizePerm(detail.permR),
+          permU: normalizePerm(detail.permU),
+          permD: normalizePerm(detail.permD),
+          permA: normalizePerm(detail.permA),
         });
         await this.roleDetailRepo.save(newDetail);
       }
@@ -447,6 +598,8 @@ export class MdmService {
 
   async getCodeItems(companyId: string, groupId: string): Promise<CodeItem[]> {
     const cleanGroupId = CodeUtil.normalize(groupId);
+    await this.assertActiveCodeGroup(companyId, cleanGroupId);
+
     return this.codeItemRepo.find({
       where: { companyId, groupId: cleanGroupId },
       order: { sortOrder: 'ASC' },
@@ -455,6 +608,8 @@ export class MdmService {
 
   async saveCodeItem(companyId: string, groupId: string, itemDto: Partial<CodeItem>): Promise<CodeItem> {
     const cleanGroupId = CodeUtil.normalize(groupId);
+    await this.assertActiveCodeGroup(companyId, cleanGroupId);
+
     const id = CodeUtil.normalize(itemDto.id);
     if (!id) throw new BadRequestException('코드아이템 ID는 필수입니다.');
 
@@ -476,6 +631,8 @@ export class MdmService {
 
   async updateCodeItem(companyId: string, groupId: string, id: string, itemDto: Partial<CodeItem>): Promise<CodeItem> {
     const cleanGroupId = CodeUtil.normalize(groupId);
+    await this.assertActiveCodeGroup(companyId, cleanGroupId);
+
     const item = await this.codeItemRepo.findOne({
       where: { companyId, groupId: cleanGroupId, id },
     });
@@ -490,6 +647,8 @@ export class MdmService {
 
   async deleteCodeItem(companyId: string, groupId: string, id: string): Promise<void> {
     const cleanGroupId = CodeUtil.normalize(groupId);
+    await this.assertActiveCodeGroup(companyId, cleanGroupId);
+
     const item = await this.codeItemRepo.findOne({
       where: { companyId, groupId: cleanGroupId, id },
     });
@@ -498,10 +657,26 @@ export class MdmService {
     await this.codeItemRepo.remove(item);
   }
 
+  private async assertActiveCodeGroup(companyId: string, groupId: string): Promise<void> {
+    const group = await this.codeGroupRepo.findOne({
+      where: { companyId, id: groupId, deleteYn: 'N' },
+    });
+    if (!group) throw new BadRequestException('코드그룹을 찾을 수 없습니다.');
+  }
+
   async getCompanies(): Promise<any[]> {
     return this.dataSource.query(
       `SELECT * FROM company WHERE delete_yn = 'N' ORDER BY id ASC`
     );
+  }
+
+  async validateSystemAdminUser(userId: string): Promise<boolean> {
+    const rows = await this.dataSource.query(
+      `SELECT role_id FROM users
+       WHERE company_id = 'SYSTEM' AND id = $1 AND use_yn = 'Y' AND delete_yn = 'N'`,
+      [userId],
+    );
+    return rows.length > 0 && rows[0].role_id?.toUpperCase() === 'SYSTEM';
   }
 
   async createCompany(body: any, operator: string): Promise<any> {
@@ -548,18 +723,28 @@ export class MdmService {
 
         const appModules = Object.values(AppModule);
         for (const m of appModules) {
-          // USER: 작업/예방/허가/게시판 + 구매요청 생성(PUR:C, 단 PUR:U 발주/마감은 제외)
-          // PURCHASER(구매·자재담당, multi_plant): 구매요청 생성/처리(PUR C·U) + 입고(STK C). 확정(A)·삭제(D)·MDM 없음.
-          const permC = r.id === 'ADMIN' || (r.id === 'MANAGER' && m !== 'MDM') || (r.id === 'USER' && ['WO', 'WP', 'PM', 'BRD', 'PUR'].includes(m)) || (r.id === 'PURCHASER' && ['PUR', 'STK'].includes(m)) ? 'Y' : 'N';
-          const permR = 'Y';
-          const permU = r.id === 'ADMIN' || (r.id === 'MANAGER' && m !== 'MDM') || (r.id === 'USER' && ['WO', 'WP', 'PM', 'BRD'].includes(m)) || (r.id === 'PURCHASER' && m === 'PUR') ? 'Y' : 'N';
-          const permD = r.id === 'ADMIN' || (r.id === 'MANAGER' && m !== 'MDM') ? 'Y' : 'N';
-          const permA = r.id === 'ADMIN' || (r.id === 'MANAGER' && m !== 'MDM') || (r.id === 'USER' && m === 'APR') ? 'Y' : 'N';
-
+          // 신규 회사 기본 Role은 초기 운영 편의를 위해 전 권한 Y로 생성하고,
+          // 회사 담당자가 권한관리 화면에서 역할별 정책에 맞게 보정한다.
           await qr.query(
             `INSERT INTO role_detail (company_id, role_id, module_detail, perm_c, perm_r, perm_u, perm_d, perm_a)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [coId, r.id, m, permC, permR, permU, permD, permA]
+            [coId, r.id, m, 'Y', 'Y', 'Y', 'Y', 'Y']
+          );
+        }
+      }
+
+      for (const group of DEFAULT_CODE_GROUPS) {
+        await qr.query(
+          `INSERT INTO code_group (company_id, id, name, system_use_yn, created_by, updated_by, delete_yn)
+           VALUES ($1, $2, $3, 'Y', $4, $4, 'N')`,
+          [coId, group.id, group.name, operator]
+        );
+
+        for (const [idx, item] of group.items.entries()) {
+          await qr.query(
+            `INSERT INTO code_item (company_id, group_id, id, name, legal_inspect_yn, sort_order)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [coId, group.id, item[0], item[1], item[0] === 'LEGAL' ? 'Y' : 'N', idx + 1]
           );
         }
       }

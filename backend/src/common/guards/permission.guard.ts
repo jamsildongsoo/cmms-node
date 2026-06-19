@@ -3,12 +3,12 @@
    Spring의 @PreAuthorize("@perm.check('WO','C')") 대응
    ========================================================================= */
 import {
-  Injectable, CanActivate, ExecutionContext, SetMetadata,
+  Injectable, CanActivate, ExecutionContext, SetMetadata, ForbiddenException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { DataSource } from 'typeorm';
 import { JwtPayload } from '../../modules/auth/auth.interfaces';
-import { AppModule } from '../constants/module.constants';
+import { AppModule, AppModuleLabel } from '../constants/module.constants';
 import { PermAction, PERM_COLUMN } from '../constants/permission.constants';
 import { DocStatus } from '../constants/status.constants';
 
@@ -21,6 +21,14 @@ export const Permission = (module: AppModule, action: PermAction) =>
 /** checkSave: C 권한 필수, status='S'면 A 권한도 필수 (결재 우회 확정) */
 export const PermissionSave = (module: AppModule, statusParam?: string) =>
   SetMetadata(PERMISSION_KEY, { module, action: 'C', saveMode: true, statusParam });
+
+const ACTION_LABEL: Record<PermAction, string> = {
+  C: '등록',
+  R: '조회',
+  U: '수정',
+  D: '삭제',
+  A: '승인',
+};
 
 @Injectable()
 export class PermissionGuard implements CanActivate {
@@ -41,33 +49,60 @@ export class PermissionGuard implements CanActivate {
 
     const req = ctx.switchToHttp().getRequest();
     const user = req.user as JwtPayload;
-    if (!user) return false;
+    if (!user) {
+      throw new ForbiddenException('요청을 처리할 사용자 권한 정보가 없습니다.');
+    }
 
     // SYSTEM 역할은 전 모듈 통과 (테넌트 결속 + 서버 재검증)
     if (user.roleId.toUpperCase() === 'SYSTEM') {
-      if (user.companyId !== 'SYSTEM') return false;
+      if (user.companyId !== 'SYSTEM') {
+        throw new ForbiddenException('SYSTEM 역할의 회사 정보가 올바르지 않습니다.');
+      }
       const dbUsers = await this.dataSource.query(
         `SELECT role_id FROM users WHERE company_id = 'SYSTEM' AND id = $1 AND delete_yn = 'N'`,
         [user.userId]
       );
-      return dbUsers.length > 0 && dbUsers[0].role_id === 'SYSTEM';
+      if (!dbUsers.length || dbUsers[0].role_id !== 'SYSTEM') {
+        throw new ForbiddenException('SYSTEM 관리자 권한을 확인할 수 없습니다.');
+      }
+      return true;
     }
 
     // 기본 권한 체크
     const hasAction = await this.checkMatrix(
       user.companyId, user.roleId, perm.module, perm.action,
     );
-    if (!hasAction) return false;
+    if (!hasAction) {
+      throw this.permissionException(perm.module, perm.action);
+    }
 
     // saveMode: status='S'면 A 권한 추가 확인
     if (perm.saveMode && perm.statusParam) {
-      const status = req.body?.header?.status ?? req.body?.status ?? req.query?.status;
+      const status = this.readPath(req.body, perm.statusParam) ?? req.query?.status;
       if (status === DocStatus.SELF_CONFIRMED) {
-        return this.checkMatrix(user.companyId, user.roleId, perm.module, 'A');
+        const canApprove = await this.checkMatrix(user.companyId, user.roleId, perm.module, 'A');
+        if (!canApprove) {
+          throw new ForbiddenException(`${this.moduleLabel(perm.module)} 직접확정 권한이 없습니다.`);
+        }
       }
     }
 
     return true;
+  }
+
+  private permissionException(module: string, action: PermAction): ForbiddenException {
+    return new ForbiddenException(`${this.moduleLabel(module)} ${ACTION_LABEL[action]} 권한이 없습니다.`);
+  }
+
+  private moduleLabel(module: string): string {
+    return AppModuleLabel[module as AppModule] ?? module;
+  }
+
+  private readPath(source: unknown, path: string): unknown {
+    return path.split('.').reduce<unknown>((value, key) => {
+      if (!value || typeof value !== 'object') return undefined;
+      return (value as Record<string, unknown>)[key];
+    }, source);
   }
 
   private async checkMatrix(

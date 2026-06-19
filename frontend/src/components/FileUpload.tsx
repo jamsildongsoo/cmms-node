@@ -13,7 +13,7 @@ interface FileItem {
 interface Props {
   /** 첨부 그룹 번호. 신규(미업로드)면 null. */
   groupNo: number | null;
-  /** 업로드 시 서버에 전달할 모듈 코드(예: BOARD, APR) */
+  /** 업로드 시 서버에 전달할 AppModule 코드(예: BRD, APR) */
   refModule: string;
   /** 첫 업로드로 그룹이 생성되면 상위 폼에 groupNo를 전달한다. */
   onGroupNoChange?: (groupNo: number) => void;

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import axiosInstance from '../api/axios';
 import { formatDateTime } from '../utils/datetime';
+import { getApiErrorMessage } from '../utils/apiError';
 import { useAuthStore } from '../store/useAuthStore';
 import FileUpload from '../components/FileUpload';
 import ApprovalDocPrint from '../components/ApprovalDocPrint';
@@ -71,7 +72,7 @@ export default function Approval() {
       setUsersList(userRes.data);
     } catch (err) {
       console.error(err);
-      alert('목록을 불러오지 못했습니다.');
+      alert(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
     }
   };
 
@@ -86,7 +87,7 @@ export default function Approval() {
       setComments('');
       setIsDetailOpen(true);
     } catch (err) {
-      alert('결재 문서 정보를 불러오는데 실패했습니다.');
+      alert(getApiErrorMessage(err, '결재 문서 정보를 불러오는데 실패했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -103,8 +104,8 @@ export default function Approval() {
       alert(action === 'APPROVE' ? '승인 처리되었습니다.' : '반려 처리되었습니다.');
       setIsDetailOpen(false);
       fetchData();
-    } catch (err: any) {
-      alert(err.response?.data?.message || '결재 처리 실패');
+    } catch (err) {
+      alert(getApiErrorMessage(err, '결재 처리 실패'));
     } finally {
       setIsLoading(false);
     }
@@ -164,8 +165,8 @@ export default function Approval() {
       alert('결재 문서가 상신되었습니다.');
       setIsDraftModalOpen(false);
       fetchData();
-    } catch (err: any) {
-      alert(err.response?.data?.message || '상신 중 오류가 발생했습니다.');
+    } catch (err) {
+      alert(getApiErrorMessage(err, '상신 중 오류가 발생했습니다.'));
     } finally {
       setIsLoading(false);
     }

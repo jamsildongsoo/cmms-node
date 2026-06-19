@@ -1,10 +1,10 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { addDays, addWeeks, addMonths, addYears } from 'date-fns';
 import { SequenceService, AppModule } from '../../common/sequence/sequence.service';
 import { resolveActivePlantId } from '../../common/utils/plant.util';
 import { getTenantContext } from '../../common/context/tenant.context';
 import { DocStatus } from '../../common/constants/status.constants';
+import { addDateOnly, toDateOnly } from '../../common/utils/date-only.util';
 
 export interface PmScheduleResponse {
   equipmentId: string;
@@ -155,14 +155,23 @@ export class PmService {
     try {
       let pmId = pmRecord.id;
       const isNew = !pmId || pmId.trim() === '';
+      let previousStatus: string | null = null;
 
       if (isNew) {
         pmId = await this.sequenceService.generateNextNo(companyId, AppModule.PM, pmRecord.departmentId);
+      } else {
+        const existing = await qr.query(
+          `SELECT status FROM pm_record
+           WHERE company_id = $1 AND plant_id = $2 AND id = $3 AND delete_yn = 'N'
+           FOR UPDATE`,
+          [companyId, activePlantId, pmId],
+        );
+        previousStatus = existing[0]?.status ?? null;
       }
 
-      const workDateStr = pmRecord.workDate instanceof Date ? pmRecord.workDate.toISOString().split('T')[0] : pmRecord.workDate;
+      const workDateStr = toDateOnly(pmRecord.workDate);
       const certExpireDateStr = pmRecord.certExpireDate
-        ? (pmRecord.certExpireDate instanceof Date ? pmRecord.certExpireDate.toISOString().split('T')[0] : pmRecord.certExpireDate)
+        ? toDateOnly(pmRecord.certExpireDate)
         : null;
 
       if (isNew) {
@@ -208,7 +217,12 @@ export class PmService {
         }
       }
 
-      if (pmRecord.status === DocStatus.SELF_CONFIRMED || pmRecord.status === DocStatus.CONFIRMED) {
+      const isFirstSelfConfirmation =
+        pmRecord.status === DocStatus.SELF_CONFIRMED &&
+        previousStatus !== DocStatus.SELF_CONFIRMED &&
+        previousStatus !== DocStatus.CONFIRMED;
+
+      if (isFirstSelfConfirmation) {
         const cycles = await qr.query(
           `SELECT * FROM equipment_check_cycle 
            WHERE company_id = $1 AND plant_id = $2 AND equipment_id = $3 AND check_type_code = $4 AND delete_yn = 'N'`,
@@ -217,9 +231,7 @@ export class PmService {
 
         if (cycles.length > 0) {
           const cycle = cycles[0];
-          const lastDate = new Date(workDateStr);
-          const nextDate = this.calculateNextDate(lastDate, cycle.cycle_val, cycle.cycle_unit);
-          const nextDateStr = nextDate.toISOString().split('T')[0];
+          const nextDateStr = addDateOnly(workDateStr, Number(cycle.cycle_val), cycle.cycle_unit);
 
           await qr.query(
             `UPDATE equipment_check_cycle 
@@ -255,14 +267,4 @@ export class PmService {
     );
   }
 
-  private calculateNextDate(lastDate: Date, val: number, unit: string): Date {
-    const u = unit.toUpperCase();
-    switch (u) {
-      case 'D': return addDays(lastDate, val);
-      case 'W': return addWeeks(lastDate, val);
-      case 'M': return addMonths(lastDate, val);
-      case 'Y': return addYears(lastDate, val);
-      default: return addMonths(lastDate, val);
-    }
-  }
 }

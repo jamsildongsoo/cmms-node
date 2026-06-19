@@ -9,6 +9,7 @@ import {
   getProcStatusLabel,
   getProcStatusClass,
 } from '../constants/status';
+import { formatDateOnly, todayLocal } from '../utils/datetime';
 
 interface Vendor { id: string; name: string; bizNo?: string; contact?: string; manager?: string; remarks?: string; deleteYn?: string }
 interface Warehouse { id: string; name: string; plantId?: string | null }
@@ -60,20 +61,26 @@ export default function Procurement() {
   const loadRequests = async () => {
     try {
       const res = await axiosInstance.get('/procurement/requests');
-      setRequests(res.data || []);
+      setRequests((res.data || []).map((request: PurchaseRequest) => ({
+        ...request,
+        requestDate: formatDateOnly(request.requestDate),
+        orderDate: formatDateOnly(request.orderDate) || null,
+        etaDate: formatDateOnly(request.etaDate) || null,
+        shipStartDate: formatDateOnly(request.shipStartDate) || null,
+      })));
     } catch (e) { console.error(e); }
   };
   useEffect(() => { if (tab === 'requests') loadRequests(); }, [tab]);
 
   // 신규/수정 모달
   const [formOpen, setFormOpen] = useState(false);
-  const [formHeader, setFormHeader] = useState<Partial<PurchaseRequest>>({ requestDate: new Date().toISOString().slice(0, 10) });
+  const [formHeader, setFormHeader] = useState<Partial<PurchaseRequest>>({ requestDate: todayLocal() });
   const [formItems, setFormItems] = useState<ItemLine[]>([{ inventoryId: '', qty: 0, unit: '' }]);
   const [confirmOnSave, setConfirmOnSave] = useState(false);
 
   const openNewForm = () => {
     setFormHeader({
-      requestDate: new Date().toISOString().slice(0, 10),
+      requestDate: todayLocal(),
       plantId: user?.lastLoginPlantId || '',
     });
     setFormItems([{ inventoryId: '', qty: 0, unit: '' }]);
@@ -143,7 +150,7 @@ export default function Procurement() {
         inputQty: Math.max(0, Number(it.qty) - Number(it.receivedQty ?? 0)),  // 프리필=잔여
         unitPrice: '',
       }));
-      setReceiveModal({ pr, lines, close: false, txDate: new Date().toISOString().slice(0, 10) });
+      setReceiveModal({ pr, lines, close: false, txDate: todayLocal() });
     } catch (e: any) { alert(e.response?.data?.message || '상세 조회 실패'); }
   };
   const submitReceive = async () => {
@@ -176,7 +183,17 @@ export default function Procurement() {
   const openPrint = async (id: string) => {
     try {
       const detail = await axiosInstance.get(`/procurement/requests/${id}`);
-      setPrintPr({ header: detail.data.header, items: detail.data.items || [] });
+      const header = detail.data.header as PurchaseRequest;
+      setPrintPr({
+        header: {
+          ...header,
+          requestDate: formatDateOnly(header.requestDate),
+          orderDate: formatDateOnly(header.orderDate) || null,
+          etaDate: formatDateOnly(header.etaDate) || null,
+          shipStartDate: formatDateOnly(header.shipStartDate) || null,
+        },
+        items: detail.data.items || [],
+      });
     } catch (e: any) { alert(e.response?.data?.message || '인쇄 실패'); }
   };
 
@@ -285,10 +302,10 @@ export default function Procurement() {
                       </>
                     )}
                     {pr.status === 'S' && !pr.procStatus && (
-                      <button onClick={() => setOrderModal({ id: pr.id, vendorId: pr.vendorId || '', orderDate: new Date().toISOString().slice(0, 10), etaDate: '' })} className="bg-amber-700 hover:bg-amber-600 text-white rounded px-2 py-1 text-[10px] font-semibold border-0 cursor-pointer">발주</button>
+                      <button onClick={() => setOrderModal({ id: pr.id, vendorId: pr.vendorId || '', orderDate: todayLocal(), etaDate: '' })} className="bg-amber-700 hover:bg-amber-600 text-white rounded px-2 py-1 text-[10px] font-semibold border-0 cursor-pointer">발주</button>
                     )}
                     {pr.status === 'S' && pr.procStatus === 'O' && (
-                      <button onClick={() => setShipModal({ id: pr.id, shipStartDate: new Date().toISOString().slice(0, 10) })} className="bg-amber-700 hover:bg-amber-600 text-white rounded px-2 py-1 text-[10px] font-semibold border-0 cursor-pointer">배송시작</button>
+                      <button onClick={() => setShipModal({ id: pr.id, shipStartDate: todayLocal() })} className="bg-amber-700 hover:bg-amber-600 text-white rounded px-2 py-1 text-[10px] font-semibold border-0 cursor-pointer">배송시작</button>
                     )}
                     {pr.status === 'S' && pr.procStatus !== 'E' && pr.procStatus && (
                       <>

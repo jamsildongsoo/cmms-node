@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import axiosInstance from '../api/axios';
 import PrintHeader from '../components/PrintHeader';
+import { getApiErrorMessage } from '../utils/apiError';
 import {
   Package, Plus, Edit2, Trash2, Printer, Save, X, FileSpreadsheet
 } from 'lucide-react';
@@ -56,7 +57,7 @@ export default function Inventory() {
       setDepts(deptRes.data);
     } catch (err) {
       console.error(err);
-      setMessage({ type: 'error', text: '목록을 불러오지 못했습니다.' });
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '목록을 불러오지 못했습니다.') });
     }
   };
 
@@ -105,7 +106,7 @@ export default function Inventory() {
       setMessage({ type: 'success', text: '자재 품목이 삭제되었습니다.' });
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: '삭제에 실패했습니다.' });
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '삭제에 실패했습니다.') });
     }
   };
 
@@ -127,8 +128,8 @@ export default function Inventory() {
       setMessage({ type: 'success', text: '자재 마스터가 저장되었습니다.' });
       setIsFormOpen(false);
       fetchData();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.response?.data?.message || '저장 실패.' });
+    } catch (err) {
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '저장 실패.') });
     } finally {
       setIsLoading(false);
     }
@@ -146,7 +147,7 @@ export default function Inventory() {
       link.click();
       document.body.removeChild(link);
     } catch (err) {
-      alert('CSV 다운로드 실패');
+      alert(getApiErrorMessage(err, 'CSV 다운로드 실패'));
     }
   };
 

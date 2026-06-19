@@ -1,8 +1,9 @@
 # 운영 배포 (B안: 레지스트리 pull). 이미지는 CI에서 빌드/푸시하고, 서버는 pull만 한다.
 #   배포: docker compose -f docker-compose.prod.yml pull \
 #         && docker compose -f docker-compose.prod.yml up -d
-#   필요한 .env 키: IMAGE_REGISTRY, IMAGE_TAG(선택), DB_*, JWT_SECRET (+ 첨부 쓰면 STORAGE_*)
-#   DB·Object Storage는 외부(Supabase). .env는 env_file로 주입 — 이미지엔 굽지 않는다.
+#   필요한 운영 키: IMAGE_REGISTRY, IMAGE_TAG(선택), DB_*, JWT_SECRET (+ 첨부 쓰면 STORAGE_*)
+#   DB·Object Storage는 외부(Supabase). 루트 .env로 주입 — 이미지엔 굽지 않는다.
+#   키 목록은 .env.template 참고. 운영 서버의 .env는 별도로 관리하고 커밋하지 않는다.
 #   (소스에서 직접 빌드하려면 docker-compose.prod.build.yml 같은 별도 파일로 분리 권장)
 services:
   api:
@@ -11,6 +12,7 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
+      DB_SYNCHRONIZE: "false"
     expose:
       - "8080"          # 외부 노출 없이 web(nginx)만 접근
     healthcheck:

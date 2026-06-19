@@ -53,6 +53,7 @@ export interface LoginResponse {
   multiPlant: 'Y' | 'N';
   mustChangePassword: boolean;
   passwordExpired: boolean;
+  permissions: Record<string, { C: string; R: string; U: string; D: string; A: string }>;
 }
 
 /** 비밀번호 변경 요청 */

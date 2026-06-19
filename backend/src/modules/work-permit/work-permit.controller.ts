@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { WorkPermitService } from './work-permit.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { PermissionGuard, Permission } from '../../common/guards/permission.guard';
+import { PermissionGuard, Permission, PermissionSave } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
@@ -38,7 +38,7 @@ export class WorkPermitController {
   }
 
   @Post()
-  @Permission(AppModule.WP, 'C')
+  @PermissionSave(AppModule.WP, 'status')
   async saveWorkPermit(@Body() permit: any): Promise<any> {
     const { companyId, userId } = getTenantContext();
     return this.workPermitService.saveWorkPermit(companyId, permit, userId);

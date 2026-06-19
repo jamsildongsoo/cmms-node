@@ -13,6 +13,7 @@ ENV NODE_ENV=production
 COPY package*.json ./
 RUN npm ci --only=production
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/scripts ./scripts
 
 # 비특권 사용자로 실행 (node 공식 이미지 내장 'node' 사용)
 USER node

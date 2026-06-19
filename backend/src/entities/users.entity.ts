@@ -1,6 +1,7 @@
 import { Entity, PrimaryColumn, Column } from 'typeorm';
 import { BaseEntity } from './base.entity';
 
+// PostgreSQL에서 user는 예약어 성격이 있어 테이블명과 파일명은 예외적으로 users를 유지한다.
 @Entity('users')
 export class User extends BaseEntity {
   @PrimaryColumn({ name: 'company_id', length: 50 })

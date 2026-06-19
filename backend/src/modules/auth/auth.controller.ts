@@ -30,7 +30,7 @@ export class AuthController {
   @Post('signup')
   async signUp(@Body() body: SignUpRequest) {
     await this.authService.signUp(body);
-    return '회원가입이 완료되었습니다.';
+    return '회원가입 신청이 완료되었습니다. 관리자 승인 후 로그인할 수 있습니다.';
   }
 
   /**

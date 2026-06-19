@@ -25,6 +25,7 @@ import {
   UserUpdateRequest,
   UserProfileResponse,
 } from './auth.interfaces';
+import { AppModule } from '../../common/constants/module.constants';
 
 @Injectable()
 export class AuthService {
@@ -145,6 +146,20 @@ export class AuthService {
       [companyId],
     );
     const companyName = companies[0]?.name ?? companyId;
+    const permissionRows = await this.dataSource.query<any[]>(
+      `SELECT module_detail, perm_c, perm_r, perm_u, perm_d, perm_a
+       FROM role_detail WHERE company_id = $1 AND role_id = $2`,
+      [companyId, user.role_id],
+    );
+    const permissions = user.role_id?.toUpperCase() === 'SYSTEM' && companyId === 'SYSTEM'
+      ? Object.fromEntries(Object.values(AppModule).map((module) => [
+          module,
+          { C: 'Y', R: 'Y', U: 'Y', D: 'Y', A: 'Y' },
+        ]))
+      : Object.fromEntries(permissionRows.map((row) => [
+          row.module_detail,
+          { C: row.perm_c, R: row.perm_r, U: row.perm_u, D: row.perm_d, A: row.perm_a },
+        ]));
 
     return {
       accessToken,
@@ -160,6 +175,7 @@ export class AuthService {
       multiPlant: user.multi_plant === 'Y' ? 'Y' : 'N',
       mustChangePassword: !!mustChange,
       passwordExpired: !!expired,
+      permissions,
     };
   }
 
@@ -221,8 +237,8 @@ export class AuthService {
     const hash = await bcrypt.hash(req.password, 12);
     await this.dataSource.query(
       `INSERT INTO users (company_id, id, name, password_hash, department_id,
-        use_yn, delete_yn, created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,'Y','N',$2,$2)`,
+        role_id, use_yn, delete_yn, created_by, updated_by)
+       VALUES ($1,$2,$3,$4,$5,NULL,'N','N',$2,$2)`,
       [companyId, req.id, req.name, hash, req.departmentId ?? null],
     );
   }

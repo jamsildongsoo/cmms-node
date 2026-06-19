@@ -3,6 +3,7 @@ import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import FileUpload from '../components/FileUpload';
 import { formatDateTime, formatDate } from '../utils/datetime';
+import { getApiErrorMessage } from '../utils/apiError';
 import { 
   Plus, Trash, Download, X, Megaphone, MessageSquare, ChevronRight 
 } from 'lucide-react';
@@ -60,7 +61,7 @@ export default function Board() {
       setPosts(res.data);
     } catch (err) {
       console.error(err);
-      alert('목록을 불러오지 못했습니다.');
+      alert(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
     }
   };
 
@@ -75,7 +76,7 @@ export default function Board() {
       setNewCommentContent('');
       setIsDetailOpen(true);
     } catch (err) {
-      alert('게시글 상세 내역을 불러오는데 실패했습니다.');
+      alert(getApiErrorMessage(err, '게시글 상세 내역을 불러오는데 실패했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -130,7 +131,7 @@ export default function Board() {
         setSelectedPost(updated.data.board);
       }
     } catch (err) {
-      alert('저장 오류 발생');
+      alert(getApiErrorMessage(err, '저장 오류 발생'));
     } finally {
       setIsLoading(false);
     }
@@ -144,7 +145,7 @@ export default function Board() {
       setIsDetailOpen(false);
       fetchData();
     } catch (err) {
-      alert('삭제 오류 발생');
+      alert(getApiErrorMessage(err, '삭제 오류 발생'));
     }
   };
 
@@ -163,7 +164,7 @@ export default function Board() {
       const res = await axiosInstance.get(`/board/${selectedPost.id}/details`);
       setComments(res.data.comments || []);
     } catch (err) {
-      alert('댓글 등록 중 오류 발생');
+      alert(getApiErrorMessage(err, '댓글 등록 중 오류 발생'));
     }
   };
 
@@ -176,7 +177,7 @@ export default function Board() {
       const res = await axiosInstance.get(`/board/${comment.boardId}/details`);
       setComments(res.data.comments || []);
     } catch (err) {
-      alert('댓글 삭제 오류');
+      alert(getApiErrorMessage(err, '댓글 삭제 오류'));
     }
   };
 
@@ -347,7 +348,7 @@ export default function Board() {
               </div>
 
               {/* 첨부파일 (읽기 전용) */}
-              <FileUpload groupNo={selectedPost.fileGroupId} refModule="BOARD" readOnly />
+              <FileUpload groupNo={selectedPost.fileGroupId} refModule="BRD" readOnly />
 
               {/* Comment Section (Single layer) */}
               <div className="space-y-4">
@@ -478,7 +479,7 @@ export default function Board() {
                   <label className="block text-slate-500 mb-1.5">첨부파일</label>
                   <FileUpload
                     groupNo={formFileGroupId}
-                    refModule="BOARD"
+                    refModule="BRD"
                     onGroupNoChange={setFormFileGroupId}
                     onUploadingChange={setFileUploading}
                   />

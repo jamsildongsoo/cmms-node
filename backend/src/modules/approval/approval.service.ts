@@ -1,8 +1,8 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { addDays, addWeeks, addMonths, addYears } from 'date-fns';
 import { SequenceService, AppModule } from '../../common/sequence/sequence.service';
 import { DocStatus } from '../../common/constants/status.constants';
+import { addDateOnly, toDateOnly } from '../../common/utils/date-only.util';
 import {
   ApprovalStepType,
   ApprovalResult,
@@ -95,7 +95,7 @@ export class ApprovalService {
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, 'N')`,
           [
             companyId, appNo, approval.title, approval.content ?? null, operator,
-            approval.fileGroupId ?? null, status
+            approval.fileGroupId ?? null, status, operator
           ],
         );
       } else {
@@ -309,19 +309,19 @@ export class ApprovalService {
     const mod = refModule.toUpperCase();
     if (mod === AppModule.PM) {
       await qr.query(
-        `UPDATE pm_record SET approval_id = $4, status = $5, updated_by = $6 
+        `UPDATE pm_record SET approval_id = $3, status = $4, updated_by = $5
          WHERE company_id = $1 AND id = $2 AND delete_yn = 'N'`,
         [companyId, refNo, approvalId, status, operator],
       );
     } else if (mod === AppModule.WO) {
       await qr.query(
-        `UPDATE work_order SET approval_id = $4, status = $5, updated_by = $6 
+        `UPDATE work_order SET approval_id = $3, status = $4, updated_by = $5
          WHERE company_id = $1 AND id = $2 AND delete_yn = 'N'`,
         [companyId, refNo, approvalId, status, operator],
       );
     } else if (mod === AppModule.WP) {
       await qr.query(
-        `UPDATE work_permit SET approval_id = $4, status = $5, updated_by = $6 
+        `UPDATE work_permit SET approval_id = $3, status = $4, updated_by = $5
          WHERE company_id = $1 AND id = $2 AND delete_yn = 'N'`,
         [companyId, refNo, approvalId, status, operator],
       );
@@ -354,27 +354,15 @@ export class ApprovalService {
 
     if (cycles.length > 0) {
       const cycle = cycles[0];
-      const lastDate = new Date(pm.work_date);
-      const nextDate = this.calculateNextDate(lastDate, cycle.cycle_val, cycle.cycle_unit);
-      const nextDateStr = nextDate.toISOString().split('T')[0];
+      const workDate = toDateOnly(pm.work_date);
+      const nextDateStr = addDateOnly(workDate, Number(cycle.cycle_val), cycle.cycle_unit);
 
       await qr.query(
         `UPDATE equipment_check_cycle 
          SET last_check_date = $5, next_check_date = $6, updated_by = $7
          WHERE company_id = $1 AND plant_id = $2 AND equipment_id = $3 AND check_type_code = $4`,
-        [companyId, pm.plant_id, pm.equipment_id, pm.check_type_code, pm.work_date, nextDateStr, operator],
+        [companyId, pm.plant_id, pm.equipment_id, pm.check_type_code, workDate, nextDateStr, operator],
       );
-    }
-  }
-
-  private calculateNextDate(lastDate: Date, val: number, unit: string): Date {
-    const u = unit.toUpperCase();
-    switch (u) {
-      case 'D': return addDays(lastDate, val);
-      case 'W': return addWeeks(lastDate, val);
-      case 'M': return addMonths(lastDate, val);
-      case 'Y': return addYears(lastDate, val);
-      default: return addMonths(lastDate, val);
     }
   }
 

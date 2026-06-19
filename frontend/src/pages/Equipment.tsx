@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import axiosInstance from '../api/axios';
 import PrintHeader from '../components/PrintHeader';
+import { getApiErrorMessage } from '../utils/apiError';
+import { formatDateOnly } from '../utils/datetime';
 import { 
   Wrench, Plus, Edit2, Trash2, Printer, Save, X, PlusCircle, MinusCircle, FileSpreadsheet, RefreshCw 
 } from 'lucide-react';
@@ -85,7 +87,7 @@ export default function Equipment() {
       }
     } catch (err) {
       console.error(err);
-      setMessage({ type: 'error', text: '목록을 불러오지 못했습니다.' });
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '목록을 불러오지 못했습니다.') });
     }
   };
 
@@ -122,7 +124,7 @@ export default function Equipment() {
       setName(targetEq.name);
       setLocation(targetEq.location || '');
       setEqTypeCode(targetEq.eqTypeCode || '');
-      setInstallDate(targetEq.installDate || '');
+      setInstallDate(formatDateOnly(targetEq.installDate));
       setWorkPermitYn(targetEq.workPermitYn || 'N');
       setMakerName(targetEq.makerName || '');
       setSpec(targetEq.spec || '');
@@ -134,13 +136,13 @@ export default function Equipment() {
         checkTypeCode: c.checkTypeCode,
         cycleVal: c.cycleVal,
         cycleUnit: c.cycleUnit,
-        lastCheckDate: c.lastCheckDate || null,
-        nextCheckDate: c.nextCheckDate || null,
+        lastCheckDate: formatDateOnly(c.lastCheckDate) || null,
+        nextCheckDate: formatDateOnly(c.nextCheckDate) || null,
       })));
       
       setIsFormOpen(true);
     } catch (err) {
-      alert('설비 상세 내역을 불러오지 못했습니다.');
+      alert(getApiErrorMessage(err, '설비 상세 내역을 불러오지 못했습니다.'));
     }
   };
 
@@ -151,7 +153,7 @@ export default function Equipment() {
       setMessage({ type: 'success', text: '설비가 성공적으로 삭제되었습니다.' });
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: '설비 삭제 실패.' });
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '설비 삭제 실패.') });
     }
   };
 
@@ -183,26 +185,7 @@ export default function Equipment() {
   const handleCheckCycleChange = (idx: number, field: keyof CheckCycle, val: any) => {
     setCheckCycles(checkCycles.map((item, i) => {
       if (i === idx) {
-        const updated = { ...item, [field]: val === '' ? null : val };
-        
-        // 점검 유형(PM_TYPE)이 변경되면 그에 맞는 대표 표준 주기를 자동으로 세팅해줍니다.
-        if (field === 'checkTypeCode') {
-          if (val === 'INSPECT') {
-            updated.cycleVal = 1;
-            updated.cycleUnit = 'M'; // 예방점검: 기본 1개월
-          } else if (val === 'PATROL') {
-            updated.cycleVal = 1;
-            updated.cycleUnit = 'D'; // 순회점검: 기본 1일
-          } else if (val === 'REPLACE') {
-            updated.cycleVal = 6;
-            updated.cycleUnit = 'M'; // 소모품교체: 기본 6개월
-          } else if (val === 'LEGAL') {
-            updated.cycleVal = 1;
-            updated.cycleUnit = 'Y'; // 법정검사: 기본 1년
-          }
-        }
-
-        return updated;
+        return { ...item, [field]: val === '' ? null : val };
       }
       return item;
     }));
@@ -236,8 +219,8 @@ export default function Equipment() {
       setMessage({ type: 'success', text: '설비 정보가 성공적으로 저장되었습니다.' });
       setIsFormOpen(false);
       fetchData();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.response?.data?.message || '저장 중 오류가 발생했습니다.' });
+    } catch (err) {
+      setMessage({ type: 'error', text: getApiErrorMessage(err, '저장 중 오류가 발생했습니다.') });
     } finally {
       setIsLoading(false);
     }
@@ -255,7 +238,7 @@ export default function Equipment() {
       link.click();
       document.body.removeChild(link);
     } catch (err) {
-      alert('CSV 다운로드 실패');
+      alert(getApiErrorMessage(err, 'CSV 다운로드 실패'));
     }
   };
 
@@ -362,11 +345,11 @@ export default function Equipment() {
                     <td className="p-3 font-semibold text-slate-200 print:text-slate-900">{eq.name}</td>
                     <td className="p-3">{plants.find(p => p.id === eq.plantId)?.name || eq.plantId}</td>
                     <td className="p-3 text-slate-400 print:text-slate-600">{eq.location || '-'}</td>
-                    <td className="p-3 text-slate-400 print:text-slate-600">{eq.installDate || '-'}</td>
+                    <td className="p-3 text-slate-400 print:text-slate-600">{formatDateOnly(eq.installDate) || '-'}</td>
                     <td className="p-3 text-slate-400 print:text-slate-600">{eq.makerName || '-'}</td>
                     <td className="p-3 text-slate-400 print:text-slate-600">{eq.model || '-'}</td>
-                    <td className="p-3 text-slate-400 print:text-slate-600">{eq.lastCheckDate || '-'}</td>
-                    <td className="p-3 font-semibold text-amber-500 print:text-black">{eq.nextCheckDate || '-'}</td>
+                    <td className="p-3 text-slate-400 print:text-slate-600">{formatDateOnly(eq.lastCheckDate) || '-'}</td>
+                    <td className="p-3 font-semibold text-amber-500 print:text-black">{formatDateOnly(eq.nextCheckDate) || '-'}</td>
                     <td className="p-3">
                       <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                         eq.workPermitYn === 'Y' 
