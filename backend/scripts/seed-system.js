@@ -5,7 +5,6 @@
    생성 대상:
      · company       SYSTEM            (시스템)
      · role          SYSTEM/SYSTEM     (시스템관리자, multi_plant='Y')
-     · role_detail   SYSTEM 롤 × 전 모듈 모두 'Y'
      · users         SYSTEM/system     (bcryptjs 해시, role_id='SYSTEM')
 
    이후 로그인 → 화면의 '회사 생성'(POST /api/mdm/companies, SYSTEM 권한)으로
@@ -78,8 +77,6 @@ function buildConnection(env) {
   return { connectionString: dbUrl, ssl };
 }
 
-const MODULES = ['MDM', 'EQP', 'INV', 'STK', 'PM', 'WO', 'WP', 'APR', 'BRD', 'PUR'];
-
 async function main() {
   const password = process.argv[2] || 'system1234';
   const env = loadEnv();
@@ -115,16 +112,6 @@ async function main() {
        ON CONFLICT (company_id, id) DO NOTHING`,
       [OP],
     );
-
-    // 권한 매트릭스 (전 모듈 모두 Y)
-    for (const m of MODULES) {
-      await client.query(
-        `INSERT INTO role_detail (company_id, role_id, module_detail, perm_c, perm_r, perm_u, perm_d, perm_a)
-         VALUES ('SYSTEM', 'SYSTEM', $1, 'Y', 'Y', 'Y', 'Y', 'Y')
-         ON CONFLICT (company_id, role_id, module_detail) DO NOTHING`,
-        [m],
-      );
-    }
 
     // 관리자 계정 (bcryptjs 해시 — 앱과 동일 라이브러리)
     const hash = await bcrypt.hash(password, 12);

@@ -1,8 +1,8 @@
-# 신규 리눅스 개발서버 구성
+# 신규 리눅스 서버 구성
 
-대상 서버: `223.130.162.61`
+대상 서버: `223.130.162.61` -네이버클라우드 기준
 
-이 절차는 운영서버와 같은 방식으로 이미지를 pull 해서 기동하는 개발/검증 서버용입니다. 기존 DB를 그대로 사용하므로 DB 초기화, seed, synchronize는 실행하지 않습니다.
+이 절차는 운영서버와 같은 방식으로 이미지를 pull 해서 기동하는 개발/검증 서버용입니다. DB 초기화, seed, synchronize는 실행하지 않습니다.
 
 ## 1. Docker 설치
 
@@ -21,7 +21,7 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plug
 
 ## 2. 운영 계정 생성
 
-root로 계속 작업하지 않고 `cmms` 계정으로 배포와 운영을 수행합니다. 개발/검증용 서버이므로 `cmms` 계정 비밀번호는 DB 비밀번호와 동일하게 둡니다.
+root로 계속 작업하지 않고 (예시)`cmms` 계정으로 배포와 운영을 수행합니다. 
 
 ```bash
 sudo adduser cmms
@@ -75,7 +75,7 @@ git clone https://github.com/jamsildongsoo/cmms-node.git /opt/cmms-node
 cd /opt/cmms-node
 ```
 
-이미 checkout 되어 있으면 최신 브랜치로 맞춘 뒤 진행합니다. 서버는 소스를 빌드하지 않고 `docker-compose.prod.yml`, `scripts/prod.sh`, `.env`만 사용해 운영서버와 같은 방식으로 이미지를 pull 합니다.
+이미 checkout 되어 있으면 최신 브랜치로 맞춘 뒤 진행합니다. 서버는 소스를 빌드하지 않고 `docker-compose.prod.yml`, `scripts/prod.sh`, `.env`만 사용해 운영서버와 같은 방식으로 이미지를 pull 합니다. 
 
 ## 5. 환경변수
 
@@ -157,12 +157,6 @@ curl -I http://127.0.0.1
 
 ```bash
 cd /opt/cmms-node
-git pull
-./scripts/prod.sh deploy
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
 ```
-
-## 주의
-
-- 기존 DB를 사용하므로 `npm run seed:system`과 `./scripts/prod.sh seed`는 실행하지 않습니다.
-- 기존 DB를 사용하므로 `DB_SYNCHRONIZE=true`로 바꾸지 않습니다.
-- 이 구성에서 Nginx는 `cmms-node-web` 컨테이너 안에서 실행되고 `/api` 요청을 `cmms-node-api`로 프록시합니다.

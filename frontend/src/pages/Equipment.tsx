@@ -4,7 +4,7 @@ import PrintHeader from '../components/PrintHeader';
 import { getApiErrorMessage } from '../utils/apiError';
 import { formatDateOnly } from '../utils/datetime';
 import { 
-  Wrench, Plus, Edit2, Trash2, Printer, Save, X, PlusCircle, MinusCircle, FileSpreadsheet, RefreshCw 
+  Wrench, Plus, Edit2, Trash2, Printer, Save, X, MinusCircle, FileSpreadsheet, RefreshCw 
 } from 'lucide-react';
 
 interface EquipmentType {
@@ -22,16 +22,6 @@ interface EquipmentType {
   remarks: string | null;
   lastCheckDate: string | null;
   nextCheckDate: string | null;
-}
-
-interface CheckItem {
-  itemNo?: number;
-  checkName: string;
-  checkMethod: string;
-  minValue: number | null;
-  maxValue: number | null;
-  baseValue: number | null;
-  unit: string;
 }
 
 interface CheckCycle {
@@ -64,9 +54,6 @@ export default function Equipment() {
   const [model, setModel] = useState('');
   const [serialNumber, setSerialNumber] = useState('');
   const [remarks, setRemarks] = useState('');
-
-  // Combined Check Items
-  const [checkItems, setCheckItems] = useState<CheckItem[]>([]);
 
   // Combined Check Cycles
   const [checkCycles, setCheckCycles] = useState<CheckCycle[]>([]);
@@ -107,7 +94,6 @@ export default function Equipment() {
     setModel('');
     setSerialNumber('');
     setRemarks('');
-    setCheckItems([]);
     setCheckCycles([]);
     setIsFormOpen(true);
   };
@@ -131,7 +117,6 @@ export default function Equipment() {
       setModel(targetEq.model || '');
       setSerialNumber(targetEq.serialNumber || '');
       setRemarks(targetEq.remarks || '');
-      setCheckItems(data.checkItems || []);
       setCheckCycles((data.checkCycles || []).map((c: any) => ({
         checkTypeCode: c.checkTypeCode,
         cycleVal: c.cycleVal,
@@ -155,23 +140,6 @@ export default function Equipment() {
     } catch (err) {
       setMessage({ type: 'error', text: getApiErrorMessage(err, '설비 삭제 실패.') });
     }
-  };
-
-  const handleAddCheckItem = () => {
-    setCheckItems([...checkItems, { checkName: '', checkMethod: '', minValue: null, maxValue: null, baseValue: null, unit: '' }]);
-  };
-
-  const handleRemoveCheckItem = (idx: number) => {
-    setCheckItems(checkItems.filter((_, i) => i !== idx));
-  };
-
-  const handleCheckItemChange = (idx: number, field: keyof CheckItem, val: any) => {
-    setCheckItems(checkItems.map((item, i) => {
-      if (i === idx) {
-        return { ...item, [field]: val === '' ? null : val };
-      }
-      return item;
-    }));
   };
 
   const handleAddCheckCycle = () => {
@@ -205,7 +173,6 @@ export default function Equipment() {
           spec: spec || null, model: model || null, serialNumber: serialNumber || null,
           remarks: remarks || null
         },
-        checkItems,
         checkCycles: checkCycles.map(c => ({
           checkTypeCode: c.checkTypeCode,
           cycleVal: c.cycleVal ? Number(c.cycleVal) : null,
@@ -562,115 +529,6 @@ export default function Equipment() {
                       />
                     </div>
                   </div>
-                </div>
-              </div>
-
-              {/* Check Items Section */}
-              <div>
-                <div className="flex justify-between items-center mb-4 border-l-2 border-blue-500 pl-2">
-                  <h3 className="text-xs font-bold text-blue-400 uppercase tracking-wider">설비 정기 점검 항목</h3>
-                  <button
-                    type="button"
-                    onClick={handleAddCheckItem}
-                    className="bg-slate-800 hover:bg-slate-700 text-blue-400 rounded-lg px-2.5 py-1 text-[11px] font-semibold flex items-center gap-1 transition-colors border-0 cursor-pointer"
-                  >
-                    <PlusCircle size={14} />
-                    점검항목 추가
-                  </button>
-                </div>
-
-                <div className="space-y-3">
-                  {checkItems.length === 0 ? (
-                    <div className="border border-dashed border-slate-800 p-6 text-center text-slate-500 text-xs rounded-xl">
-                      등록된 점검항목이 없습니다. 우측 상단의 추가 버튼을 눌러 점검 항목을 추가해 주세요.
-                    </div>
-                  ) : (
-                    checkItems.map((item, idx) => (
-                      <div key={idx} className="flex gap-3 bg-slate-950 border border-slate-800 rounded-xl p-4 text-xs relative items-center">
-                        <div className="flex-1 space-y-3">
-                          {/* 1번째 줄: 점검항목명, 점검방법 */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div>
-                              <label className="block text-slate-500 text-[10px] mb-1">점검항목명</label>
-                              <input
-                                type="text"
-                                required
-                                value={item.checkName}
-                                onChange={(e) => handleCheckItemChange(idx, 'checkName', e.target.value)}
-                                placeholder="예: 모터 내부 온도"
-                                className="w-full bg-slate-900 border border-slate-850 focus:border-blue-500 rounded-lg py-1.5 px-3 text-slate-200 outline-none"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-slate-500 text-[10px] mb-1">점검방법</label>
-                              <input
-                                type="text"
-                                value={item.checkMethod}
-                                onChange={(e) => handleCheckItemChange(idx, 'checkMethod', e.target.value)}
-                                placeholder="예: 열화상 카메라 측정"
-                                className="w-full bg-slate-900 border border-slate-850 focus:border-blue-500 rounded-lg py-1.5 px-3 text-slate-200 outline-none"
-                              />
-                            </div>
-                          </div>
-
-                          {/* 2번째 줄: 최소값, 최대값, 기준값, 단위 */}
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                            <div>
-                              <label className="block text-slate-500 text-[10px] mb-1">최소값</label>
-                              <input
-                                type="number"
-                                step="any"
-                                value={item.minValue === null ? '' : item.minValue}
-                                onChange={(e) => handleCheckItemChange(idx, 'minValue', e.target.value)}
-                                placeholder="Min"
-                                className="w-full bg-slate-900 border border-slate-850 focus:border-blue-500 rounded-lg py-1.5 px-3 text-slate-200 outline-none"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-slate-500 text-[10px] mb-1">최대값</label>
-                              <input
-                                type="number"
-                                step="any"
-                                value={item.maxValue === null ? '' : item.maxValue}
-                                onChange={(e) => handleCheckItemChange(idx, 'maxValue', e.target.value)}
-                                placeholder="Max"
-                                className="w-full bg-slate-900 border border-slate-850 focus:border-blue-500 rounded-lg py-1.5 px-3 text-slate-200 outline-none"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-slate-500 text-[10px] mb-1">기준값</label>
-                              <input
-                                type="number"
-                                step="any"
-                                value={item.baseValue === null ? '' : item.baseValue}
-                                onChange={(e) => handleCheckItemChange(idx, 'baseValue', e.target.value)}
-                                placeholder="Base"
-                                className="w-full bg-slate-900 border border-slate-850 focus:border-blue-500 rounded-lg py-1.5 px-3 text-slate-200 outline-none"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-slate-500 text-[10px] mb-1">단위</label>
-                              <input
-                                type="text"
-                                value={item.unit}
-                                onChange={(e) => handleCheckItemChange(idx, 'unit', e.target.value)}
-                                placeholder="예: ℃, A, V"
-                                className="w-full bg-slate-900 border border-slate-850 focus:border-blue-500 rounded-lg py-1.5 px-3 text-slate-200 outline-none"
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveCheckItem(idx)}
-                          className="p-2 bg-slate-900 hover:bg-slate-850 text-rose-500 rounded-lg transition-colors border-0 cursor-pointer self-center"
-                        >
-                          <MinusCircle size={16} />
-                        </button>
-                      </div>
-                    ))
-                  )}
                 </div>
               </div>
 

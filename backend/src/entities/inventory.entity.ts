@@ -12,8 +12,8 @@ export class Inventory extends BaseEntity {
   @Column({ length: 150 })
   name!: string;
 
-  @Column({ type: 'varchar',  name: 'item_type_code', length: 50, nullable: true })
-  itemTypeCode!: string | null;
+  @Column({ type: 'varchar',  name: 'inv_type_code', length: 50, nullable: true })
+  invTypeCode!: string | null;
 
   @Column({ type: 'varchar',  name: 'department_id', length: 50, nullable: true })
   departmentId!: string | null;

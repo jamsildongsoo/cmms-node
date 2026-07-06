@@ -332,7 +332,9 @@ export class ApprovalService {
     const pms = await qr.query(`SELECT * FROM pm_record WHERE company_id = $1 AND approval_id = $2`, [companyId, approvalId]);
     for (const pm of pms) {
       await qr.query(`UPDATE pm_record SET status = '${DocStatus.CONFIRMED}', updated_by = $3 WHERE company_id = $1 AND id = $2`, [companyId, pm.id, operator]);
-      await this.updateCheckCycleSchedule(qr, companyId, pm, operator);
+      if (pm.step_stage === 'R') {
+        await this.updateCheckCycleSchedule(qr, companyId, pm, operator);
+      }
     }
 
     await qr.query(`UPDATE work_order SET status = '${DocStatus.CONFIRMED}', updated_by = $3 WHERE company_id = $1 AND approval_id = $2`, [companyId, approvalId, operator]);
@@ -346,6 +348,24 @@ export class ApprovalService {
   }
 
   private async updateCheckCycleSchedule(qr: any, companyId: string, pm: any, operator: string) {
+    if (pm.ref_no) {
+      const confirmedResults = await qr.query(
+        `SELECT id FROM pm_record
+         WHERE company_id = $1
+           AND plant_id = $2
+           AND step_stage = 'R'
+           AND ref_module = 'PM'
+           AND ref_no = $3
+           AND status IN ($4, $5)
+           AND id <> $6
+           AND delete_yn = 'N'`,
+        [companyId, pm.plant_id, pm.ref_no, DocStatus.SELF_CONFIRMED, DocStatus.CONFIRMED, pm.id],
+      );
+      if (confirmedResults.length > 0) {
+        throw new BadRequestException('이미 확정된 예방점검 실적이 있는 계획입니다.');
+      }
+    }
+
     const cycles = await qr.query(
       `SELECT * FROM equipment_check_cycle 
        WHERE company_id = $1 AND plant_id = $2 AND equipment_id = $3 AND check_type_code = $4 AND delete_yn = 'N'`,

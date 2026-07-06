@@ -9,7 +9,7 @@ import {
 interface InventoryType {
   id: string;
   name: string;
-  itemTypeCode: string | null;
+  invTypeCode: string | null;
   departmentId: string | null;
   unit: string | null;
   makerName: string | null;
@@ -32,7 +32,7 @@ export default function Inventory() {
   // Inventory fields state
   const [id, setId] = useState('');
   const [name, setName] = useState('');
-  const [itemTypeCode, setItemTypeCode] = useState('ITEM_TYPE_01'); // Default
+  const [invTypeCode, setInvTypeCode] = useState('INV_TYPE_01');
   const [departmentId, setDepartmentId] = useState('');
   const [unit, setUnit] = useState('');
   const [makerName, setMakerName] = useState('');
@@ -67,7 +67,7 @@ export default function Inventory() {
     setEditingId(null);
     setId('');
     setName('');
-    setItemTypeCode('ITEM_TYPE_01');
+    setInvTypeCode('INV_TYPE_01');
     setDepartmentId(depts.length > 0 ? depts[0].id : '');
     setUnit('');
     setMakerName('');
@@ -85,7 +85,7 @@ export default function Inventory() {
     setEditingId(inv.id);
     setId(inv.id);
     setName(inv.name);
-    setItemTypeCode(inv.itemTypeCode || '');
+    setInvTypeCode(inv.invTypeCode || '');
     setDepartmentId(inv.departmentId || '');
     setUnit(inv.unit || '');
     setMakerName(inv.makerName || '');
@@ -118,7 +118,7 @@ export default function Inventory() {
     setMessage(null);
     try {
       const payload = {
-        id, name, itemTypeCode, departmentId: departmentId || null,
+        id, name, invTypeCode, departmentId: departmentId || null,
         unit: unit || null, makerName: makerName || null, spec: spec || null,
         model: model || null, serialNumber: serialNumber || null,
         safetyQty, reorderQty, leadTimeDays, remarks: remarks || null
@@ -309,13 +309,13 @@ export default function Inventory() {
                     <div>
                       <label className="block text-slate-400 mb-1.5">자재 구분타입</label>
                       <select
-                        value={itemTypeCode}
-                        onChange={(e) => setItemTypeCode(e.target.value)}
+                        value={invTypeCode}
+                        onChange={(e) => setInvTypeCode(e.target.value)}
                         className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none transition-colors"
                       >
-                        <option value="ITEM_TYPE_01">예비부품 (Spare Part)</option>
-                        <option value="ITEM_TYPE_02">소모성 공구 (Tool)</option>
-                        <option value="ITEM_TYPE_03">부자재 (Material)</option>
+                        <option value="INV_TYPE_01">예비부품 (Spare Part)</option>
+                        <option value="INV_TYPE_02">소모성 공구 (Tool)</option>
+                        <option value="INV_TYPE_03">부자재 (Material)</option>
                       </select>
                     </div>
                     <div>

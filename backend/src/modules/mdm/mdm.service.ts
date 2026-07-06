@@ -28,12 +28,12 @@ const DEFAULT_CODE_GROUPS = [
     ],
   },
   {
-    id: 'ITEM_TYPE',
+    id: 'INV_TYPE',
     name: '자재 유형',
     items: [
-      ['ITEM_TYPE_01', '예비부품'],
-      ['ITEM_TYPE_02', '소모성 공구'],
-      ['ITEM_TYPE_03', '부자재'],
+      ['INV_TYPE_01', '예비부품'],
+      ['INV_TYPE_02', '소모성 공구'],
+      ['INV_TYPE_03', '부자재'],
     ],
   },
   {
@@ -44,15 +44,6 @@ const DEFAULT_CODE_GROUPS = [
       ['PATROL', '순회점검'],
       ['REPLACE', '소모품교체'],
       ['LEGAL', '정기법정검사'],
-    ],
-  },
-  {
-    id: 'PM_JUDGE',
-    name: '예방점검 판정',
-    items: [
-      ['OK', '양호'],
-      ['NG', '불량'],
-      ['OTHER', '기타'],
     ],
   },
   {
@@ -113,14 +104,6 @@ const DEFAULT_CODE_GROUPS = [
       ['W', '주'],
       ['M', '월'],
       ['Y', '년'],
-    ],
-  },
-  {
-    id: 'MH_UNIT',
-    name: '공수 단위',
-    items: [
-      ['H', '시간'],
-      ['D', '일'],
     ],
   },
 ] as const;

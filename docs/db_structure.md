@@ -71,12 +71,12 @@
 | `code_item` | 코드그룹별 코드 아이템. |
 | `equipment` | 설비 마스터. |
 | `equipment_check_cycle` | 설비별 예방점검 주기. |
-| `equipment_check_item` | 설비별 점검 항목과 기준값. |
+| `equipment_check_item` | Legacy 설비별 점검 항목. 신규 예방점검 흐름에서는 사용하지 않습니다. |
 | `inventory` | 자재/품목 마스터. |
 
 주의사항:
 - 신규 회사 생성 시 기본 `code_group`/`code_item`이 자동 생성됩니다.
-- 기본 코드 예: `EQ_TYPE`, `ITEM_TYPE`, `PM_TYPE`, `PM_JUDGE`, `WO_TYPE`, `WP_TYPE`, `PR_TYPE`.
+- 기본 코드 예: `EQ_TYPE`, `INV_TYPE`, `PM_TYPE`, `WO_TYPE`, `WP_TYPE`, `PR_TYPE`.
 - 업무 코드 값은 참조 무결성을 위해 쓰기 시 유효성 검증이 필요합니다.
 
 ### 3.3 재고
@@ -98,14 +98,15 @@
 |--------|------|
 | `work_order` | 작업지시서 헤더. |
 | `work_order_item` | 작업지시별 작업/소요 품목 상세. |
-| `pm_record` | 예방점검 실적 헤더. |
-| `pm_record_item` | 예방점검 항목별 측정값. |
+| `pm_record` | 예방점검 계획/실적 헤더. `step_stage`로 계획(`P`)과 실적(`R`)을 구분하고, 실적은 `ref_module='PM'`, `ref_no=<계획번호>`로 계획을 참조합니다. |
+| `pm_record_item` | 예방점검 계획/실적 공용 항목. 계획은 기준값 중심, 실적은 계획 항목 복사 후 측정값을 저장합니다. |
 | `work_permit` | 안전작업허가서 및 LOTO 관련 체크 정보. |
 
 주의사항:
 - 보전 업무 테이블은 `company_id`와 `plant_id`를 함께 사용합니다.
 - 단일 플랜트 사용자는 `users.last_login_plant_id` 기준 플랜트만 접근해야 합니다.
 - 멀티 플랜트 사용자는 요청 플랜트 기준으로 접근합니다.
+- 예방점검 주기는 실적(`step_stage='R'`)이 확정될 때만 갱신합니다. 계획 확정은 주기를 갱신하지 않습니다.
 
 ### 3.5 구매
 
@@ -170,7 +171,8 @@ erDiagram
     equipment ||--o{ work_order : "정비 대상"
     work_order ||--o{ work_order_item : "작업 상세"
     equipment ||--o{ pm_record : "예방점검"
-    pm_record ||--o{ pm_record_item : "측정값"
+    pm_record ||--o{ pm_record : "계획-실적 참조"
+    pm_record ||--o{ pm_record_item : "계획/실적 항목"
     warehouse ||--o{ inventory_status : "현재고"
     inventory ||--o{ inventory_status : "품목 현재고"
     inventory ||--o{ inventory_history : "수불 이력"

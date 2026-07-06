@@ -32,9 +32,9 @@ export class PmController {
 
   @Get('records')
   @Permission(AppModule.PM, 'R')
-  async getPmRecords(): Promise<any[]> {
+  async getPmRecords(@Query('stepStage') stepStage?: string): Promise<any[]> {
     const { companyId, userId } = getTenantContext();
-    return this.pmService.getPmRecordsByCompany(companyId, userId);
+    return this.pmService.getPmRecordsByCompany(companyId, userId, stepStage);
   }
 
   @Get('records/details')

@@ -21,6 +21,9 @@ export class PmRecord extends BaseEntity {
   @Column({ name: 'check_type_code', length: 50 })
   checkTypeCode!: string;
 
+  @Column({ name: 'step_stage', length: 1, default: 'R' })
+  stepStage!: string;
+
   @Column({ name: 'work_date', type: 'date' })
   workDate!: Date | string;
 
@@ -44,6 +47,12 @@ export class PmRecord extends BaseEntity {
 
   @Column({ type: 'varchar',  name: 'approval_id', length: 50, nullable: true })
   approvalId!: string | null;
+
+  @Column({ type: 'varchar',  name: 'ref_no', length: 50, nullable: true })
+  refNo!: string | null;
+
+  @Column({ type: 'varchar',  name: 'ref_module', length: 50, nullable: true })
+  refModule!: string | null;
 
   @Column({ name: 'status', length: 1, default: 'T' })
   status!: string;

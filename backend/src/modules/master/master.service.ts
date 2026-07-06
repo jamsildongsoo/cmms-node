@@ -135,23 +135,7 @@ export class MasterService {
       savedEq = await this.eqRepo.save(eq);
     }
 
-    // 1. 점검 항목 업데이트 (기존 물리 삭제 후 재생성)
-    await this.checkItemRepo.delete({ companyId, plantId: activePlantId, equipmentId: reqEq.id });
-    if (request.checkItems) {
-      let seq = 1;
-      const newItems = request.checkItems.map(item =>
-        this.checkItemRepo.create({
-          ...item,
-          companyId,
-          plantId: activePlantId,
-          equipmentId: reqEq.id,
-          itemNo: seq++,
-        }),
-      );
-      await this.checkItemRepo.save(newItems);
-    }
-
-    // 2. 점검 주기 업데이트 (기존 논리 삭제 후 재생성)
+    // 점검 항목은 예방점검 계획(PM)에서 관리한다. 설비 마스터는 점검주기만 갱신한다.
     const oldCycles = await this.checkCycleRepo.find({
       where: { companyId, plantId: activePlantId, equipmentId: reqEq.id, deleteYn: 'N' },
     });
@@ -260,7 +244,7 @@ export class MasterService {
     csv += '자재코드,자재명,자재타입,관리부서,단위,제조사,스펙,모델,일련번호,안전재고,재주문점,리드타임(일),비고\n';
 
     for (const inv of list) {
-      csv += `${this.escapeCsv(inv.id)},${this.escapeCsv(inv.name)},${this.escapeCsv(inv.itemTypeCode)},${this.escapeCsv(inv.departmentId)},${this.escapeCsv(inv.unit)},${this.escapeCsv(inv.makerName)},${this.escapeCsv(inv.spec)},${this.escapeCsv(inv.model)},${this.escapeCsv(inv.serialNumber)},${inv.safetyQty},${inv.reorderQty},${inv.leadTimeDays},${this.escapeCsv(inv.remarks)}\n`;
+      csv += `${this.escapeCsv(inv.id)},${this.escapeCsv(inv.name)},${this.escapeCsv(inv.invTypeCode)},${this.escapeCsv(inv.departmentId)},${this.escapeCsv(inv.unit)},${this.escapeCsv(inv.makerName)},${this.escapeCsv(inv.spec)},${this.escapeCsv(inv.model)},${this.escapeCsv(inv.serialNumber)},${inv.safetyQty},${inv.reorderQty},${inv.leadTimeDays},${this.escapeCsv(inv.remarks)}\n`;
     }
     return csv;
   }
