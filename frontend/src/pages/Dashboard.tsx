@@ -7,7 +7,7 @@ import MyPage from './MyPage';
 import MdmLayout from './MdmLayout';
 import Equipment from './Equipment';
 import Inventory from './Inventory';
-import PreventiveMaintenance from './PreventiveMaintenance';
+import PmRecord from './PmRecord';
 import WorkOrder from './WorkOrder';
 import WorkPermit from './WorkPermit';
 import InventoryTransaction from './InventoryTransaction';
@@ -66,7 +66,7 @@ export default function Dashboard() {
       case 'inventory':
         return <Inventory />;
       case 'pm':
-        return <PreventiveMaintenance />;
+        return <PmRecord />;
       case 'wo':
         return <WorkOrder />;
       case 'wp':

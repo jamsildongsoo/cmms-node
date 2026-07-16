@@ -80,17 +80,21 @@ export class ApprovalService {
         if (existing[0].status !== DocStatus.TEMP) {
           throw new BadRequestException('임시저장 상태에서만 재상신할 수 있습니다.');
         }
-        await qr.query(
-          `DELETE FROM approval_step WHERE company_id = $1 AND approval_id = $2`,
-          [companyId, appNo],
-        );
+        // 결재선 교체: 요청에 steps가 있을 때만 기존 결재자(step_no>0)를 교체.
+        // 기안(step_no=0)은 항상 보존된다.
+        if (steps && steps.length > 0) {
+          await qr.query(
+            `DELETE FROM approval_step WHERE company_id = $1 AND approval_id = $2 AND step_no > 0`,
+            [companyId, appNo],
+          );
+        }
       }
 
       const status = hasApprover ? DocStatus.IN_PROGRESS : DocStatus.TEMP;
 
       if (isNew) {
         await qr.query(
-          `INSERT INTO approval 
+          `INSERT INTO approval
             (company_id, id, title, content, drafter_id, file_group_id, status, created_by, updated_by, delete_yn)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, 'N')`,
           [
@@ -98,9 +102,16 @@ export class ApprovalService {
             approval.fileGroupId ?? null, status, operator
           ],
         );
+        // 신규 문서: 기안 step 생성
+        await qr.query(
+          `INSERT INTO approval_step
+            (company_id, approval_id, step_no, approver_id, approval_type, approval_result, action_at, comments)
+           VALUES ($1, $2, 0, $3, '${ApprovalStepType.DRAFT}', '${ApprovalResult.APPROVED}', NOW(), '상신함')`,
+          [companyId, appNo, operator],
+        );
       } else {
         await qr.query(
-          `UPDATE approval 
+          `UPDATE approval
            SET title = $3, content = $4, file_group_id = $5, status = $6, updated_by = $7
            WHERE company_id = $1 AND id = $2`,
           [
@@ -110,13 +121,7 @@ export class ApprovalService {
         );
       }
 
-      await qr.query(
-        `INSERT INTO approval_step 
-          (company_id, approval_id, step_no, approver_id, approval_type, approval_result, action_at, comments)
-         VALUES ($1, $2, 0, $3, '${ApprovalStepType.DRAFT}', '${ApprovalResult.APPROVED}', NOW(), '상신함')`,
-        [companyId, appNo, operator],
-      );
-
+      // 결재자 steps 삽입: 신규/재상신 공용. 재상신 시에는 이미 step_no>0이 삭제되었으므로 중복 없음.
       if (steps && steps.length > 0) {
         for (let i = 0; i < steps.length; i++) {
           const step = steps[i];

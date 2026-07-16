@@ -41,4 +41,7 @@ export class InventoryHistory extends BaseEntity {
 
   @Column({ type: 'varchar',  name: 'doc_no', length: 50, nullable: true })
   docNo!: string | null;
+
+  @Column({ type: 'varchar',  name: 'ref_line_no', length: 20, nullable: true })
+  refLineNo!: string | null;
 }

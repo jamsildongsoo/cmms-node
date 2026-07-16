@@ -12,6 +12,9 @@ export class PmRecord extends BaseEntity {
   @PrimaryColumn({ name: 'id', length: 50 })
   id!: string;
 
+  @Column({ name: 'title', length: 150, nullable: true })
+  title!: string | null;
+
   @Column({ name: 'equipment_id', length: 50 })
   equipmentId!: string;
 
@@ -22,7 +25,16 @@ export class PmRecord extends BaseEntity {
   checkTypeCode!: string;
 
   @Column({ name: 'step_stage', length: 1, default: 'R' })
-  stepStage!: string;
+  stepStage!: string; // P: 계획, R: 실적
+
+  @Column({ name: 'cycle_from', type: 'date', nullable: true })
+  cycleFrom!: Date | string | null;
+
+  @Column({ name: 'cycle_end', type: 'date', nullable: true })
+  cycleEnd!: Date | string | null;
+
+  @Column({ name: 'close_yn', type: 'char', length: 1, default: 'N' })
+  closeYn!: string;
 
   @Column({ name: 'work_date', type: 'date' })
   workDate!: Date | string;

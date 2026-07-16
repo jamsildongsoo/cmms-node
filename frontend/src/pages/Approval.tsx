@@ -10,8 +10,8 @@ import {
   getCommonStatusClass as getStatusClass,
   getStepTypeLabel,
 } from '../constants/status';
-import { 
-  FileSignature, Check, X, Printer, ArrowRight, Plus 
+import {
+  FileSignature, Check, X, Printer, ArrowRight, Plus, Pencil
 } from 'lucide-react';
 
 interface ApprovalModel {
@@ -61,6 +61,7 @@ export default function Approval() {
   const [selectedLine, setSelectedLine] = useState<{ approverId: string; type: string }[]>([]);
   const [newFileGroupId, setNewFileGroupId] = useState<number | null>(null);
   const [fileUploading, setFileUploading] = useState(false);
+  const [editingApprovalId, setEditingApprovalId] = useState<string | null>(null);
 
   const fetchData = async () => {
     try {
@@ -118,7 +119,31 @@ export default function Approval() {
     setNewRefModule('');
     setSelectedLine([]);
     setNewFileGroupId(null);
+    setEditingApprovalId(null);
     setIsDraftModalOpen(true);
+  };
+
+  const handleEditDraft = async (app: ApprovalModel) => {
+    setIsLoading(true);
+    try {
+      const res = await axiosInstance.get(`/approval/${app.id}/details`);
+      setNewTitle(res.data.approval.title);
+      setNewContent(res.data.approval.content || '');
+      setNewRefNo(res.data.approval.refNo || '');
+      setNewRefModule(res.data.approval.refModule || '');
+      setNewFileGroupId(res.data.approval.fileGroupId);
+      // 기존 결재선 로드 (step_no > 0만, 기안 제외)
+      const existingSteps = (res.data.steps || [])
+        .filter((s: any) => s.stepNo > 0)
+        .map((s: any) => ({ approverId: s.approverId, type: s.approvalType }));
+      setSelectedLine(existingSteps);
+      setEditingApprovalId(app.id);
+      setIsDraftModalOpen(true);
+    } catch (err) {
+      alert(getApiErrorMessage(err, '결재 문서 정보를 불러오는데 실패했습니다.'));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleAddLineApprover = (userId: string, type: 'A' | 'G' | 'R') => {
@@ -148,6 +173,7 @@ export default function Approval() {
     try {
       const payload = {
         approval: {
+          id: editingApprovalId || null,
           title: newTitle,
           content: newContent,
           fileGroupId: newFileGroupId
@@ -155,14 +181,13 @@ export default function Approval() {
         steps: selectedLine.map(l => ({
           approverId: l.approverId,
           approvalType: l.type,
-          approvalResult: 'T'
         })),
         refNo: newRefNo || null,
         refModule: newRefModule || null
       };
 
       await axiosInstance.post('/approval/submit', payload);
-      alert('결재 문서가 상신되었습니다.');
+      alert(editingApprovalId ? '결재 문서가 수정되었습니다.' : '결재 문서가 상신되었습니다.');
       setIsDraftModalOpen(false);
       fetchData();
     } catch (err) {
@@ -301,13 +326,24 @@ export default function Approval() {
                       </span>
                     </td>
                     <td className="p-3 text-right">
-                      <button
-                        onClick={() => handleOpenDetail(app)}
-                        className="bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 rounded-lg px-3 py-1.5 font-semibold text-[11px] border border-blue-500/20 hover:border-blue-500/40 flex items-center gap-1 ml-auto cursor-pointer"
-                      >
-                        <span>결재 보기</span>
-                        <ArrowRight size={12} />
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        {app.status === 'T' && app.drafterId === user?.id && (
+                          <button
+                            onClick={() => handleEditDraft(app)}
+                            className="bg-amber-600/10 hover:bg-amber-600/20 text-amber-400 rounded-lg px-3 py-1.5 font-semibold text-[11px] border border-amber-500/20 hover:border-amber-500/40 flex items-center gap-1 cursor-pointer"
+                          >
+                            <Pencil size={12} />
+                            <span>수정</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleOpenDetail(app)}
+                          className="bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 rounded-lg px-3 py-1.5 font-semibold text-[11px] border border-blue-500/20 hover:border-blue-500/40 flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>결재 보기</span>
+                          <ArrowRight size={12} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -509,7 +545,9 @@ export default function Approval() {
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl">
             <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0">
-              <h2 className="text-lg font-bold text-slate-200">일반 결재 기안서 상신</h2>
+              <h2 className="text-lg font-bold text-slate-200">
+                {editingApprovalId ? '결재 기안서 수정' : '일반 결재 기안서 상신'}
+              </h2>
               <button onClick={() => setIsDraftModalOpen(false)} className="text-slate-500 hover:text-slate-300 border-0 cursor-pointer bg-transparent"><X size={20} /></button>
             </div>
 
@@ -637,7 +675,7 @@ export default function Approval() {
 
             <div className="p-6 border-t border-slate-800 flex justify-end gap-2 shrink-0">
               <button onClick={() => setIsDraftModalOpen(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg py-2 px-4 border-0 cursor-pointer">취소</button>
-              <button onClick={handleSaveDraft} disabled={isLoading || fileUploading} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-5 border-0 cursor-pointer disabled:opacity-50">{fileUploading ? '업로드 중…' : '기안 상신'}</button>
+              <button onClick={handleSaveDraft} disabled={isLoading || fileUploading} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-5 border-0 cursor-pointer disabled:opacity-50">{fileUploading ? '업로드 중…' : (editingApprovalId ? '수정 상신' : '기안 상신')}</button>
             </div>
           </div>
         </div>

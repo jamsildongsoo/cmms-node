@@ -15,6 +15,7 @@ export enum DocStatus {
   SELF_CONFIRMED = 'S', // 직접확정(권한자, 결재 우회)
   REJECTED = 'R', // 반려
   CANCELED = 'X', // 취소
+  EXPIRED = 'E', // 기간 만료 (예방점검 계획 전용)
 }
 
 export const DocStatusLabel: Record<DocStatus, string> = {
@@ -24,6 +25,7 @@ export const DocStatusLabel: Record<DocStatus, string> = {
   [DocStatus.SELF_CONFIRMED]: '직접확정',
   [DocStatus.REJECTED]: '반려',
   [DocStatus.CANCELED]: '취소',
+  [DocStatus.EXPIRED]: '만료',
 };
 
 /**

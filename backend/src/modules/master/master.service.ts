@@ -2,7 +2,6 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Equipment } from '../../entities/equipment.entity';
-import { EquipmentCheckItem } from '../../entities/equipment-check-item.entity';
 import { EquipmentCheckCycle } from '../../entities/equipment-check-cycle.entity';
 import { Inventory } from '../../entities/inventory.entity';
 import { resolveActivePlantId } from '../../common/utils/plant.util';
@@ -10,7 +9,6 @@ import { toDateOnly } from '../../common/utils/date-only.util';
 
 export interface EquipmentSaveRequest {
   equipment: Partial<Equipment>;
-  checkItems?: Partial<EquipmentCheckItem>[];
   checkCycles?: Partial<EquipmentCheckCycle>[];
 }
 
@@ -19,7 +17,6 @@ export class MasterService {
   constructor(
     private readonly dataSource: DataSource,
     @InjectRepository(Equipment) private readonly eqRepo: Repository<Equipment>,
-    @InjectRepository(EquipmentCheckItem) private readonly checkItemRepo: Repository<EquipmentCheckItem>,
     @InjectRepository(EquipmentCheckCycle) private readonly checkCycleRepo: Repository<EquipmentCheckCycle>,
     @InjectRepository(Inventory) private readonly invRepo: Repository<Inventory>,
   ) {}
@@ -83,18 +80,12 @@ export class MasterService {
     const eq = await this.eqRepo.findOne({ where: { companyId, plantId: activePlantId, id, deleteYn: 'N' } });
     if (!eq) throw new BadRequestException('설비를 찾을 수 없습니다.');
 
-    const checkItems = await this.checkItemRepo.find({
-      where: { companyId, plantId: activePlantId, equipmentId: id },
-      order: { itemNo: 'ASC' },
-    });
-
     const checkCycles = await this.checkCycleRepo.find({
       where: { companyId, plantId: activePlantId, equipmentId: id, deleteYn: 'N' },
     });
 
     return {
       equipment: eq,
-      checkItems,
       checkCycles,
     };
   }

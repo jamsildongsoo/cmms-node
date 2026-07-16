@@ -3,7 +3,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { MasterController } from './master.controller';
 import { MasterService } from './master.service';
 import { Equipment } from '../../entities/equipment.entity';
-import { EquipmentCheckItem } from '../../entities/equipment-check-item.entity';
 import { EquipmentCheckCycle } from '../../entities/equipment-check-cycle.entity';
 import { Inventory } from '../../entities/inventory.entity';
 
@@ -11,7 +10,6 @@ import { Inventory } from '../../entities/inventory.entity';
   imports: [
     TypeOrmModule.forFeature([
       Equipment,
-      EquipmentCheckItem,
       EquipmentCheckCycle,
       Inventory,
     ]),

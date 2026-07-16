@@ -71,7 +71,7 @@
 | `code_item` | 코드그룹별 코드 아이템. |
 | `equipment` | 설비 마스터. |
 | `equipment_check_cycle` | 설비별 예방점검 주기. |
-| `equipment_check_item` | Legacy 설비별 점검 항목. 신규 예방점검 흐름에서는 사용하지 않습니다. |
+| `pm_check_template` | 점검 항목 템플릿 (점검유형별). |
 | `inventory` | 자재/품목 마스터. |
 
 주의사항:
@@ -98,8 +98,9 @@
 |--------|------|
 | `work_order` | 작업지시서 헤더. |
 | `work_order_item` | 작업지시별 작업/소요 품목 상세. |
-| `pm_record` | 예방점검 계획/실적 헤더. `step_stage`로 계획(`P`)과 실적(`R`)을 구분하고, 실적은 `ref_module='PM'`, `ref_no=<계획번호>`로 계획을 참조합니다. |
-| `pm_record_item` | 예방점검 계획/실적 공용 항목. 계획은 기준값 중심, 실적은 계획 항목 복사 후 측정값을 저장합니다. |
+| `pm_record` | 예방점검 계획/실적 헤더. `step_stage`로 계획(`P`)과 실적(`R`)을 구분. 계획 전용 필드: `title`, `cycle_from`, `cycle_end`, `close_yn`. 실적은 `ref_module='PM'`, `ref_no=<계획번호>`로 계획 참조. |
+| `pm_record_item` | 예방점검 계획/실적 공용 항목. 계획은 기준값(min/max/base), 실적은 측정값(check_value) 저장. |
+| `pm_check_template` | 점검 항목 템플릿. 점검유형별 기본 항목 정의. 계획 생성 시 템플릿에서 불러오기 가능. |
 | `work_permit` | 안전작업허가서 및 LOTO 관련 체크 정보. |
 
 주의사항:

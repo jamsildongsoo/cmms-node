@@ -25,6 +25,7 @@ export interface TxItem {
   docNo?: string;
   refNo?: string;
   refModule?: string;
+  refLineNo?: string;         // 연계 문서 라인 번호 (PUR 등)
 }
 
 export interface InventoryTxRequest {
@@ -161,11 +162,11 @@ export class InventoryTxService {
       `INSERT INTO inventory_history
          (company_id, warehouse_id, inventory_id, tx_type_code,
           qty, unit_price, amount, tx_date, user_id, doc_no,
-          ref_no, ref_module, delete_yn, created_by, updated_by)
-       VALUES ($1,$2,$3,'${TxType.IN}',$4,$5,$6,$7,$8,$9,$10,$11,'N',$8,$8)`,
+          ref_no, ref_module, ref_line_no, delete_yn, created_by, updated_by)
+       VALUES ($1,$2,$3,'${TxType.IN}',$4,$5,$6,$7,$8,$9,$10,$11,$12,'N',$8,$8)`,
       [companyId, item.warehouseId, item.inventoryId,
        qty.toFixed(4), price.toFixed(4), amount.toFixed(4),
-       txDate, operator, item.docNo, item.refNo ?? null, item.refModule ?? null],
+       txDate, operator, item.docNo, item.refNo ?? null, item.refModule ?? null, item.refLineNo ?? null],
     );
   }
 
@@ -213,11 +214,11 @@ export class InventoryTxService {
       `INSERT INTO inventory_history
          (company_id, warehouse_id, inventory_id, tx_type_code,
           qty, unit_price, amount, tx_date, user_id, doc_no,
-          ref_no, ref_module, delete_yn, created_by, updated_by)
-       VALUES ($1,$2,$3,'${TxType.OUT}',$4,$5,$6,$7,$8,$9,$10,$11,'N',$8,$8)`,
+          ref_no, ref_module, ref_line_no, delete_yn, created_by, updated_by)
+       VALUES ($1,$2,$3,'${TxType.OUT}',$4,$5,$6,$7,$8,$9,$10,$11,$12,'N',$8,$8)`,
       [companyId, item.warehouseId, item.inventoryId,
        qty.negated().toFixed(4), avgPrice.toFixed(4), amount.negated().toFixed(4),
-       txDate, operator, item.docNo, item.refNo ?? null, item.refModule ?? null],
+       txDate, operator, item.docNo, item.refNo ?? null, item.refModule ?? null, item.refLineNo ?? null],
     );
   }
 
@@ -304,11 +305,11 @@ export class InventoryTxService {
       `INSERT INTO inventory_history
          (company_id, warehouse_id, inventory_id, tx_type_code,
           qty, unit_price, amount, tx_date, user_id, doc_no,
-          delete_yn, created_by, updated_by)
+          ref_line_no, delete_yn, created_by, updated_by)
        VALUES ($1,$2,$3,'${TxType.ADJ}',$4,$5,$6,$7,$8,$9,'N',$8,$8)`,
       [companyId, item.warehouseId, item.inventoryId,
        adjQty.toFixed(4), new Decimal(item.unitPrice ?? '0').toFixed(4), adjAmount.toFixed(4),
-       txDate, operator, item.docNo],
+       txDate, operator, item.docNo, item.refLineNo ?? null],
     );
   }
 

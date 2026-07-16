@@ -30,6 +30,7 @@ interface InventoryHistoryModel {
   refNo: string | null;
   refModule: string | null;
   docNo: string | null;  // STK 전표번호
+  refLineNo: string | null;  // 연계 문서 라인 번호 (PUR 등)
 }
 
 interface TxGridItem {
@@ -225,7 +226,7 @@ export default function InventoryTransaction() {
 
   const exportHistoryCsv = () => {
     if (historyList.length === 0) return;
-    const headers = ['이력번호', '창고', '자재코드', '자재명', '구분', '수량', '단가', '금액', '처리일자', '담당자', '참조번호'];
+    const headers = ['이력번호', '창고', '자재코드', '자재명', '구분', '수량', '단가', '금액', '처리일자', '담당자', '참조번호', '라인'];
     const rows = historyList.map(h => {
       const inv = inventories.find(i => i.id === h.inventoryId);
       const wh = warehouses.find(w => w.id === h.warehouseId);
@@ -240,7 +241,8 @@ export default function InventoryTransaction() {
         h.amount,
         h.txDate,
         h.userId,
-        h.refNo || '-'
+        h.refNo || '-',
+        h.refLineNo || '-',
       ];
     });
 
@@ -399,12 +401,13 @@ export default function InventoryTransaction() {
                   <th className="p-3 font-semibold">처리일자</th>
                   <th className="p-3 font-semibold">담당자</th>
                   <th className="p-3 font-semibold">연계참조번호</th>
+                  <th className="p-3 font-semibold w-16 text-center">라인</th>
                   <th className="p-3 font-semibold text-right print:hidden">전표</th>
                 </tr>
               </thead>
               <tbody>
                 {historyList.length === 0 ? (
-                  <tr><td colSpan={12} className="p-8 text-center text-slate-600 print:text-slate-400">재고 거래 이력이 없습니다.</td></tr>
+                  <tr><td colSpan={13} className="p-8 text-center text-slate-600 print:text-slate-400">재고 거래 이력이 없습니다.</td></tr>
                 ) : (
                   historyList.map((h) => {
                     const inv = inventories.find(i => i.id === h.inventoryId);
@@ -422,6 +425,7 @@ export default function InventoryTransaction() {
                         <td className="p-3 font-mono text-slate-400">{h.txDate}</td>
                         <td className="p-3">{h.userId}</td>
                         <td className="p-3 font-mono text-slate-500">{h.refNo || '-'}</td>
+                        <td className="p-3 text-center font-mono text-xs text-slate-500">{h.refLineNo || '-'}</td>
                         <td className="p-3 text-right print:hidden">
                           <button
                             onClick={() => handleOpenSlip(h)}

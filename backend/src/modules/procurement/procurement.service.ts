@@ -91,14 +91,15 @@ export class ProcurementService {
     }
 
     const items = await this.dataSource.query(
-      `SELECT 
+      `SELECT
         line_no as "lineNo",
         inventory_id as "inventoryId",
         qty,
         unit,
+        received_qty as "receivedQty",
         remarks
       FROM purchase_request_item 
-      WHERE company_id = $1 AND request_id = $2 
+      WHERE company_id = $1 AND request_id = $2
       ORDER BY line_no ASC`,
       [companyId, id],
     );
@@ -146,10 +147,10 @@ export class ProcurementService {
         await qr.query(
           `INSERT INTO purchase_request 
             (company_id, id, plant_id, warehouse_id, requester_id, request_date, request_type, vendor_id, status, proc_status, remarks, created_by, updated_by, delete_yn)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '${DocStatus.TEMP}', NULL, $9, $10, $10, 'N')`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, $10, $11, $11, 'N')`,
           [
             companyId, prNo, targetPlantId, header.warehouseId, operator, requestDateStr,
-            header.requestType ?? null, header.vendorId ?? null, header.remarks ?? null, operator
+            header.requestType ?? null, header.vendorId ?? null, DocStatus.TEMP, header.remarks ?? null, operator
           ],
         );
       } else {
@@ -165,10 +166,10 @@ export class ProcurementService {
         }
 
         await qr.query(
-          `UPDATE purchase_request 
-           SET warehouse_id = $3, request_type = $4, remarks = $5, updated_by = $6
+          `UPDATE purchase_request
+           SET warehouse_id = $3, vendor_id = $4, request_type = $5, remarks = $6, updated_by = $7
            WHERE company_id = $1 AND id = $2`,
-          [companyId, prNo, header.warehouseId, header.requestType ?? null, header.remarks ?? null, operator],
+          [companyId, prNo, header.warehouseId, header.vendorId ?? null, header.requestType ?? null, header.remarks ?? null, operator],
         );
 
         await qr.query(
@@ -191,8 +192,8 @@ export class ProcurementService {
 
       if (confirm) {
         await qr.query(
-          `UPDATE purchase_request SET status = '${DocStatus.SELF_CONFIRMED}', updated_by = $3 WHERE company_id = $1 AND id = $2`,
-          [companyId, prNo, operator],
+          `UPDATE purchase_request SET status = $3, updated_by = $4 WHERE company_id = $1 AND id = $2`,
+          [companyId, prNo, DocStatus.SELF_CONFIRMED, operator],
         );
       }
 
@@ -217,9 +218,17 @@ export class ProcurementService {
       throw new BadRequestException('저장 상태(T)에서만 확정할 수 있습니다.');
     }
 
+    const itemCount = await this.dataSource.query(
+      `SELECT COUNT(*) as cnt FROM purchase_request_item WHERE company_id = $1 AND request_id = $2`,
+      [companyId, requestId],
+    );
+    if (Number(itemCount[0].cnt) === 0) {
+      throw new BadRequestException('자재 라인이 없는 구매요청은 확정할 수 없습니다.');
+    }
+
     await this.dataSource.query(
-      `UPDATE purchase_request SET status = '${DocStatus.SELF_CONFIRMED}', updated_by = $3 WHERE company_id = $1 AND id = $2`,
-      [companyId, requestId, operator],
+      `UPDATE purchase_request SET status = $3, updated_by = $4 WHERE company_id = $1 AND id = $2`,
+      [companyId, requestId, DocStatus.SELF_CONFIRMED, operator],
     );
 
     const saved = await this.dataSource.query(
@@ -239,10 +248,10 @@ export class ProcurementService {
       : null;
 
     await this.dataSource.query(
-      `UPDATE purchase_request 
-       SET vendor_id = $3, order_date = $4, eta_date = $5, proc_status = '${ProcStatus.ORDERED}', updated_by = $6
+      `UPDATE purchase_request
+       SET vendor_id = $3, order_date = $4, eta_date = $5, proc_status = $6, updated_by = $7
        WHERE company_id = $1 AND id = $2`,
-      [companyId, req.requestId, req.vendorId, orderDateStr, etaDateStr, operator],
+      [companyId, req.requestId, req.vendorId, orderDateStr, etaDateStr, ProcStatus.ORDERED, operator],
     );
 
     const saved = await this.dataSource.query(
@@ -259,10 +268,10 @@ export class ProcurementService {
       : new Date().toISOString().split('T')[0];
 
     await this.dataSource.query(
-      `UPDATE purchase_request 
-       SET ship_start_date = $3, proc_status = '${ProcStatus.SHIPPING}', updated_by = $4
+      `UPDATE purchase_request
+       SET ship_start_date = $3, proc_status = $4, updated_by = $5
        WHERE company_id = $1 AND id = $2`,
-      [companyId, req.requestId, shipStartDateStr, operator],
+      [companyId, req.requestId, shipStartDateStr, ProcStatus.SHIPPING, operator],
     );
 
     const saved = await this.dataSource.query(
@@ -279,10 +288,10 @@ export class ProcurementService {
     }
 
     await this.dataSource.query(
-      `UPDATE purchase_request 
-       SET proc_status = '${ProcStatus.CLOSED}', updated_by = $3
+      `UPDATE purchase_request
+       SET proc_status = $3, updated_by = $4
        WHERE company_id = $1 AND id = $2`,
-      [companyId, requestId, operator],
+      [companyId, requestId, ProcStatus.CLOSED, operator],
     );
 
     const saved = await this.dataSource.query(
@@ -294,6 +303,9 @@ export class ProcurementService {
 
   async receive(companyId: string, req: ReceiveRequest, operator: string): Promise<any> {
     const pr = await this.mustGetConfirmed(companyId, req.requestId);
+    if (pr.proc_status !== ProcStatus.ORDERED && pr.proc_status !== ProcStatus.SHIPPING && pr.proc_status !== ProcStatus.RECEIVED) {
+      throw new BadRequestException(`입고는 발주(O), 배송중(D), 입고(I) 상태에서만 가능합니다. 현재: ${pr.proc_status ?? 'null'}`);
+    }
     if (pr.proc_status === ProcStatus.CLOSED) {
       throw new BadRequestException('종료된 요청에는 입고할 수 없습니다.');
     }
@@ -317,61 +329,69 @@ export class ProcurementService {
       : new Date().toISOString().split('T')[0];
 
     const txItems: any[] = [];
-    const qr = this.dataSource.createQueryRunner();
-    await qr.connect();
-    await qr.startTransaction();
+    for (const line of req.lines) {
+      const prItem = prItems.find((it: any) => it.line_no === line.lineNo);
+      if (!prItem) {
+        throw new BadRequestException(`PR 라인 ${line.lineNo}을 찾을 수 없습니다.`);
+      }
 
-    try {
-      for (const line of req.lines) {
-        const prItem = prItems.find((it: any) => it.line_no === line.lineNo);
-        if (!prItem) {
-          throw new BadRequestException(`PR 라인 ${line.lineNo}을 찾을 수 없습니다.`);
-        }
+      const inputDecimal = new Decimal(line.qty);
+      const currentReceived = new Decimal(prItem.received_qty);
+      const orderedQty = new Decimal(prItem.qty);
+      const newReceivedQty = currentReceived.add(inputDecimal);
 
-        const qtyDecimal = new Decimal(line.qty);
-        const unitPriceDecimal = new Decimal(line.unitPrice);
-
-        txItems.push({
-          txTypeCode: TxType.IN,
-          warehouseId: pr.warehouse_id,
-          inventoryId: prItem.inventory_id,
-          qty: qtyDecimal.toString(),
-          unitPrice: unitPriceDecimal.toString(),
-          txDate: new Date(txDateStr),
-          docNo,
-          refNo: pr.id,
-          refModule: AppModule.PUR,
-        });
-
-        const newReceivedQty = new Decimal(prItem.received_qty).add(qtyDecimal);
-        await qr.query(
-          `UPDATE purchase_request_item SET received_qty = $4 
-           WHERE company_id = $1 AND request_id = $2 AND line_no = $3`,
-          [companyId, pr.id, line.lineNo, newReceivedQty.toFixed(4)],
+      if (newReceivedQty.gt(orderedQty)) {
+        throw new BadRequestException(
+          `입고 수량을 초과합니다. 라인 ${line.lineNo}: 주문=${orderedQty.toFixed(4)}, ` +
+          `기입고=${currentReceived.toFixed(4)}, 요청=${inputDecimal.toFixed(4)}, ` +
+          `잔여=${orderedQty.sub(currentReceived).toFixed(4)}`
         );
       }
 
-      await this.inventoryTxService.processTransactions({ items: txItems });
+      const unitPriceDecimal = line.unitPrice != null
+        ? new Decimal(line.unitPrice)
+        : new Decimal(0);
 
-      const finalProcStatus = req.close ? ProcStatus.CLOSED : ProcStatus.RECEIVED;
-      await qr.query(
-        `UPDATE purchase_request SET proc_status = $3, updated_by = $4 WHERE company_id = $1 AND id = $2`,
-        [companyId, pr.id, finalProcStatus, operator],
-      );
-
-      await qr.commitTransaction();
-
-      const saved = await this.dataSource.query(
-        `SELECT * FROM purchase_request WHERE company_id = $1 AND id = $2`,
-        [companyId, pr.id],
-      );
-      return saved[0];
-    } catch (err) {
-      await qr.rollbackTransaction();
-      throw err;
-    } finally {
-      await qr.release();
+      txItems.push({
+        txTypeCode: TxType.IN,
+        warehouseId: pr.warehouse_id,
+        inventoryId: prItem.inventory_id,
+        qty: inputDecimal.toString(),
+        unitPrice: unitPriceDecimal.toString(),
+        txDate: new Date(txDateStr),
+        docNo,
+        refNo: pr.id,
+        refModule: AppModule.PUR,
+        refLineNo: String(line.lineNo),
+      });
     }
+
+    // 재고 처리 먼저 (자체 트랜잭션) — 성공 시에만 PR 문서 업데이트
+    await this.inventoryTxService.processTransactions({ items: txItems });
+
+    for (const line of req.lines) {
+      const prItem = prItems.find((it: any) => it.line_no === line.lineNo);
+      const inputDecimal = new Decimal(line.qty);
+      const newReceivedQty = new Decimal(prItem.received_qty).add(inputDecimal);
+
+      await this.dataSource.query(
+        `UPDATE purchase_request_item SET received_qty = $4
+         WHERE company_id = $1 AND request_id = $2 AND line_no = $3`,
+        [companyId, pr.id, line.lineNo, newReceivedQty.toFixed(4)],
+      );
+    }
+
+    const finalProcStatus = req.close ? ProcStatus.CLOSED : ProcStatus.RECEIVED;
+    await this.dataSource.query(
+      `UPDATE purchase_request SET proc_status = $3, updated_by = $4 WHERE company_id = $1 AND id = $2`,
+      [companyId, pr.id, finalProcStatus, operator],
+    );
+
+    const saved = await this.dataSource.query(
+      `SELECT * FROM purchase_request WHERE company_id = $1 AND id = $2`,
+      [companyId, pr.id],
+    );
+    return saved[0];
   }
 
   async cancelSlip(companyId: string, docNo: string, operator: string): Promise<void> {
@@ -443,18 +463,19 @@ export class ProcurementService {
         );
 
         for (const h of rows) {
-          const prItem = prItems.find((pri: any) => pri.inventory_id === h.inventory_id);
-          if (prItem) {
-            const currentReceived = new Decimal(prItem.received_qty);
-            const historyQty = new Decimal(h.qty);
-            const updatedReceived = Decimal.max(currentReceived.sub(historyQty), 0);
+          // ref_line_no로 정확한 라인 매칭
+          const prItem = prItems.find((pri: any) => String(pri.line_no) === h.ref_line_no);
+          if (!prItem) continue;
 
-            await qr.query(
-              `UPDATE purchase_request_item SET received_qty = $4 
-               WHERE company_id = $1 AND request_id = $2 AND line_no = $3`,
-              [companyId, prId, prItem.line_no, updatedReceived.toFixed(4)],
-            );
-          }
+          const currentReceived = new Decimal(prItem.received_qty);
+          const historyQty = new Decimal(h.qty);
+          const updatedReceived = Decimal.max(currentReceived.sub(historyQty), 0);
+
+          await qr.query(
+            `UPDATE purchase_request_item SET received_qty = $4
+             WHERE company_id = $1 AND request_id = $2 AND line_no = $3`,
+            [companyId, prId, prItem.line_no, updatedReceived.toFixed(4)],
+          );
         }
       }
 

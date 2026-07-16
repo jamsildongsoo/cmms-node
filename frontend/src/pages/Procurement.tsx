@@ -157,7 +157,7 @@ export default function Procurement() {
     if (!receiveModal) return;
     const lines: ReceiveLine[] = receiveModal.lines
       .filter((l: any) => Number(l.inputQty) > 0)
-      .map((l: any) => ({ lineNo: l.lineNo, qty: Number(l.inputQty), unitPrice: l.unitPrice ? Number(l.unitPrice) : null }));
+      .map((l: any) => ({ lineNo: l.lineNo, qty: Number(l.inputQty), unitPrice: l.unitPrice ? Number(l.unitPrice) : 0 }));
     if (lines.length === 0) { alert('입고 수량을 1개 이상 입력하세요.'); return; }
     try {
       await axiosInstance.post('/procurement/receipts', { requestId: receiveModal.pr.id, txDate: receiveModal.txDate, close: receiveModal.close, lines });

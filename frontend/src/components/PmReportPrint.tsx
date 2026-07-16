@@ -14,11 +14,14 @@ interface PmCheckItem {
 
 interface PmReportPrintProps {
   pmNo: string;
+  title?: string;
   status: string;
   approvalId?: string | null;
   deptName: string;
   workerId: string;
   workDate: string;
+  cycleFrom?: string | null;
+  cycleEnd?: string | null;
   equipmentName: string;
   checkTypeCode: string;
   judgeCode: string;
@@ -45,10 +48,18 @@ export default function PmReportPrint(props: PmReportPrintProps) {
         <PrintFieldGrid cols={3}>
           <PrintField label="번호" value={props.pmNo} />
           <PrintField label="상태" value={getCommonStatusLabel(props.status)} />
+          <PrintField label="제목" value={props.title || '-'} />
           <div />
           <PrintField label="부서" value={props.deptName} />
           <PrintField label="담당자(점검자)" value={props.workerId} />
           <PrintField label="점검일자" value={props.workDate} />
+          {(props.cycleFrom || props.cycleEnd) && (
+            <>
+              <PrintField label="계획기간" value={`${props.cycleFrom || '-'} ~ ${props.cycleEnd || '-'}`} />
+              <div />
+              <div />
+            </>
+          )}
         </PrintFieldGrid>
       </PrintSection>
 

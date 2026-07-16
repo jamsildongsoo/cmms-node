@@ -2,14 +2,20 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   Query,
+  Param,
   UseGuards,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { PmService, PmSaveRequest, PmScheduleResponse } from './pm.service';
+import {
+  PmService,
+  PmSaveRequest,
+  PmScheduleResponse,
+} from './pm.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionGuard, Permission, PermissionSave } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
@@ -32,9 +38,14 @@ export class PmController {
 
   @Get('records')
   @Permission(AppModule.PM, 'R')
-  async getPmRecords(@Query('stepStage') stepStage?: string): Promise<any[]> {
+  async getPmRecords(
+    @Query('stepStage') stepStage?: string,
+    @Query('searchType') searchType?: string,
+    @Query('searchValue') searchValue?: string,
+    @Query('showAll') showAll?: string,
+  ): Promise<any[]> {
     const { companyId, userId } = getTenantContext();
-    return this.pmService.getPmRecordsByCompany(companyId, userId, stepStage);
+    return this.pmService.getPmRecords(companyId, userId, stepStage, searchType, searchValue, showAll);
   }
 
   @Get('records/details')
@@ -47,14 +58,14 @@ export class PmController {
     return this.pmService.getPmRecordDetails(companyId, plantId, id, userId);
   }
 
-  @Get('records/initial-items')
+  @Get('templates')
   @Permission(AppModule.PM, 'R')
-  async getInitialCheckItems(
+  async getCheckTemplates(
     @Query('plantId') plantId: string,
-    @Query('equipmentId') equipmentId: string,
+    @Query('checkTypeCode') checkTypeCode: string,
   ): Promise<any[]> {
     const { companyId, userId } = getTenantContext();
-    return this.pmService.getInitialCheckItems(companyId, plantId, equipmentId, userId);
+    return this.pmService.getCheckTemplates(companyId, plantId, checkTypeCode, userId);
   }
 
   @Post('records')
@@ -62,6 +73,16 @@ export class PmController {
   async savePmRecord(@Body() request: PmSaveRequest): Promise<any> {
     const { companyId, userId } = getTenantContext();
     return this.pmService.savePmRecord(companyId, request, userId);
+  }
+
+  @Patch('plans/:id/close')
+  @Permission(AppModule.PM, 'U')
+  async closePmPlan(
+    @Param('id') id: string,
+    @Query('plantId') plantId: string,
+  ): Promise<void> {
+    const { companyId, userId } = getTenantContext();
+    await this.pmService.closePmPlan(companyId, plantId, id, userId);
   }
 
   @Delete('records')
