@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
+import { useAuthStore } from '../store/useAuthStore';
 import axiosInstance from '../api/axios';
-import PrintHeader from '../components/PrintHeader';
 import { getApiErrorMessage } from '../utils/apiError';
 import { formatDateOnly } from '../utils/datetime';
 import { 
@@ -210,7 +210,97 @@ export default function Equipment() {
   };
 
   const handlePrint = () => {
-    window.print();
+    const user = useAuthStore.getState().user;
+    const now = new Date();
+    const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+
+    const printData = {
+      equipments: filteredEquipments,
+      plants,
+      companyName: user?.companyName || user?.companyId || 'CMMS',
+      printerName: user?.name || '-',
+      printDate: stamp,
+    };
+
+    const printWindow = window.open('', '_blank', 'width=1200,height=800');
+    if (!printWindow) {
+      alert('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
+      return;
+    }
+
+    // 새 창 제목 설정
+    printWindow.document.title = '설비 마스터 목록 - 인쇄';
+
+    const eqTypeLabel: Record<string, string> = {
+      PUMP: '펌프', MOTOR: '모터', BOILER: '보일러', VALVE: '밸브',
+      COMPRESSOR: '압축기', PANEL: '전기판넬', ETC: '기타 설비',
+    };
+
+    const rows = printData.equipments.map(eq => `
+      <tr>
+        <td class="mono">${eq.id}</td>
+        <td class="name">${eq.name}</td>
+        <td>${printData.plants.find(p => p.id === eq.plantId)?.name || eq.plantId}</td>
+        <td>${eqTypeLabel[eq.eqTypeCode || ''] || eq.eqTypeCode || '-'}</td>
+        <td>${eq.location || '-'}</td>
+        <td>${eq.installDate || '-'}</td>
+        <td>${eq.makerName || '-'}</td>
+        <td>${eq.model || '-'}</td>
+        <td>${eq.workPermitYn === 'Y' ? '대상' : '미대상'}</td>
+      </tr>
+    `).join('');
+
+    printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>설비 마스터 목록 - 인쇄</title>
+  <style>
+    @page {
+      size: A4 landscape;
+      margin: 10mm 10mm 14mm 10mm;
+      @bottom-right {
+        content: counter(page) " / " counter(pages);
+        font-size: 8pt;
+        color: #666;
+      }
+    }
+    @page :first { margin-top: 10mm; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #000; padding: 10mm; }
+    .print-log { display: flex; justify-content: space-between; font-size: 8pt; color: #666; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 8px; }
+    .header { text-align: center; font-size: 16pt; font-weight: bold; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+    th, td { padding: 6px 8px; border: 1px solid #ccc; text-align: left; }
+    th { background: #f0f0f0; font-weight: bold; }
+    td.mono { font-family: monospace; }
+    td.name { font-weight: 600; }
+    @media print { .no-print { display: none; } }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="text-align:right; margin-bottom:12px;">
+    <button onclick="window.print()" style="padding:8px 20px; background:#2563eb; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:10pt;">인쇄</button>
+  </div>
+  <div class="print-log">
+    <span>회사: ${printData.companyName}</span>
+    <span>출력자: ${printData.printerName} &nbsp;|&nbsp; 출력일시: ${printData.printDate}</span>
+  </div>
+  <div class="header">설비 마스터 목록</div>
+  <table>
+    <thead>
+      <tr>
+        <th>설비코드</th><th>설비명</th><th>플랜트</th><th>설비유형</th><th>설치위치</th><th>설치일자</th><th>제조사</th><th>모델</th><th>작업허가</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows || '<tr><td colspan="9" style="text-align:center;padding:24px;color:#999;">등록된 설비가 없습니다.</td></tr>'}
+    </tbody>
+  </table>
+</body>
+</html>`);
+    printWindow.document.close();
+    printWindow.focus();
   };
 
   // Filter list by selected plant
@@ -219,12 +309,9 @@ export default function Equipment() {
     : equipments;
 
   return (
-    <div className="space-y-6 print-area print-landscape">
-      <PrintHeader />
-      <h1 className="hidden print:block text-center text-xl font-bold tracking-widest text-black border-b-2 border-black pb-2 mb-4">설비 마스터 목록</h1>
-
+    <div className="space-y-6">
       {/* Header and top buttons */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 print:hidden">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-2">
             <Wrench size={24} className="text-blue-500" />
@@ -236,21 +323,21 @@ export default function Equipment() {
         <div className="flex gap-2">
           <button
             onClick={handleCsvDownload}
-            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-750 px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <FileSpreadsheet size={15} />
-            CSV 내보내기
+            <FileSpreadsheet size={14} />
+            CSV
           </button>
           <button
             onClick={handlePrint}
-            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-750 px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <Printer size={15} />
-            가로 목록 인쇄
+            <Printer size={14} />
+            목록 인쇄
           </button>
           <button
             onClick={handleOpenCreate}
-            className="bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border-0"
+            className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border-0"
           >
             <Plus size={15} />
             입력
@@ -259,12 +346,13 @@ export default function Equipment() {
       </div>
 
       {message && (
-        <div className={`p-3 rounded-lg border text-xs text-center print:hidden ${
-          message.type === 'success' 
-            ? 'bg-emerald-950/40 border-emerald-800/80 text-emerald-400' 
-            : 'bg-red-950/40 border-red-800/80 text-red-400'
-        }`}>
-          {message.text}
+        <div className="p-3 rounded-lg border border-slate-800 bg-slate-900 text-xs text-center text-slate-200 print:hidden flex items-center justify-center gap-2">
+          {message.type === 'success' ? (
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+          )}
+          <span>{message.text}</span>
         </div>
       )}
 

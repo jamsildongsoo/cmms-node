@@ -15,7 +15,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const menuItems: any[] = [
     { id: 'dashboard', label: '대시보드', icon: LayoutDashboard },
     { 
-      category: '기준 정보 (MDM)', 
+      category: '기준 정보', 
       items: [
         { id: 'equipment', label: '설비 마스터', icon: Wrench },
         { id: 'inventory', label: '재고 마스터', icon: Package },
@@ -27,8 +27,8 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
       items: [
         { id: 'pm', label: '예방점검 기록', icon: ClipboardList },
         { id: 'wo', label: '작업지시서', icon: ClipboardList },
-        { id: 'wp', label: '작업허가서 (Permit)', icon: FileSignature },
-        { id: 'procurement', label: '구매 (Procurement)', icon: ShoppingCart },
+        { id: 'wp', label: '작업허가서', icon: FileSignature },
+        { id: 'procurement', label: '구매', icon: ShoppingCart },
         { id: 'stock', label: '재고 입출고/이동', icon: Layers }
       ]
     },
@@ -104,10 +104,6 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
           }
         })}
       </nav>
-
-      <div className="p-3 border-t border-slate-800 text-center text-[9px] text-slate-600">
-        © 2026 한국플랜트서비스. All rights reserved.
-      </div>
     </aside>
   );
 }

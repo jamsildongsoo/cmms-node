@@ -323,6 +323,59 @@ export default function PmRecord() {
     }));
   };
 
+  const handlePrint = () => {
+    const list = activeTab === 'plans' ? plans : results;
+    if (list.length === 0) { alert('인쇄할 목록이 없습니다.'); return; }
+
+    const user = useAuthStore.getState().user;
+    const now = new Date();
+    const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+
+    const printWindow = window.open('', '_blank', 'width=1200,height=800');
+    if (!printWindow) { alert('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.'); return; }
+
+    const tabLabel = activeTab === 'plans' ? '예방점검 계획' : '예방점검 실적';
+    const rows = list.map(rec => `
+      <tr>
+        <td class="mono">${rec.id}</td>
+        <td>${rec.title || '-'}</td>
+        <td>${rec.equipmentName || rec.equipmentId}</td>
+        <td>${depts.find(d => d.id === rec.departmentId)?.name || rec.departmentId}</td>
+        <td>${rec.cycleFrom || '-'} ~ ${rec.cycleEnd || '-'}</td>
+        <td>${rec.workDate || '-'}</td>
+        <td>${usersList.find(u => u.id === rec.workerId)?.name || rec.workerId}</td>
+        <td>${rec.status === 'S' ? '확정' : rec.status === 'C' ? '완결' : '임시'}</td>
+      </tr>
+    `).join('');
+
+    printWindow.document.title = `${tabLabel} 목록 - 인쇄`;
+    printWindow.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${tabLabel} 목록 - 인쇄</title>
+<style>
+@page { size: A4 landscape; margin: 10mm 10mm 14mm 10mm; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #000; padding: 10mm; }
+h1 { text-align: center; font-size: 14pt; margin-bottom: 4mm; border-bottom: 2px solid #000; padding-bottom: 3mm; }
+.print-info { display: flex; justify-content: space-between; font-size: 8pt; color: #666; border-bottom: 1px solid #ccc; padding-bottom: 2mm; margin-bottom: 4mm; }
+table { width: 100%; border-collapse: collapse; font-size: 8pt; }
+th, td { border: 1px solid #333; padding: 4px 6px; text-align: center; }
+th { background: #eee; font-weight: 600; }
+.mono { font-family: monospace; }
+.no-print { text-align: right; margin-bottom: 12px; }
+.no-print button { padding: 8px 20px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 10pt; }
+@media print { .no-print { display: none; } }
+</style></head><body>
+<h1>${tabLabel} 현황</h1>
+<div class="print-info"><span>회사: ${user?.companyName || user?.companyId || 'CMMS'}</span><span>출력자: ${user?.name || '-'} | 출력일시: ${stamp}</span></div>
+<table><thead><tr>
+<th>문서번호</th><th>제목</th><th>설비</th><th>부서</th><th>계획기간</th><th>점검일</th><th>작업자</th><th>상태</th>
+</tr></thead><tbody>${rows}</tbody></table>
+<div class="no-print"><button onclick="window.print()">인쇄</button></div>
+</body></html>`);
+    printWindow.document.close();
+    printWindow.focus();
+  };
+
   const handleClosePlan = async (record: PmRecord) => {
     if (!confirm('이 예방점검 계획을 종료하시겠습니까? 종료 후 수정할 수 없습니다.')) return;
     try {
@@ -443,22 +496,20 @@ export default function PmRecord() {
         </div>
 
         <div className="flex items-center gap-3">
-          {activeTab === 'results' && (
-            <button
-              onClick={() => window.print()}
-              className="bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Printer size={14} />
-              목록 인쇄
-            </button>
-          )}
+          <button
+            onClick={handlePrint}
+            className="bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <Printer size={14} />
+            목록 인쇄
+          </button>
           {activeTab === 'plans' && (
             <button
               onClick={openNewPlan}
               className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border-0"
             >
               <Plus size={14} />
-              계획 수립
+              입력
             </button>
           )}
           <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg">
@@ -532,12 +583,13 @@ export default function PmRecord() {
       </div>
 
       {message && (
-        <div className={`p-3 rounded-lg border text-xs text-center print:hidden ${
-          message.type === 'success'
-            ? 'bg-emerald-950/40 border-emerald-800/80 text-emerald-400'
-            : 'bg-red-950/40 border-red-800/80 text-red-400'
-        }`}>
-          {message.text}
+        <div className="p-3 rounded-lg border border-slate-800 bg-slate-900 text-xs text-center text-slate-200 print:hidden flex items-center justify-center gap-2">
+          {message.type === 'success' ? (
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+          )}
+          <span>{message.text}</span>
         </div>
       )}
 
@@ -665,7 +717,7 @@ export default function PmRecord() {
 
       {isFormOpen && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto print:absolute print:inset-0 print:bg-white print:p-0">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl print:border-0 print:shadow-none print:max-h-none print:w-full print:h-full">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl print:border-0 print:shadow-none print:max-h-none print:w-full print:h-full">
             <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0 print:hidden">
               <h2 className="text-lg font-bold text-slate-200">
                 {pmNo ? `예방점검 ${stepStage === 'P' ? '계획' : '실적'} 상세/수정 [${pmNo}]` : `신규 예방점검 ${stepStage === 'P' ? '계획' : '실적'} 입력`}

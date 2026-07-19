@@ -12,17 +12,22 @@ import {
   ParseIntPipe,
   HttpCode,
   HttpStatus,
+  Inject,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { Readable } from 'stream';
 import { FileStorageService, UploadResponse, FileItemResponse } from './file-storage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { S3_CLIENT, STORAGE_SETTINGS, StorageSettings } from './storage.config';
 
 @Controller('api/files')
 @UseGuards(JwtAuthGuard)
 export class FileController {
-  constructor(private readonly fileService: FileStorageService) {}
+  constructor(
+    private readonly fileService: FileStorageService,
+    @Inject(STORAGE_SETTINGS) private readonly settings: StorageSettings,
+  ) {}
 
   @Post()
   @UseInterceptors(FilesInterceptor('files'))

@@ -13,7 +13,11 @@
     "test:watch": "jest --watch",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:cov": "jest --coverage",
-    "migrate": "node -r ts-node/register scripts/migrate.ts",
+    "migrate": "ts-node -r ts-node/register scripts/migrate.ts",
+    "migrate:gen": "npx typeorm migration:generate -d scripts/migrate.ts migration/${npm_config_name:-Migration} -n",
+    "migrate:run": "ts-node -r ts-node/register scripts/migrate.ts run",
+    "migrate:show": "ts-node -r ts-node/register scripts/migrate.ts show",
+    "migrate:revert": "ts-node -r ts-node/register scripts/migrate.ts revert",
     "seed:system": "node scripts/seed-system.js",
     "typecheck": "tsc --noEmit"
   },

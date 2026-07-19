@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 운영 배포 보조 스크립트.
 # - 일반 배포: ./scripts/prod.sh deploy
+# - DB 마이그레이션: ./scripts/prod.sh migrate
 # - 최초 SYSTEM seed: ./scripts/prod.sh seed '강한-임시-비밀번호'
 # - 최초 구축 보조: ./scripts/prod.sh bootstrap '강한-임시-비밀번호'
 set -euo pipefail
@@ -24,6 +25,12 @@ pull_images() {
 start_services() {
   echo "▶ 운영 서비스 기동"
   docker compose -f "$COMPOSE_FILE" up -d
+}
+
+run_migrate() {
+  echo "▶ 운영 DB 마이그레이션 적용 (search_path=prod)"
+  docker compose -f "$COMPOSE_FILE" run --rm api \
+    npm run migrate:run
 }
 
 seed_system() {
@@ -50,11 +57,15 @@ case "$CMD" in
     shift
     seed_system "${1:-}"
     ;;
+  migrate)
+    require_env_file
+    run_migrate
+    ;;
   bootstrap)
     require_env_file
     shift
     pull_images
-    echo "▶ 운영 DB 스키마 적용은 별도 절차로 먼저 완료되어 있어야 합니다."
+    run_migrate
     seed_system "${1:-}"
     start_services
     ;;
@@ -64,12 +75,14 @@ case "$CMD" in
   ./scripts/prod.sh deploy
       일반 운영 배포: 이미지 pull 후 서비스 기동
 
+  ./scripts/prod.sh migrate
+      운영 DB 스키마 마이그레이션 적용 (search_path=prod)
+
   ./scripts/prod.sh seed '강한-임시-비밀번호'
       최초 운영 DB 구축 시 SYSTEM 계정 1회 seed
 
   ./scripts/prod.sh bootstrap '강한-임시-비밀번호'
-      최초 구축 보조: pull, seed, up -d
-      단, 운영 DB 스키마 적용은 별도 절차로 먼저 완료해야 함
+      최초 구축 전체: pull, migrate, seed, up -d
 USAGE
     exit 1
     ;;

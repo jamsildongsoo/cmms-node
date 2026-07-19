@@ -57,14 +57,6 @@ const DEFAULT_CODE_GROUPS = [
     ],
   },
   {
-    id: 'WO_STAGE',
-    name: '작업지시 단계',
-    items: [
-      ['P', '작업 계획/지시'],
-      ['R', '작업 실적/완료'],
-    ],
-  },
-  {
     id: 'WP_TYPE',
     name: '작업허가 유형',
     items: [
@@ -94,16 +86,6 @@ const DEFAULT_CODE_GROUPS = [
       ['SPARE', '예비품 구매'],
       ['SERVICE', '외주/서비스'],
       ['ETC', '기타 구매'],
-    ],
-  },
-  {
-    id: 'CYCLE_UNIT',
-    name: '점검주기 단위',
-    items: [
-      ['D', '일'],
-      ['W', '주'],
-      ['M', '월'],
-      ['Y', '년'],
     ],
   },
 ] as const;
@@ -374,7 +356,31 @@ export class MdmService {
   // 5. 사용자 (User)
   // =========================================================================
   async getUsersByCompany(companyId: string): Promise<User[]> {
-    return this.userRepo.find({ where: { companyId, deleteYn: 'N' } });
+    const users = await this.userRepo.find({
+      where: { companyId, deleteYn: 'N' },
+      order: { 'User.id': 'ASC' },
+      relations: ['department'],
+      select: {
+        id: true,
+        name: true,
+        title: true,
+        position: true,
+        departmentId: true,
+        roleId: true,
+        email: true,
+        phone: true,
+        lastLoginPlantId: true,
+        useYn: true,
+        department: {
+          name: true
+        }
+      }
+    });
+
+    return users.map(u => ({
+      ...u,
+      departmentName: u.department?.name ?? null,
+    })) as (User & { departmentName: string | null })[];
   }
 
   async saveUser(companyId: string, userDto: Partial<User>, operator: string): Promise<User> {
@@ -396,6 +402,10 @@ export class MdmService {
         exists.name = userDto.name || id;
         exists.roleId = roleId;
         exists.departmentId = CodeUtil.normalizeOrNull(userDto.departmentId);
+        exists.email = userDto.email || null;
+        exists.phone = userDto.phone || null;
+        exists.position = userDto.position || null;
+        exists.title = userDto.title || null;
         exists.passwordHash = await bcrypt.hash('1234', 12); // 복구 시에도 임시 비번 리셋
         exists.useYn = 'Y';
         exists.deleteYn = 'N';
@@ -406,11 +416,15 @@ export class MdmService {
 
     const hash = await bcrypt.hash('1234', 12);
     const user = this.userRepo.create({
-      ...userDto,
       companyId,
       id,
+      name: userDto.name || id,
       roleId,
       departmentId: CodeUtil.normalizeOrNull(userDto.departmentId),
+      email: userDto.email || null,
+      phone: userDto.phone || null,
+      position: userDto.position || null,
+      title: userDto.title || null,
       passwordHash: hash,
       useYn: 'Y',
       mustChangePassword: 'Y',

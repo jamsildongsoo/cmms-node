@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react';
 import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import FileUpload from '../components/FileUpload';
+import RichTextEditor from '../components/RichTextEditor';
 import { formatDateTime, formatDate } from '../utils/datetime';
 import { getApiErrorMessage } from '../utils/apiError';
-import { 
-  Plus, Trash, Download, X, Megaphone, MessageSquare, ChevronRight 
+import {
+  Plus, Trash, Download, X, Megaphone, MessageSquare, ChevronRight
 } from 'lucide-react';
 
 interface BoardModel {
@@ -304,7 +305,7 @@ export default function Board() {
       {/* DETAIL & COMMENT POPUP */}
       {isDetailOpen && selectedPost && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl">
             {/* Header */}
             <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0">
               <h2 className="text-lg font-bold text-slate-200 flex items-center gap-1.5">
@@ -421,7 +422,7 @@ export default function Board() {
       {/* EDIT / CREATE FORM MODAL */}
       {isFormOpen && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl">
             <div className="p-6 border-b border-slate-800 flex justify-between items-center">
               <h2 className="text-lg font-bold text-slate-200">
                 {formId ? '게시글 수정' : '새 게시글 작성'}
@@ -467,13 +468,15 @@ export default function Board() {
                 </div>
                 <div className="col-span-2">
                   <label className="block text-slate-500 mb-1.5">상세 내용 *</label>
-                  <textarea
-                    rows={6}
-                    placeholder="본문 내용을 입력하세요."
-                    value={formContent}
-                    onChange={(e) => setFormContent(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none resize-none font-sans"
-                  />
+                  <div className="bg-slate-950 border border-slate-800 rounded-lg overflow-hidden">
+                    <RichTextEditor
+                      key={formId || 'new'}
+                      content={formContent}
+                      onChange={setFormContent}
+                      placeholder="본문 내용을 입력하세요."
+                      minHeight="180px"
+                    />
+                  </div>
                 </div>
                 <div className="col-span-2">
                   <label className="block text-slate-500 mb-1.5">첨부파일</label>

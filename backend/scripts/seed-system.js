@@ -61,8 +61,15 @@ function buildConnection(env) {
     dbUrl = `postgresql://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${rest}`;
   }
   let ssl = false;
+  let searchPath = null;
   try {
     const u = new URL(dbUrl);
+    // search_path 추출 (options=-c search_path=XXX 형태)
+    const options = u.searchParams.get('options');
+    if (options) {
+      const match = options.match(/search_path[=%]3[D]?([^&]+)/i);
+      if (match) searchPath = decodeURIComponent(match[1]);
+    }
     if (u.searchParams.has('ssl') || u.searchParams.has('sslmode')) {
       u.searchParams.delete('ssl');
       u.searchParams.delete('sslmode');
@@ -74,18 +81,24 @@ function buildConnection(env) {
       ssl = { rejectUnauthorized: false };
     }
   }
-  return { connectionString: dbUrl, ssl };
+  return { connectionString: dbUrl, ssl, searchPath };
 }
 
 async function main() {
   const password = process.argv[2] || 'system1234';
   const env = loadEnv();
-  const client = new Client(buildConnection(env));
+  const conn = buildConnection(env);
+  const client = new Client({ connectionString: conn.connectionString, ssl: conn.ssl });
   await client.connect();
+
+  // search_path 명시적 설정 (pg 라이브러리가 URL options 파라미터를 무시함)
+  if (conn.searchPath) {
+    await client.query(`SET search_path TO ${conn.searchPath}`);
+  }
 
   // 테이블 존재 확인 (synchronize 선행 필요)
   const { rows: chk } = await client.query(
-    `SELECT to_regclass('public.users') AS t`,
+    `SELECT to_regclass('users') AS t`,
   );
   if (!chk[0].t) {
     await client.end();

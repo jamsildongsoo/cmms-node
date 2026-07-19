@@ -31,6 +31,12 @@ export default function ApprovalDocPrint(p: ApprovalDocPrintProps) {
 
   return (
     <div className="hidden print:block bg-white text-black">
+      <style>{`
+        .approval-print-content table { border-collapse: collapse; width: 100%; margin-bottom: 0.5rem; }
+        .approval-print-content td, .approval-print-content th { border: 1px solid #94a3b8; padding: 4px 6px; }
+        .approval-print-content th { background-color: #f1f5f9; color: #0f172a; font-weight: 600; }
+        .approval-print-content table, .approval-print-content td, .approval-print-content th { font-size: 9px; }
+      `}</style>
       <PrintHeader />
       <h1 className="text-center text-lg font-bold tracking-widest mb-4">결 재 품 의 서</h1>
 
@@ -60,7 +66,7 @@ export default function ApprovalDocPrint(p: ApprovalDocPrintProps) {
       )}
 
       <PrintSection title="품의 내용">
-        <div className="text-[10px] whitespace-pre-wrap min-h-[120px]">{p.content || '(본문 없음)'}</div>
+        <div className="approval-print-content text-[10px] min-h-[120px]">{p.content || '(본문 없음)'}</div>
       </PrintSection>
 
       <PrintSection title="결재 처리 이력">

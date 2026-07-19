@@ -12,20 +12,19 @@ interface PrintHeaderProps {
   approvalNo?: string | null;
 }
 
-/** 출력일시: YYYYMMDDhhmmss (로컬/KST 기준) */
+/** 출력일시: YYYYMMDD HH:MM:SS (로컬/KST 기준) */
 function formatStamp(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
 export default function PrintHeader({ approvalNo }: PrintHeaderProps) {
   const user = useAuthStore((s) => s.user);
   const stamp = formatStamp(new Date());
 
-  // print:fixed + top-0 → 브라우저가 모든 인쇄 페이지 상단에 반복 렌더(워터마크)
-  // 좌끝: 결재번호(있을 때) / 우끝: 회사·출력자·출력일시(보안 워터마크)
+  // 첫 페이지만 상단에 출력 로그 표시 (브라우저 페이지 분할에 맡김)
   return (
-    <div className="hidden print:flex print:fixed top-0 left-0 right-0 z-[9999] justify-between px-3 pt-1.5 text-[9px] text-slate-400 font-normal">
+    <div className="hidden print:flex print:justify-between print:items-center print:mb-2 print:text-[9px] print:text-slate-500 print:border-b print:border-slate-300 print:pb-1">
       <span>{approvalNo ? `결재: ${approvalNo}` : ''}</span>
       <div className="flex gap-4">
         <span>회사: {user?.companyName || user?.companyId || 'CMMS'}</span>

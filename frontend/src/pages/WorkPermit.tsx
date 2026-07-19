@@ -8,7 +8,7 @@ import PrintHeader from '../components/PrintHeader';
 import WorkPermitPrint from '../components/WorkPermitPrint';
 import ApprovalSubmitModal from '../components/ApprovalSubmitModal';
 import { 
-  ClipboardList, Edit2, Trash2, Printer, X, Plus, Download, CheckSquare, Square, ChevronDown, ChevronUp 
+  ClipboardList, Edit2, Trash2, Printer, X, Plus, CheckSquare, Square, ChevronDown, ChevronUp 
 } from 'lucide-react';
 
 interface WorkPermitModel {
@@ -393,31 +393,55 @@ export default function WorkPermit() {
     }[code] || code;
   };
 
-  const exportToCsv = () => {
-    if (permits.length === 0) return;
-    const headers = ['허가서번호', '허가서명', '설비코드', '허가구분', '부서', '감독자', '시작일시', '종료일시', '상태'];
-    const rows = permits.map(w => [
-      w.id,
-      w.title,
-      w.equipmentId,
-      w.permitTypeCodes.split(',').map(getWpTypeLabel).join('|'),
-      depts.find(d => d.id === w.departmentId)?.name || w.departmentId,
-      usersList.find(u => u.id === w.supervisorId)?.name || w.supervisorId,
-      formatDateTime(w.startAt),
-      formatDateTime(w.endAt),
-      getStatusLabel(w.status)
-    ]);
+  const handlePrint = () => {
+    if (permits.length === 0) { alert('인쇄할 목록이 없습니다.'); return; }
+    const user = useAuthStore.getState().user;
+    const now = new Date();
+    const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
 
-    const csvContent = "\uFEFF" + [headers.join(','), ...rows.map(e => e.map(val => `"${val.replace(/"/g, '""')}"`).join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'work_permits.csv');
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const printWindow = window.open('', '_blank', 'width=1200,height=800');
+    if (!printWindow) { alert('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.'); return; }
+
+    const rows = permits.map(wp => `
+      <tr>
+        <td class="mono">${wp.id}</td>
+        <td>${wp.title}</td>
+        <td>${wp.equipmentId}</td>
+        <td>${wp.permitTypeCodes.split(',').map(getWpTypeLabel).join(', ')}</td>
+        <td>${depts.find(d => d.id === wp.departmentId)?.name || wp.departmentId}</td>
+        <td>${usersList.find(u => u.id === wp.supervisorId)?.name || wp.supervisorId}</td>
+        <td>${formatDateTime(wp.startAt)}</td>
+        <td>${formatDateTime(wp.endAt)}</td>
+        <td>${getStatusLabel(wp.status)}</td>
+      </tr>
+    `).join('');
+
+    printWindow.document.title = '안전작업허가서 목록 - 인쇄';
+    printWindow.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>안전작업허가서 목록 - 인쇄</title>
+<style>
+@page { size: A4 landscape; margin: 10mm 10mm 14mm 10mm; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #000; padding: 10mm; }
+h1 { text-align: center; font-size: 14pt; margin-bottom: 4mm; border-bottom: 2px solid #000; padding-bottom: 3mm; }
+.print-info { display: flex; justify-content: space-between; font-size: 8pt; color: #666; border-bottom: 1px solid #ccc; padding-bottom: 2mm; margin-bottom: 4mm; }
+table { width: 100%; border-collapse: collapse; font-size: 8pt; }
+th, td { border: 1px solid #333; padding: 4px 6px; text-align: center; }
+th { background: #eee; font-weight: 600; }
+.mono { font-family: monospace; }
+.no-print { text-align: right; margin-bottom: 12px; }
+.no-print button { padding: 8px 20px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 10pt; }
+@media print { .no-print { display: none; } }
+</style></head><body>
+<h1>안전작업허가서 현황</h1>
+<div class="print-info"><span>회사: ${user?.companyName || user?.companyId || 'CMMS'}</span><span>출력자: ${user?.name || '-'} | 출력일시: ${stamp}</span></div>
+<table><thead><tr>
+<th>허가서번호</th><th>제목</th><th>설비</th><th>유형</th><th>부서</th><th>감독자</th><th>시작</th><th>종료</th><th>상태</th>
+</tr></thead><tbody>${rows}</tbody></table>
+<div class="no-print"><button onclick="window.print()">인쇄</button></div>
+</body></html>`);
+    printWindow.document.close();
+    printWindow.focus();
   };
 
   const checksheets = [
@@ -437,20 +461,20 @@ export default function WorkPermit() {
         <div>
           <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-2">
             <ClipboardList size={24} className="text-blue-500" />
-            안전작업허가서(Work Permit) 관리
+            안전작업허가서 관리
           </h1>
           <p className="text-slate-400 text-sm mt-1">현장 안전 사고 방지를 위한 작업 유형별 허가서 발급 및 체크시트를 작성합니다.</p>
         </div>
 
         <div className="flex items-center gap-3">
           <button
-            onClick={exportToCsv}
+            onClick={handlePrint}
             className="bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <Download size={14} />
-            CSV 내보내기
+            <Printer size={14} />
+            목록 인쇄
           </button>
-          
+
           <button
             onClick={handleOpenCreate}
             className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors border-0 cursor-pointer shadow-lg shadow-blue-900/20"
@@ -462,17 +486,18 @@ export default function WorkPermit() {
       </div>
 
       {message && (
-        <div className={`p-3 rounded-lg border text-xs text-center print:hidden ${
-          message.type === 'success' 
-            ? 'bg-emerald-950/40 border-emerald-800/80 text-emerald-400' 
-            : 'bg-red-950/40 border-red-800/80 text-red-400'
-        }`}>
-          {message.text}
+        <div className="p-3 rounded-lg border border-slate-800 bg-slate-900 text-xs text-center text-slate-200 print:hidden flex items-center justify-center gap-2">
+          {message.type === 'success' ? (
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+          )}
+          <span>{message.text}</span>
         </div>
       )}
 
       {/* Main Grid View — 모달(허가서) 열림 시 인쇄 제외(전용뷰와 중복 방지) */}
-      <div className={`bg-slate-900 border border-slate-800 rounded-xl p-6 print:border-0 print:bg-transparent print:p-0 ${isFormOpen ? 'print:hidden' : ''}`}>
+      <div className={`bg-slate-900 border border-slate-800 rounded-xl p-6 print:border-0 print:bg-transparent print:p-0 print-landscape ${isFormOpen ? 'print:hidden' : ''}`}>
 
         {/* Print Only Header */}
         <PrintHeader />

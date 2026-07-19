@@ -1,4 +1,5 @@
-import { Entity, PrimaryColumn, Column } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Department } from './department.entity';
 import { BaseEntity } from './base.entity';
 
 @Entity('inventory')

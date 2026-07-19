@@ -1,4 +1,5 @@
-import { Entity, PrimaryColumn, Column } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Department } from './department.entity';
 import { BaseEntity } from './base.entity';
 
 // PostgreSQL에서 user는 예약어 성격이 있어 테이블명과 파일명은 예외적으로 users를 유지한다.
@@ -16,34 +17,41 @@ export class User extends BaseEntity {
   @Column({ name: 'password_hash', length: 256 })
   passwordHash!: string;
 
-  @Column({ type: 'varchar',  name: 'department_id', length: 50, nullable: true })
+  @Column({ type: 'varchar', name: 'department_id', length: 50, nullable: true })
   departmentId!: string | null;
 
-  @Column({ type: 'varchar',  name: 'role_id', length: 50, nullable: true })
+  @ManyToOne(() => Department)
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'department_id', referencedColumnName: 'id' }
+  ])
+  department!: Department | null;
+
+  @Column({ type: 'varchar', name: 'role_id', length: 50, nullable: true })
   roleId!: string | null;
 
-  @Column({ type: 'varchar',  length: 100, nullable: true })
+  @Column({ type: 'varchar', length: 100, nullable: true })
   email!: string | null;
 
-  @Column({ type: 'varchar',  length: 50, nullable: true })
+  @Column({ type: 'varchar', length: 50, nullable: true })
   phone!: string | null;
 
-  @Column({ type: 'varchar',  length: 50, nullable: true })
+  @Column({ type: 'varchar', length: 50, nullable: true })
   position!: string | null;
 
-  @Column({ type: 'varchar',  length: 50, nullable: true })
+  @Column({ type: 'varchar', length: 50, nullable: true })
   title!: string | null;
 
   @Column({ name: 'use_yn', type: 'char', length: 1, default: 'Y' })
   useYn!: string;
 
-  @Column({ type: 'varchar',  name: 'last_login_ip', length: 50, nullable: true })
+  @Column({ type: 'varchar', name: 'last_login_ip', length: 50, nullable: true })
   lastLoginIp!: string | null;
 
   @Column({ name: 'last_login_at', type: 'timestamptz', nullable: true })
   lastLoginAt!: Date | null;
 
-  @Column({ type: 'varchar',  name: 'last_login_plant_id', length: 50, nullable: true })
+  @Column({ type: 'varchar', name: 'last_login_plant_id', length: 50, nullable: true })
   lastLoginPlantId!: string | null;
 
   @Column({ name: 'password_changed_at', type: 'timestamptz', default: () => 'CURRENT_TIMESTAMP' })

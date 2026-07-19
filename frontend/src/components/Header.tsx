@@ -38,7 +38,6 @@ export default function Header() {
           </div>
           <div className="leading-tight">
             <h1 className="text-sm font-extrabold text-slate-100 tracking-wide">설비관리시스템</h1>
-            <span className="text-[10px] text-slate-500 font-semibold">한국플랜트서비스</span>
           </div>
         </div>
         {/* 로그인 사용자 정보 */}

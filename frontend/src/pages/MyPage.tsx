@@ -103,12 +103,13 @@ export default function MyPage() {
       </div>
 
       {message && (
-        <div className={`mb-6 p-4 rounded-lg border text-sm text-center ${
-          message.type === 'success' 
-            ? 'bg-emerald-950/40 border-emerald-800/80 text-emerald-400' 
-            : 'bg-red-950/40 border-red-800/80 text-red-400'
-        }`}>
-          {message.text}
+        <div className="mb-6 p-4 rounded-lg border border-slate-800 bg-slate-900 text-sm text-center text-slate-200 flex items-center justify-center gap-2">
+          {message.type === 'success' ? (
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+          )}
+          <span>{message.text}</span>
         </div>
       )}
 
@@ -150,31 +151,20 @@ export default function MyPage() {
               기본 정보 수정
             </h3>
             <form onSubmit={handleProfileSubmit} className="space-y-4">
+              {/* 1행: 사용자 이름 */}
+              <div>
+                <label className="block text-slate-400 text-xs mb-1.5 font-medium">사용자 이름</label>
+                <input
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 text-xs outline-none transition-colors"
+                />
+              </div>
+
+              {/* 2행: 전화번호, 이메일 */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-slate-400 text-xs mb-1.5 font-medium">사용자 이름</label>
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 text-xs outline-none transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 text-xs mb-1.5 font-medium">이메일 주소</label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-600">
-                      <Mail size={14} />
-                    </div>
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 pl-8 pr-3 text-slate-200 text-xs outline-none transition-colors"
-                    />
-                  </div>
-                </div>
                 <div>
                   <label className="block text-slate-400 text-xs mb-1.5 font-medium">전화번호</label>
                   <div className="relative">
@@ -190,6 +180,24 @@ export default function MyPage() {
                   </div>
                 </div>
                 <div>
+                  <label className="block text-slate-400 text-xs mb-1.5 font-medium">이메일 주소</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-600">
+                      <Mail size={14} />
+                    </div>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 pl-8 pr-3 text-slate-200 text-xs outline-none transition-colors"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* 3행: 직급, 직책 */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
                   <label className="block text-slate-400 text-xs mb-1.5 font-medium">직급</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-600">
@@ -203,7 +211,7 @@ export default function MyPage() {
                     />
                   </div>
                 </div>
-                <div className="sm:col-span-2">
+                <div>
                   <label className="block text-slate-400 text-xs mb-1.5 font-medium">직책</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-600">

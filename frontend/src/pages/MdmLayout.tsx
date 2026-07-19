@@ -31,7 +31,7 @@ export default function MdmLayout() {
         <div>
           <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-2">
             <Building2 size={24} className="text-blue-500" />
-            기준 정보 설정 (MDM)
+            기준 정보 설정
           </h1>
           <p className="text-slate-400 text-sm mt-1">시스템 운영의 뼈대가 되는 조직, 공통코드, 권한 등을 설정합니다.</p>
         </div>
@@ -66,12 +66,13 @@ export default function MdmLayout() {
       </div>
 
       {message && (
-        <div className={`p-3 rounded-lg border text-xs text-center transition-all ${
-          message.type === 'success' 
-            ? 'bg-emerald-950/40 border-emerald-800/80 text-emerald-400' 
-            : 'bg-red-950/40 border-red-800/80 text-red-400'
-        }`}>
-          {message.text}
+        <div className="p-3 rounded-lg border border-slate-800 bg-slate-900 text-xs text-center text-slate-200 transition-all flex items-center justify-center gap-2">
+          {message.type === 'success' ? (
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+          )}
+          <span>{message.text}</span>
         </div>
       )}
 

@@ -1,4 +1,6 @@
-import { Entity, PrimaryColumn, Column } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Department } from './department.entity';
+import { Equipment } from './equipment.entity';
 import { BaseEntity } from './base.entity';
 
 @Entity('pm_record')
@@ -12,7 +14,7 @@ export class PmRecord extends BaseEntity {
   @PrimaryColumn({ name: 'id', length: 50 })
   id!: string;
 
-  @Column({ name: 'title', length: 150, nullable: true })
+  @Column({ name: 'title', type: 'varchar', length: 150, nullable: true })
   title!: string | null;
 
   @Column({ name: 'equipment_id', length: 50 })

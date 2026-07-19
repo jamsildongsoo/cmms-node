@@ -23,6 +23,7 @@ export interface StorageSettings {
   reconcileGraceHours: number;
   reconcileCron: string;
   maxFileSizeBytes: number;
+  maxFileCount: number;
 }
 
 export function createS3Client(settings: StorageSettings): S3Client {
@@ -40,17 +41,20 @@ export function createS3Client(settings: StorageSettings): S3Client {
 }
 
 export function loadStorageSettings(config: ConfigService): StorageSettings {
+  const maxFileSizeMB = config.get<number>('FILE_MAX_SIZE_MB', 100); // nginx client_max_body_size와 일치
+
   const allowedMimesRaw = config.get<string>(
     'STORAGE_ALLOWED_MIMES',
-    'image/*,application/pdf,' +
+    'image/*,' +
+    'application/pdf,' +
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,' +
     'application/vnd.ms-excel,' +
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document,' +
     'application/msword,' +
     'application/vnd.openxmlformats-officedocument.presentationml.presentation,' +
     'application/vnd.ms-powerpoint,' +
-    'application/x-hwp,application/vnd.hancom.hwp,' +
-    'application/hwp+zip,application/vnd.hancom.hwpx,' +
+    'application/x-hwp,application/vnd.hancom.hwp,application/haansofthwp,' +
+    'application/hwp+zip,application/vnd.hancom.hwpx,application/octet-stream,' +
     'application/zip,application/x-zip-compressed',
   );
 
@@ -67,7 +71,8 @@ export function loadStorageSettings(config: ConfigService): StorageSettings {
     reconcileEnabled: config.get<string>('STORAGE_RECONCILE_ENABLED', 'false') === 'true',
     reconcileGraceHours: config.get<number>('STORAGE_RECONCILE_GRACE_HOURS', 24),
     reconcileCron: config.get<string>('STORAGE_RECONCILE_CRON', '0 0 4 * * *'),
-    maxFileSizeBytes: 20 * 1024 * 1024, // 20MB (Spring multipart max-file-size)
+    maxFileSizeBytes: maxFileSizeMB * 1024 * 1024,
+    maxFileCount: config.get<number>('FILE_MAX_COUNT', 10),
   };
 }
 

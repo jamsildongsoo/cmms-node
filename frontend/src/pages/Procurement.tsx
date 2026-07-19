@@ -178,6 +178,69 @@ export default function Procurement() {
     catch (e: any) { alert(e.response?.data?.message || '삭제 실패'); }
   };
 
+  // 목록 인쇄
+  const handlePrint = () => {
+    const list = tab === 'requests' ? requests : vendors;
+    if (list.length === 0) { alert('인쇄할 목록이 없습니다.'); return; }
+    const user = useAuthStore.getState().user;
+    const now = new Date();
+    const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+
+    const printWindow = window.open('', '_blank', 'width=1200,height=800');
+    if (!printWindow) { alert('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.'); return; }
+
+    const tabLabel = tab === 'requests' ? '구매요청' : '벤더';
+    const rows = tab === 'requests'
+      ? (list as PurchaseRequest[]).map(pr => `
+          <tr>
+            <td class="mono">${pr.id}</td>
+            <td>${pr.requestDate || '-'}</td>
+            <td>${pr.plantId || '-'} / ${pr.warehouseId || '-'}</td>
+            <td>${pr.type === 'ITEM' ? '자재' : pr.type === 'SERVICE' ? '용역' : pr.type}</td>
+            <td>${pr.status === 'T' ? '저장' : pr.status === 'C' ? '확정' : pr.status === 'O' ? '발주' : pr.status === 'S' ? '배송' : pr.status}</td>
+            <td>${pr.approvalId || '-'}</td>
+          </tr>
+        `).join('')
+      : (list as Vendor[]).map(v => `
+          <tr>
+            <td class="mono">${v.id}</td>
+            <td>${v.name}</td>
+            <td>${v.bizNo || '-'}</td>
+            <td>${v.contact || '-'}</td>
+            <td>${v.manager || '-'}</td>
+          </tr>
+        `).join('');
+
+    const thCells = tab === 'requests'
+      ? '<th>요청번호</th><th>요청일</th><th>플랜트/저장소</th><th>유형</th><th>절차</th><th>결재번호</th>'
+      : '<th>코드</th><th>이름</th><th>사업자번호</th><th>연락처</th><th>담당자</th>';
+
+    printWindow.document.title = `${tabLabel} 목록 - 인쇄`;
+    printWindow.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${tabLabel} 목록 - 인쇄</title>
+<style>
+@page { size: A4 landscape; margin: 10mm 10mm 14mm 10mm; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #000; padding: 10mm; }
+h1 { text-align: center; font-size: 14pt; margin-bottom: 4mm; border-bottom: 2px solid #000; padding-bottom: 3mm; }
+.print-info { display: flex; justify-content: space-between; font-size: 8pt; color: #666; border-bottom: 1px solid #ccc; padding-bottom: 2mm; margin-bottom: 4mm; }
+table { width: 100%; border-collapse: collapse; font-size: 8pt; }
+th, td { border: 1px solid #333; padding: 4px 6px; text-align: center; }
+th { background: #eee; font-weight: 600; }
+.mono { font-family: monospace; }
+.no-print { text-align: right; margin-bottom: 12px; }
+.no-print button { padding: 8px 20px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 10pt; }
+@media print { .no-print { display: none; } }
+</style></head><body>
+<h1>${tabLabel} 현황</h1>
+<div class="print-info"><span>회사: ${user?.companyName || user?.companyId || 'CMMS'}</span><span>출력자: ${user?.name || '-'} | 출력일시: ${stamp}</span></div>
+<table><thead><tr>${thCells}</tr></thead><tbody>${rows}</tbody></table>
+<div class="no-print"><button onclick="window.print()">인쇄</button></div>
+</body></html>`);
+    printWindow.document.close();
+    printWindow.focus();
+  };
+
   // 인쇄(구매요청서)
   const [printPr, setPrintPr] = useState<{ header: PurchaseRequest; items: ItemLine[] } | null>(null);
   const openPrint = async (id: string) => {
@@ -232,41 +295,41 @@ export default function Procurement() {
     <div className="space-y-6">
       {/* 헤더 */}
       <div className="flex justify-between items-center print:hidden">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-2">
-            <ShoppingCart size={24} className="text-blue-500" />
-            구매 (Procurement)
-          </h1>
-          <p className="text-slate-400 text-sm mt-1">구매요청 → 발주/배송 → 입고(재고 반영). 풀 워크플로우는 오프라인.</p>
-        </div>
-        <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg">
-          <button onClick={() => setTab('requests')} className={`px-4 py-1.5 rounded-md text-xs font-semibold cursor-pointer border-0 ${tab === 'requests' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200 bg-transparent'}`}>
-            구매요청
+        <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-2">
+          <ShoppingCart size={24} className="text-blue-500" />
+          구매
+        </h1>
+        <div className="flex items-center gap-3">
+          <button onClick={handlePrint} className="bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 cursor-pointer">
+            <Printer size={14} /> 목록 인쇄
           </button>
-          <button onClick={() => setTab('vendors')} className={`px-4 py-1.5 rounded-md text-xs font-semibold cursor-pointer border-0 ${tab === 'vendors' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200 bg-transparent'}`}>
-            벤더 관리
+          <button onClick={tab === 'requests' ? openNewForm : () => setVendorForm({ id: '', name: '', bizNo: '', contact: '', manager: '', remarks: '' })} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 cursor-pointer border-0">
+            <Plus size={14} /> 입력
           </button>
+          <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg">
+            <button onClick={() => setTab('requests')} className={`px-4 py-1.5 rounded-md text-xs font-semibold cursor-pointer border-0 ${tab === 'requests' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200 bg-transparent'}`}>
+              구매요청
+            </button>
+            <button onClick={() => setTab('vendors')} className={`px-4 py-1.5 rounded-md text-xs font-semibold cursor-pointer border-0 ${tab === 'vendors' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200 bg-transparent'}`}>
+              벤더 관리
+            </button>
+          </div>
         </div>
       </div>
 
       {tab === 'requests' && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-          <div className="flex justify-between items-center mb-4 print:hidden">
-            <h2 className="text-lg font-bold text-slate-200">구매요청 목록</h2>
-            <button onClick={openNewForm} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-3 py-1.5 text-xs font-semibold flex items-center gap-1 cursor-pointer border-0">
-              <Plus size={13} /> 입력
-            </button>
-          </div>
+          <h2 className="text-lg font-bold text-slate-200 mb-4 print:hidden">구매요청 목록</h2>
           <table className="w-full text-xs">
             <thead className="bg-slate-950 text-slate-400 text-left">
               <tr>
-                <th className="p-3">PR번호</th>
+                <th className="p-3">요청번호</th>
                 <th className="p-3">요청일</th>
                 <th className="p-3">플랜트/저장소</th>
                 <th className="p-3">유형</th>
                 <th className="p-3">문서</th>
                 <th className="p-3">절차</th>
-                <th className="p-3 text-right">액션</th>
+                <th className="p-3 text-right">작업</th>
               </tr>
             </thead>
             <tbody>
@@ -327,12 +390,7 @@ export default function Procurement() {
       {/* 벤더 관리 탭 */}
       {tab === 'vendors' && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-bold text-slate-200">벤더 관리</h2>
-            <button onClick={() => setVendorForm({ id: '', name: '', bizNo: '', contact: '', manager: '', remarks: '' })} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-3 py-1.5 text-xs font-semibold flex items-center gap-1 cursor-pointer border-0">
-              <Plus size={13} /> 입력
-            </button>
-          </div>
+          <h2 className="text-lg font-bold text-slate-200 mb-4">벤더 관리</h2>
           <table className="w-full text-xs">
             <thead className="bg-slate-950 text-slate-400 text-left">
               <tr>
@@ -544,7 +602,7 @@ export default function Procurement() {
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 print:hidden">
-      <div className="bg-slate-950 border border-slate-800 rounded-xl p-6 w-[640px] max-h-[90vh] overflow-y-auto">
+      <div className="bg-slate-950 border border-slate-800 rounded-xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-sm font-bold text-slate-200">{title}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-200 bg-transparent border-0 cursor-pointer">

@@ -21,9 +21,11 @@ interface Props {
   onUploadingChange?: (uploading: boolean) => void;
   /** 읽기 전용(상세 조회): 업로드/삭제 없이 목록·다운로드만. */
   readOnly?: boolean;
+  /** 에러 메시지를 상위 컴포넌트에 전달(toast 등). */
+  onError?: (message: string) => void;
 }
 
-export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUploadingChange, readOnly = false }: Props) {
+export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUploadingChange, readOnly = false, onError }: Props) {
   const [items, setItems] = useState<FileItem[]>([]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -52,14 +54,17 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
     if (readOnly || !files || files.length === 0) return;
     const form = new FormData();
     Array.from(files).forEach((f) => form.append('files', f));
-    form.append('refModule', refModule);
     if (groupNo) form.append('groupNo', String(groupNo));
 
     setUploading(true);
     setProgress(0);
     try {
-      const res = await axiosInstance.post('/files', form, {
-        headers: { 'Content-Type': undefined as any }, // FormData 경계(boundary) 자동 설정 유도
+      const params = new URLSearchParams();
+      params.set('refModule', refModule);
+      if (groupNo) params.set('groupNo', String(groupNo));
+
+      const res = await axiosInstance.post(`/files?${params.toString()}`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (e) => {
           if (e.total) setProgress(Math.round((e.loaded * 100) / e.total));
         },
@@ -68,7 +73,8 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
       if (!groupNo && onGroupNoChange) onGroupNoChange(newGroupNo);
       await loadItems(newGroupNo);
     } catch (err: any) {
-      alert(err.response?.data?.message || '파일 업로드에 실패했습니다.');
+      const msg = err.response?.data?.message || '파일 업로드에 실패했습니다.';
+      onError?.(msg);
     } finally {
       setUploading(false);
       setProgress(0);
@@ -91,7 +97,7 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
       a.remove();
       window.URL.revokeObjectURL(url);
     } catch {
-      alert('다운로드에 실패했습니다.');
+      onError?.('다운로드에 실패했습니다.');
     }
   };
 
@@ -102,7 +108,7 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
       await axiosInstance.delete(`/files/${groupNo}/${item.itemNo}`);
       loadItems(groupNo);
     } catch {
-      alert('삭제에 실패했습니다.');
+      onError?.('삭제에 실패했습니다.');
     }
   };
 

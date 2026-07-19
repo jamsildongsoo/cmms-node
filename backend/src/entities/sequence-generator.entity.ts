@@ -1,4 +1,5 @@
-import { Entity, PrimaryColumn, Column } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Department } from './department.entity';
 import { BaseEntity } from './base.entity';
 
 /** 문서번호 채번기 — 채번 SequenceService가 raw SQL로 사용 */

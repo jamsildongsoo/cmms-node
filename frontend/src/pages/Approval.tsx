@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import axiosInstance from '../api/axios';
 import { formatDateTime } from '../utils/datetime';
+import RichTextEditor from '../components/RichTextEditor';
 import { getApiErrorMessage } from '../utils/apiError';
 import { useAuthStore } from '../store/useAuthStore';
 import FileUpload from '../components/FileUpload';
@@ -25,6 +26,16 @@ interface ApprovalModel {
   updatedAt: string;
 }
 
+interface User {
+  id: string;
+  name: string;
+  title: string | null;
+  position: string | null;
+  departmentName: string | null;
+  departmentId: string | null;
+  useYn?: string;
+}
+
 interface ApprovalStepModel {
   approvalId: string;
   stepNo: number;
@@ -40,7 +51,7 @@ export default function Approval() {
   const [activeTab, setActiveTab] = useState<'pending' | 'sent' | 'referenced' | 'processed'>('pending');
 
   const [approvals, setApprovals] = useState<ApprovalModel[]>([]);
-  const [usersList, setUsersList] = useState<{ id: string; name: string; title: string | null; position: string | null }[]>([]);
+  const [usersList, setUsersList] = useState<User[]>([]);
 
   // Modal / Detail states
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -50,6 +61,7 @@ export default function Approval() {
   // Action input states
   const [comments, setComments] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
 
   // New Draft Creation Modal
@@ -59,6 +71,8 @@ export default function Approval() {
   const [newRefNo, setNewRefNo] = useState('');
   const [newRefModule, setNewRefModule] = useState('');
   const [selectedLine, setSelectedLine] = useState<{ approverId: string; type: string }[]>([]);
+  const [lineUserId, setLineUserId] = useState('');
+  const [lineType, setLineType] = useState<'A' | 'G' | 'R'>('A');
   const [newFileGroupId, setNewFileGroupId] = useState<number | null>(null);
   const [fileUploading, setFileUploading] = useState(false);
   const [editingApprovalId, setEditingApprovalId] = useState<string | null>(null);
@@ -118,8 +132,11 @@ export default function Approval() {
     setNewRefNo('');
     setNewRefModule('');
     setSelectedLine([]);
+    setLineUserId('');
+    setLineType('A');
     setNewFileGroupId(null);
     setEditingApprovalId(null);
+    setNewContent('');
     setIsDraftModalOpen(true);
   };
 
@@ -146,9 +163,11 @@ export default function Approval() {
     }
   };
 
-  const handleAddLineApprover = (userId: string, type: 'A' | 'G' | 'R') => {
-    if (selectedLine.some(l => l.approverId === userId)) return;
-    setSelectedLine([...selectedLine, { approverId: userId, type }]);
+  const handleAddLineApprover = () => {
+    if (!lineUserId) return;
+    if (selectedLine.some(l => l.approverId === lineUserId)) return;
+    setSelectedLine([...selectedLine, { approverId: lineUserId, type: lineType }]);
+    setLineUserId('');
   };
 
   const handleRemoveLineApprover = (idx: number) => {
@@ -238,6 +257,19 @@ export default function Approval() {
   };
 
   return (
+    <>
+      <style>{`
+        .approval-content table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
+        .approval-content td, .approval-content th { border: 1px solid #334155; padding: 6px 8px; }
+        .approval-content th { background-color: #334155; color: #e2e8f0; font-weight: 600; }
+        .approval-content tr:nth-child(even) td { background-color: #1e293b33; }
+        .approval-content table, .approval-content td, .approval-content th { font-size: 0.75rem; }
+        @media print {
+          .approval-content td, .approval-content th { border-color: #94a3b8; }
+          .approval-content th { background-color: #f1f5f9; color: #0f172a; }
+          .approval-content tr:nth-child(even) td { background-color: #f8fafc; }
+        }
+      `}</style>
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 print:hidden">
@@ -411,7 +443,7 @@ export default function Approval() {
 
                 <div>
                   <span className="text-[10px] font-bold text-slate-500 block mb-1.5">품의 내용 및 상세 본문</span>
-                  <div className="bg-slate-950/40 border border-slate-800 p-4 rounded-xl text-slate-300 font-sans text-xs whitespace-pre-wrap min-h-[150px] leading-relaxed print:bg-white print:border-slate-350 print:text-black print:p-2">
+                  <div className="bg-slate-950/40 border border-slate-800 p-4 rounded-xl text-slate-300 font-sans text-xs min-h-[150px] leading-relaxed print:bg-white print:border-slate-350 print:text-black print:p-2 approval-content">
                     {selectedApproval.content || '(본문 내용 없음)'}
                   </div>
                 </div>
@@ -543,7 +575,7 @@ export default function Approval() {
       {/* DRAFT SUBMISSION MODAL */}
       {isDraftModalOpen && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl">
             <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0">
               <h2 className="text-lg font-bold text-slate-200">
                 {editingApprovalId ? '결재 기안서 수정' : '일반 결재 기안서 상신'}
@@ -551,21 +583,122 @@ export default function Approval() {
               <button onClick={() => setIsDraftModalOpen(false)} className="text-slate-500 hover:text-slate-300 border-0 cursor-pointer bg-transparent"><X size={20} /></button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 text-xs">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="sm:col-span-2">
-                  <label className="block text-slate-400 mb-1.5">품의 제목 *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="결재 기안서 제목을 입력해주세요."
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none"
+            <div className="flex-1 overflow-y-auto p-6 space-y-5 text-xs">
+              {message && (
+                <div className="p-3 rounded-lg border border-slate-800 bg-slate-900 text-xs text-center text-slate-200 flex items-center justify-center gap-2">
+                  {message.type === 'success' ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+                  )}
+                  <span>{message.text}</span>
+                </div>
+              )}
+              {/* 1행: 품의 제목 */}
+              <div>
+                <label className="block text-slate-400 mb-1.5 font-semibold">품의 제목 *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="결재 기안서 제목을 입력해주세요."
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none"
+                />
+              </div>
+
+              {/* 2행: 결재선 */}
+              <div>
+                <label className="block text-slate-400 mb-2 font-semibold">결재선 구성 (기안자 제외 순차 지정)</label>
+                <div className="flex gap-2 mb-3">
+                  <select
+                    value={lineUserId}
+                    onChange={(e) => setLineUserId(e.target.value)}
+                    className="flex-1 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none"
+                  >
+                    <option value="">사용자 선택</option>
+                    {usersList.filter(u => u.id !== user?.id && u.useYn === 'Y').map(u => (
+                      <option key={u.id} value={u.id}>{u.name}({u.id}) / {u.position || '-'} / {u.title || '-'} / {u.departmentName || '-'}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={lineType}
+                    onChange={(e) => setLineType(e.target.value as 'A' | 'G' | 'R')}
+                    className="w-28 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none"
+                  >
+                    <option value="A">결재</option>
+                    <option value="G">합의</option>
+                    <option value="R">참조</option>
+                  </select>
+                  <button
+                    onClick={handleAddLineApprover}
+                    disabled={!lineUserId}
+                    className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-lg px-3 flex items-center gap-1 border-0 cursor-pointer"
+                  >
+                    <Plus size={14} /> 추가
+                  </button>
+                </div>
+                {selectedLine.length === 0 ? (
+                  <div className="text-center py-3 text-slate-600 bg-slate-950/50 rounded-lg border border-slate-800">
+                    결재선을 지정해주세요.
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {selectedLine.map((line, idx) => {
+                      const u = usersList.find(usr => usr.id === line.approverId);
+                      const typeLabel = line.type === 'A' ? '결재' : line.type === 'G' ? '합의' : '참조';
+                      const typeColor = line.type === 'A' ? 'text-blue-400' : line.type === 'G' ? 'text-purple-400' : 'text-slate-400';
+                      return (
+                        <div key={idx} className="flex justify-between items-center bg-slate-950 px-3 py-2 rounded border border-slate-800">
+                          <div className="flex items-center gap-2">
+                            <span className="text-slate-500 font-mono w-5">{idx + 1}</span>
+                            <span className={`font-semibold text-[10px] ${typeColor} w-10`}>{typeLabel}</span>
+                            <span className="text-slate-200">{u?.name}</span>
+                            <span className="text-slate-500 text-[10px]">({u?.position || '-'}) / {u?.departmentName || '-'}</span>
+                          </div>
+                          <button
+                            onClick={() => handleRemoveLineApprover(idx)}
+                            className="text-slate-600 hover:text-rose-400 bg-transparent border-0 cursor-pointer text-xs"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* 3행: 본문 (Tiptap 에디터) */}
+              <div>
+                <label className="block text-slate-400 mb-1.5 font-semibold">상세 내용</label>
+                <div className="bg-slate-950 border border-slate-800 rounded-lg overflow-hidden">
+                  <RichTextEditor
+                    key={editingApprovalId || 'new'}
+                    content={newContent}
+                    onChange={setNewContent}
+                    placeholder="품의 내용을 구체적으로 작성하세요."
+                    minHeight="200px"
                   />
                 </div>
+              </div>
+
+              {/* 4행: 첨부파일 */}
+              <div>
+                <label className="block text-slate-400 mb-1.5 font-semibold">첨부파일</label>
+                <FileUpload
+                  groupNo={newFileGroupId}
+                  refModule="APR"
+                  onGroupNoChange={setNewFileGroupId}
+                  onUploadingChange={setFileUploading}
+                  onError={(msg) => setMessage({ type: 'error', text: msg })}
+                />
+              </div>
+
+              {/* 연계 참조 (옵션) */}
+              <div className="grid grid-cols-2 gap-4 pt-3 border-t border-slate-800">
                 <div>
-                  <label className="block text-slate-400 mb-1.5">연계 참조 번호 (Optional)</label>
+                  <label className="block text-slate-400 mb-1.5">연계 참조 번호</label>
                   <input
                     type="text"
                     placeholder="예: WO-202605-0001"
@@ -575,100 +708,14 @@ export default function Approval() {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-400 mb-1.5">연계 참조 모듈 (Optional)</label>
+                  <label className="block text-slate-400 mb-1.5">연계 참조 모듈</label>
                   <input
                     type="text"
-                    placeholder="예: WO 또는 PM"
+                    placeholder="예: WO, PM"
                     value={newRefModule}
                     onChange={(e) => setNewRefModule(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none font-mono"
                   />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-slate-400 mb-1.5">상세 내용</label>
-                  <textarea
-                    rows={5}
-                    placeholder="품의 내용을 구체적으로 작성하세요."
-                    value={newContent}
-                    onChange={(e) => setNewContent(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none font-sans"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-slate-400 mb-1.5">첨부파일</label>
-                  <FileUpload
-                    groupNo={newFileGroupId}
-                    refModule="APR"
-                    onGroupNoChange={setNewFileGroupId}
-                    onUploadingChange={setFileUploading}
-                  />
-                </div>
-              </div>
-
-              {/* Approval Line Configuration */}
-              <div className="space-y-3">
-                <span className="text-slate-400 font-bold block">결재선 구성 (기안자 제외 순차 지정)</span>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-950 p-4 rounded-xl border border-slate-850">
-                  
-                  {/* Left: User list Selector */}
-                  <div className="space-y-2 border-r border-slate-900 pr-4">
-                    <span className="block text-[10px] text-slate-500 font-semibold uppercase">임직원 주소록</span>
-                    <div className="max-h-40 overflow-y-auto space-y-1">
-                      {usersList.filter(u => u.id !== user?.id).map(u => (
-                        <div key={u.id} className="flex justify-between items-center bg-slate-900/60 p-2 rounded border border-slate-850">
-                          <span>{u.name} ({u.title || '직책없음'})</span>
-                          <div className="flex gap-1">
-                            <button
-                              onClick={() => handleAddLineApprover(u.id, 'A')}
-                              className="bg-blue-600/10 hover:bg-blue-600 text-blue-400 hover:text-white px-2 py-0.5 rounded text-[10px] transition-colors border-0 cursor-pointer"
-                            >
-                              결재
-                            </button>
-                            <button
-                              onClick={() => handleAddLineApprover(u.id, 'G')}
-                              className="bg-purple-600/10 hover:bg-purple-600 text-purple-400 hover:text-white px-2 py-0.5 rounded text-[10px] transition-colors border-0 cursor-pointer"
-                            >
-                              합의
-                            </button>
-                            <button
-                              onClick={() => handleAddLineApprover(u.id, 'R')}
-                              className="bg-slate-700/10 hover:bg-slate-700 text-slate-400 hover:text-white px-2 py-0.5 rounded text-[10px] transition-colors border-0 cursor-pointer"
-                            >
-                              참조
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Right: Selected Approval Line */}
-                  <div className="space-y-2 pl-2">
-                    <span className="block text-[10px] text-slate-500 font-semibold uppercase">지정된 결재선</span>
-                    <div className="max-h-40 overflow-y-auto space-y-1">
-                      {selectedLine.length === 0 ? (
-                        <span className="text-slate-600 block text-center py-8">지정된 결재선이 없습니다.</span>
-                      ) : (
-                        selectedLine.map((line, idx) => {
-                          const u = usersList.find(usr => usr.id === line.approverId);
-                          return (
-                            <div key={idx} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-800">
-                              <span className="font-mono text-[10px]">
-                                {idx + 1}. [{getStepTypeLabel(line.type)}] {u?.name} ({u?.title || '-'})
-                              </span>
-                              <button
-                                onClick={() => handleRemoveLineApprover(idx)}
-                                className="text-slate-500 hover:text-rose-400 bg-transparent border-0 cursor-pointer font-bold text-xs"
-                              >
-                                삭제
-                              </button>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-
                 </div>
               </div>
             </div>
@@ -682,5 +729,6 @@ export default function Approval() {
       )}
 
     </div>
+    </>
   );
 }

@@ -168,7 +168,7 @@ export class PmService {
        AND p.equipment_id = e.id`;
 
     // 동적 WHERE 조건 빌드
-    const conditions: string[] = ['p.delete_yn = \'N\''];
+    const conditions: string[] = [`p.company_id = $1`];
     const params: any[] = [companyId];
     let paramIdx = 2;
 

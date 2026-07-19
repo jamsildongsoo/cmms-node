@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_INTERCEPTOR } from '@nestjs/core';
+import { MulterModule } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { MdmModule } from './modules/mdm/mdm.module';
@@ -22,6 +24,10 @@ import { SystemModule } from './modules/system/system.module';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['.env', '../.env'],
+    }),
+    // 전역 multer 설정 — 파일 파싱만, 검증은 file-storage.service에서
+    MulterModule.register({
+      storage: memoryStorage(),
     }),
     DatabaseModule,
     AuthModule,
