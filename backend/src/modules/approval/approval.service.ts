@@ -13,7 +13,7 @@ export interface ApprovalSubmitRequest {
   approval: {
     id?: string | null;
     title: string;
-    content?: string | null;
+    content?: Record<string, unknown> | null;
     fileGroupId?: string | number | null;
     status?: string;
   };
@@ -33,6 +33,17 @@ export interface ApprovalActionRequest {
 export interface ApprovalDetailResponse {
   approval: any;
   steps: any[];
+}
+
+interface ApprovalRow {
+  id: string;
+  title: string;
+  content: Record<string, unknown> | null;
+  drafter_id: string;
+  file_group_id: string | number | null;
+  status: string;
+  created_at: string | Date;
+  updated_at: string | Date;
 }
 
 /**
@@ -82,7 +93,7 @@ export class ApprovalService {
         }
         // 결재선 교체: 요청에 steps가 있을 때만 기존 결재자(step_no>0)를 교체.
         // 기안(step_no=0)은 항상 보존된다.
-        if (steps && steps.length > 0) {
+        if (steps) {
           await qr.query(
             `DELETE FROM approval_step WHERE company_id = $1 AND approval_id = $2 AND step_no > 0`,
             [companyId, appNo],
@@ -90,7 +101,13 @@ export class ApprovalService {
         }
       }
 
-      const status = hasApprover ? DocStatus.IN_PROGRESS : DocStatus.TEMP;
+      // 결재선이 구성되어 있어도 임시저장 요청은 T 상태를 유지한다.
+      // status를 보내지 않는 일반 상신만 결재선 유무에 따라 상태를 결정한다.
+      const status = approval.status === DocStatus.TEMP
+        ? DocStatus.TEMP
+        : hasApprover
+          ? DocStatus.IN_PROGRESS
+          : DocStatus.TEMP;
 
       if (isNew) {
         await qr.query(
@@ -144,7 +161,7 @@ export class ApprovalService {
         `SELECT * FROM approval WHERE company_id = $1 AND id = $2`,
         [companyId, appNo],
       );
-      return saved[0];
+      return this.toApprovalResponse(saved[0]);
     } catch (err) {
       await qr.rollbackTransaction();
       throw err;
@@ -154,10 +171,11 @@ export class ApprovalService {
   }
 
   async getSentApprovals(companyId: string, userId: string): Promise<any[]> {
-    return this.dataSource.query(
+    const rows = await this.dataSource.query(
       `SELECT * FROM approval WHERE company_id = $1 AND drafter_id = $2 AND delete_yn = 'N' ORDER BY id DESC`,
       [companyId, userId],
     );
+    return rows.map((row: ApprovalRow) => this.toApprovalResponse(row));
   }
 
   async getPendingApprovals(companyId: string, userId: string): Promise<any[]> {
@@ -178,7 +196,7 @@ export class ApprovalService {
           [companyId, step.approval_id],
         );
         if (rows.length > 0) {
-          pendingApprovals.push(rows[0]);
+          pendingApprovals.push(this.toApprovalResponse(rows[0]));
         }
       }
     }
@@ -187,17 +205,18 @@ export class ApprovalService {
   }
 
   async getReferencedApprovals(companyId: string, userId: string): Promise<any[]> {
-    return this.dataSource.query(
+    const rows = await this.dataSource.query(
       `SELECT a.* FROM approval a
        JOIN approval_step s ON a.company_id = s.company_id AND a.id = s.approval_id
        WHERE a.company_id = $1 AND s.approver_id = $2 AND s.approval_type = '${ApprovalStepType.REFERENCE}' AND a.delete_yn = 'N'
        ORDER BY a.id DESC`,
       [companyId, userId],
     );
+    return rows.map((row: ApprovalRow) => this.toApprovalResponse(row));
   }
 
   async getProcessedApprovals(companyId: string, userId: string): Promise<any[]> {
-    return this.dataSource.query(
+    const rows = await this.dataSource.query(
       `SELECT DISTINCT a.* FROM approval a
        JOIN approval_step s ON a.company_id = s.company_id AND a.id = s.approval_id
        WHERE a.company_id = $1 
@@ -208,6 +227,7 @@ export class ApprovalService {
        ORDER BY a.id DESC`,
       [companyId, userId],
     );
+    return rows.map((row: ApprovalRow) => this.toApprovalResponse(row));
   }
 
   async getApprovalDetails(companyId: string, id: string): Promise<ApprovalDetailResponse> {
@@ -234,8 +254,21 @@ export class ApprovalService {
     );
 
     return {
-      approval: rows[0],
+      approval: this.toApprovalResponse(rows[0]),
       steps,
+    };
+  }
+
+  private toApprovalResponse(row: ApprovalRow): any {
+    return {
+      id: row.id,
+      title: row.title,
+      content: row.content,
+      drafterId: row.drafter_id,
+      fileGroupId: row.file_group_id == null ? null : Number(row.file_group_id),
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
     };
   }
 

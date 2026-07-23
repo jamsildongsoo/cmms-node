@@ -433,12 +433,12 @@ th { background: #eee; font-weight: 600; }
 .no-print button { padding: 8px 20px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 10pt; }
 @media print { .no-print { display: none; } }
 </style></head><body>
+<div class="no-print"><button onclick="window.print()">인쇄</button></div>
 <h1>안전작업허가서 현황</h1>
 <div class="print-info"><span>회사: ${user?.companyName || user?.companyId || 'CMMS'}</span><span>출력자: ${user?.name || '-'} | 출력일시: ${stamp}</span></div>
 <table><thead><tr>
 <th>허가서번호</th><th>제목</th><th>설비</th><th>유형</th><th>부서</th><th>감독자</th><th>시작</th><th>종료</th><th>상태</th>
 </tr></thead><tbody>${rows}</tbody></table>
-<div class="no-print"><button onclick="window.print()">인쇄</button></div>
 </body></html>`);
     printWindow.document.close();
     printWindow.focus();

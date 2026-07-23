@@ -18,12 +18,9 @@ export interface StorageSettings {
   accessKey: string;
   secretKey: string;
   bucket: string;
-  allowedMimes: string[];
   reconcileEnabled: boolean;
   reconcileGraceHours: number;
   reconcileCron: string;
-  maxFileSizeBytes: number;
-  maxFileCount: number;
 }
 
 export function createS3Client(settings: StorageSettings): S3Client {
@@ -34,45 +31,23 @@ export function createS3Client(settings: StorageSettings): S3Client {
       accessKeyId: settings.accessKey,
       secretAccessKey: settings.secretKey,
     },
-    // Spring: S3Configuration.builder().pathStyleAccessEnabled(true)
     // Supabase Storage S3 호환 필수 설정
     forcePathStyle: true,
+    // Supabase S3 게이트웨이는 Supabase 프로젝트 region 기준으로 SigV4 서명 검증
+    signingRegion: 'ap-south-1',
   });
 }
 
 export function loadStorageSettings(config: ConfigService): StorageSettings {
-  const maxFileSizeMB = config.get<number>('FILE_MAX_SIZE_MB', 100); // nginx client_max_body_size와 일치
-
-  const allowedMimesRaw = config.get<string>(
-    'STORAGE_ALLOWED_MIMES',
-    'image/*,' +
-    'application/pdf,' +
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,' +
-    'application/vnd.ms-excel,' +
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document,' +
-    'application/msword,' +
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation,' +
-    'application/vnd.ms-powerpoint,' +
-    'application/x-hwp,application/vnd.hancom.hwp,application/haansofthwp,' +
-    'application/hwp+zip,application/vnd.hancom.hwpx,application/octet-stream,' +
-    'application/zip,application/x-zip-compressed',
-  );
-
   return {
     endpoint: config.getOrThrow<string>('STORAGE_ENDPOINT'),
     region: config.get<string>('STORAGE_REGION', 'ap-southeast-1'),
     accessKey: config.getOrThrow<string>('STORAGE_ACCESS_KEY'),
     secretKey: config.getOrThrow<string>('STORAGE_SECRET_KEY'),
-    bucket: config.get<string>('STORAGE_BUCKET', 'cmms-attachments'),
-    allowedMimes: allowedMimesRaw
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
+    bucket: config.get<string>('STORAGE_BUCKET', 'cmms-node-attachments'),
     reconcileEnabled: config.get<string>('STORAGE_RECONCILE_ENABLED', 'false') === 'true',
     reconcileGraceHours: config.get<number>('STORAGE_RECONCILE_GRACE_HOURS', 24),
     reconcileCron: config.get<string>('STORAGE_RECONCILE_CRON', '0 0 4 * * *'),
-    maxFileSizeBytes: maxFileSizeMB * 1024 * 1024,
-    maxFileCount: config.get<number>('FILE_MAX_COUNT', 10),
   };
 }
 

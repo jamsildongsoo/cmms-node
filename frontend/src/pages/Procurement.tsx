@@ -20,6 +20,7 @@ interface PurchaseRequest {
   id: string; plantId: string; warehouseId: string; requesterId: string; requestDate: string;
   requestType?: string; vendorId?: string | null; orderDate?: string | null; etaDate?: string | null;
   shipStartDate?: string | null; status: string; procStatus?: string | null; remarks?: string;
+  type?: string; approvalId?: string | null;
 }
 interface ItemLine { lineNo?: number; inventoryId: string; qty: number; unit?: string; remarks?: string }
 interface ReceiveLine { lineNo: number; qty: number; unitPrice?: number | null }

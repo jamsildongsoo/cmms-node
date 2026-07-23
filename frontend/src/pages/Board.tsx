@@ -3,23 +3,30 @@ import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import FileUpload from '../components/FileUpload';
 import RichTextEditor from '../components/RichTextEditor';
-import { formatDateTime, formatDate } from '../utils/datetime';
+import RichTextViewer from '../components/RichTextViewer';
+import {
+  createEmptyRichTextDocument,
+  isRichTextEmpty,
+  type RichTextDocument,
+} from '../types/richText';
+import { formatDateTime } from '../utils/datetime';
 import { getApiErrorMessage } from '../utils/apiError';
 import {
-  Plus, Trash, Download, X, Megaphone, MessageSquare, ChevronRight
+  Plus, Trash, X, Megaphone, MessageSquare, ChevronRight
 } from 'lucide-react';
 
 interface BoardModel {
   id: number;
   boardTypeCode: string;
   title: string;
-  content: string;
+  content: RichTextDocument;
   noticeYn: string; // Y, N
   fileGroupId: number | null;
   refNo: string | null;
   refModule: string | null;
   createdAt: string;
   createdBy: string;
+  createdByName: string | null;
 }
 
 interface BoardCommentModel {
@@ -45,7 +52,7 @@ export default function Board() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [formId, setFormId] = useState<number | null>(null);
   const [formTitle, setFormTitle] = useState('');
-  const [formContent, setFormContent] = useState('');
+  const [formContent, setFormContent] = useState<RichTextDocument>(createEmptyRichTextDocument);
   const [formNoticeYn, setFormNoticeYn] = useState('N');
   const [formBoardType, setFormBoardType] = useState('FREE'); // Default FREE
   const [formFileGroupId, setFormFileGroupId] = useState<number | null>(null);
@@ -55,6 +62,9 @@ export default function Board() {
   const [newCommentContent, setNewCommentContent] = useState('');
 
   const [isLoading, setIsLoading] = useState(false);
+
+  const formatAuthor = (post: BoardModel) =>
+    post.createdByName ? `${post.createdBy} / ${post.createdByName}` : post.createdBy;
 
   const fetchData = async () => {
     try {
@@ -66,7 +76,23 @@ export default function Board() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    let active = true;
+
+    axiosInstance.get('/board')
+      .then((res) => {
+        if (active) setPosts(res.data);
+      })
+      .catch((err) => {
+        if (!active) return;
+        console.error(err);
+        alert(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleOpenDetail = async (post: BoardModel) => {
     setIsLoading(true);
@@ -86,7 +112,7 @@ export default function Board() {
   const handleOpenCreate = () => {
     setFormId(null);
     setFormTitle('');
-    setFormContent('');
+    setFormContent(createEmptyRichTextDocument());
     setFormNoticeYn('N');
     setFormBoardType('FREE');
     setFormFileGroupId(null);
@@ -104,7 +130,7 @@ export default function Board() {
   };
 
   const handleSavePost = async () => {
-    if (!formTitle.trim() || !formContent.trim()) {
+    if (!formTitle.trim() || isRichTextEmpty(formContent)) {
       alert('제목과 내용을 모두 기입해 주세요.');
       return;
     }
@@ -182,30 +208,6 @@ export default function Board() {
     }
   };
 
-  const exportCsv = () => {
-    if (posts.length === 0) return;
-    const headers = ['번호', '구분', '제목', '공지여부', '기안자', '기안일'];
-    const rows = posts.map(p => [
-      p.id,
-      p.boardTypeCode === 'NOTICE' ? '공지사항' : '일반게시',
-      p.title,
-      p.noticeYn === 'Y' ? '예' : '아니오',
-      p.createdBy,
-      formatDate(p.createdAt)
-    ]);
-
-    const csvContent = "\uFEFF" + [headers.join(','), ...rows.map(e => e.map(val => `"${val.toString().replace(/"/g, '""')}"`).join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'board_posts.csv');
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -219,14 +221,6 @@ export default function Board() {
         </div>
 
         <div className="flex items-center gap-3">
-          <button
-            onClick={exportCsv}
-            className="bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <Download size={14} />
-            CSV 내보내기
-          </button>
-          
           <button
             onClick={handleOpenCreate}
             className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors border-0 cursor-pointer shadow-lg shadow-blue-900/20"
@@ -283,7 +277,7 @@ export default function Board() {
                           </span>
                         </div>
                       </td>
-                      <td className="p-3 text-slate-400">{post.createdBy}</td>
+                      <td className="p-3 text-slate-400">{formatAuthor(post)}</td>
                       <td className="p-3 font-mono text-slate-500">{formatDateTime(post.createdAt)}</td>
                       <td className="p-3 text-right">
                         <button
@@ -321,7 +315,7 @@ export default function Board() {
                 <div>
                   <h3 className="text-base font-extrabold text-slate-100">{selectedPost.title}</h3>
                   <div className="flex gap-4 text-slate-500 font-mono text-[10px] mt-1.5">
-                    <span>작성자: {selectedPost.createdBy}</span>
+                    <span>작성자: {formatAuthor(selectedPost)}</span>
                     <span>작성일시: {formatDateTime(selectedPost.createdAt)}</span>
                   </div>
                 </div>
@@ -344,9 +338,10 @@ export default function Board() {
               </div>
 
               {/* Main Content body */}
-              <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-xl text-slate-300 font-sans text-xs whitespace-pre-wrap min-h-[120px] leading-relaxed">
-                {selectedPost.content}
-              </div>
+              <RichTextViewer
+                content={selectedPost.content}
+                className="bg-slate-950/40 border border-slate-850 p-4 rounded-xl text-slate-300 font-sans text-xs min-h-[120px] leading-relaxed"
+              />
 
               {/* 첨부파일 (읽기 전용) */}
               <FileUpload groupNo={selectedPost.fileGroupId} refModule="BRD" readOnly />
@@ -423,48 +418,38 @@ export default function Board() {
       {isFormOpen && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl">
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+            <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0">
               <h2 className="text-lg font-bold text-slate-200">
                 {formId ? '게시글 수정' : '새 게시글 작성'}
               </h2>
               <button onClick={() => setIsFormOpen(false)} className="text-slate-500 hover:text-slate-300 border-0 cursor-pointer bg-transparent"><X size={20} /></button>
             </div>
 
-            <div className="p-6 space-y-4 text-xs">
+            <div className="p-6 space-y-4 text-xs flex-1 min-h-0 overflow-y-auto">
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
-                  <label className="block text-slate-500 mb-1.5">글 제목 *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="제목을 입력하세요."
-                    value={formTitle}
-                    onChange={(e) => setFormTitle(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-500 mb-1.5">공지 여부</label>
-                  <select
-                    value={formNoticeYn}
-                    onChange={(e) => setFormNoticeYn(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none"
-                  >
-                    <option value="N">일반 (N)</option>
-                    <option value="Y">공지글 고정 (Y)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-slate-500 mb-1.5">게시판 유형</label>
-                  <select
-                    value={formBoardType}
-                    onChange={(e) => setFormBoardType(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none"
-                  >
-                    <option value="FREE">자유게시판</option>
-                    <option value="NOTICE">공지사항</option>
-                    <option value="WORK">업무게시판</option>
-                  </select>
+                  <label htmlFor="board-title" className="block text-slate-500 mb-1.5">글 제목 *</label>
+                  <div className="flex items-center gap-4">
+                    <input
+                      id="board-title"
+                      type="text"
+                      required
+                      placeholder="제목을 입력하세요."
+                      value={formTitle}
+                      onChange={(e) => setFormTitle(e.target.value)}
+                      className="flex-1 min-w-0 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none"
+                    />
+                    <label className="flex items-center gap-2 text-slate-400 cursor-pointer select-none shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={formNoticeYn === 'Y'}
+                        onChange={(e) => setFormNoticeYn(e.target.checked ? 'Y' : 'N')}
+                        className="h-4 w-4 accent-blue-600 cursor-pointer"
+                      />
+                      공지
+                    </label>
+                  </div>
+                  <input type="hidden" name="boardTypeCode" value={formBoardType} />
                 </div>
                 <div className="col-span-2">
                   <label className="block text-slate-500 mb-1.5">상세 내용 *</label>
@@ -490,7 +475,7 @@ export default function Board() {
               </div>
             </div>
 
-            <div className="p-6 border-t border-slate-800 flex justify-end gap-2">
+            <div className="p-6 border-t border-slate-800 flex justify-end gap-2 shrink-0">
               <button onClick={() => setIsFormOpen(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg py-2 px-4 border-0 cursor-pointer">취소</button>
               <button onClick={handleSavePost} disabled={isLoading || fileUploading} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-4 border-0 cursor-pointer disabled:opacity-50">{fileUploading ? '업로드 중…' : '저장 완료'}</button>
             </div>

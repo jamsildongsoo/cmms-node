@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import axiosInstance from '../api/axios';
 import { getApiErrorMessage } from '../utils/apiError';
+import { richTextFromPlainText } from '../types/richText';
 
 interface ApprovalUser {
   id: string;
@@ -67,7 +68,10 @@ export default function ApprovalSubmitModal({
     setError('');
     try {
       const response = await axiosInstance.post('/approval/submit', {
-        approval: { title: title.trim(), content: content || null },
+        approval: {
+          title: title.trim(),
+          content: content.trim() ? richTextFromPlainText(content) : null,
+        },
         steps: approverIds.map((approverId) => ({
           approverId,
           approvalType: 'A',

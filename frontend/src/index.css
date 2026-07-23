@@ -45,6 +45,82 @@ html.light {
   min-height: 44px;
 }
 
+/* Tiptap 편집·상세·인쇄 공용 본문 스타일 */
+.rich-text-content {
+  color: var(--color-slate-200);
+}
+
+.rich-text-content table {
+  border-collapse: collapse;
+  margin: 0;
+  overflow: hidden;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.rich-text-content td,
+.rich-text-content th {
+  border: 1px solid var(--color-slate-700);
+  box-sizing: border-box;
+  color: inherit;
+  min-width: 1em;
+  padding: 6px 8px;
+  position: relative;
+  vertical-align: top;
+}
+
+.rich-text-content th {
+  background-color: var(--color-slate-800);
+  font-weight: 600;
+  text-align: left;
+}
+
+.rich-text-content .selectedCell {
+  outline: 2px solid #3b82f6;
+}
+
+.rich-text-content [data-placeholder] {
+  display: none;
+}
+
+.rich-text-content p.is-editor-empty:first-child::before {
+  color: #64748b;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.rich-text-content ul,
+.rich-text-content ol {
+  padding-left: 1.5rem;
+}
+
+.rich-text-content a {
+  color: #60a5fa;
+  text-decoration: underline;
+}
+
+.rich-text-content mark {
+  color: #1e293b;
+}
+
+@media print {
+  .rich-text-content:not(.preserve-print-formatting),
+  .rich-text-content:not(.preserve-print-formatting) * {
+    color: #000 !important;
+  }
+
+  .rich-text-content:not(.preserve-print-formatting) td,
+  .rich-text-content:not(.preserve-print-formatting) th {
+    border-color: #94a3b8 !important;
+  }
+
+  .rich-text-content:not(.preserve-print-formatting) th {
+    background-color: #f1f5f9 !important;
+  }
+}
+
 /* ==========================================================================
    인쇄 공통 정책 — 목록은 landscape 고정
    ========================================================================== */

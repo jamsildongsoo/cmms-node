@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsOptional, IsIn } from 'class-validator';
+import { IsNotEmpty, IsString, IsOptional, IsIn, IsObject } from 'class-validator';
 import { AppModule } from '../../../common/constants/module.constants';
 
 export class SaveBoardDto {
@@ -14,8 +14,8 @@ export class SaveBoardDto {
   title!: string;
 
   @IsNotEmpty()
-  @IsString()
-  content!: string;
+  @IsObject()
+  content!: Record<string, unknown>;
 
   @IsOptional()
   @IsString()

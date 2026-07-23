@@ -12,8 +12,8 @@ export class Approval extends BaseEntity {
   @Column({ name: 'title', length: 150 })
   title!: string;
 
-  @Column({ name: 'content', type: 'text', nullable: true })
-  content!: string | null;
+  @Column({ name: 'content', type: 'jsonb', nullable: true })
+  content!: Record<string, unknown> | null;
 
   @Column({ name: 'drafter_id', length: 50 })
   drafterId!: string;

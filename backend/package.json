@@ -1,7 +1,7 @@
 {
   "name": "cmms-node-backend",
   "version": "0.1.0",
-  "description": "CMMS AGY Backend - Node.js / NestJS / TypeScript",
+  "description": "CMMS node Backend - Node.js / NestJS / TypeScript",
   "private": true,
   "scripts": {
     "build": "nest build",

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import { getCommonStatusLabel as getStatusLabel, getCommonStatusClass as getStatusClass } from '../constants/status';
@@ -110,7 +111,6 @@ export default function PmRecord() {
   const [checkItems, setCheckItems] = useState<PmRecordItem[]>([]);
 
   const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [approvalRef, setApprovalRef] = useState<{ refNo: string; title: string } | null>(null);
 
   const canDirectConfirm = user?.permissions?.PM?.A === 'Y';
@@ -151,7 +151,7 @@ export default function PmRecord() {
       setEquipments(equipmentRes.data || []);
       setUsersList(userRes.data || []);
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '예방점검 목록을 불러오지 못했습니다.') });
+      toast.error(getApiErrorMessage(err, '예방점검 목록을 불러오지 못했습니다.'));
     }
   };
 
@@ -218,7 +218,7 @@ export default function PmRecord() {
       setCheckItems(res.data.checkItems || []);
       setIsFormOpen(true);
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '예방점검 상세를 불러오지 못했습니다.') });
+      toast.error(getApiErrorMessage(err, '예방점검 상세를 불러오지 못했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -226,7 +226,7 @@ export default function PmRecord() {
 
   const openResultFromPlan = async (plan: PmRecord) => {
     if (!isConfirmed(plan.status)) {
-      setMessage({ type: 'error', text: '확정된 예방점검 계획에 대해서만 실적을 입력할 수 있습니다.' });
+      toast.error('확정된 예방점검 계획에 대해서만 실적을 입력할 수 있습니다.');
       return;
     }
     setIsLoading(true);
@@ -246,7 +246,7 @@ export default function PmRecord() {
       })));
       setIsFormOpen(true);
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '계획 항목을 불러오지 못했습니다.') });
+      toast.error(getApiErrorMessage(err, '계획 항목을 불러오지 못했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -261,7 +261,7 @@ export default function PmRecord() {
 
   const loadTemplates = async (code: string) => {
     if (!plantId) {
-      setMessage({ type: 'error', text: '플랜트를 먼저 선택해주세요.' });
+      toast.error('플랜트를 먼저 선택해주세요.');
       return;
     }
     setIsLoading(true);
@@ -269,7 +269,7 @@ export default function PmRecord() {
       const res = await axiosInstance.get(`/pm/templates?plantId=${plantId}&checkTypeCode=${code}`);
       const templates = res.data || [];
       if (templates.length === 0) {
-        setMessage({ type: 'error', text: '등록된 점검 템플릿이 없습니다. 직접 입력해주세요.' });
+        toast.error('등록된 점검 템플릿이 없습니다. 직접 입력해주세요.');
         setCheckItems([]);
       } else {
         setCheckItems(templates.map((item: PmRecordItem, idx: number) => ({
@@ -280,10 +280,10 @@ export default function PmRecord() {
           baseValue: item.baseValue != null ? Number(item.baseValue) : null,
           checkValue: null,
         })));
-        setMessage({ type: 'success', text: `${templates.length}개 템플릿 항목을 불러왔습니다.` });
+        toast.success(`${templates.length}개 템플릿 항목을 불러왔습니다.`);
       }
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '템플릿 로딩 실패.') });
+      toast.error(getApiErrorMessage(err, '템플릿 로딩 실패.'));
     } finally {
       setIsLoading(false);
     }
@@ -325,14 +325,14 @@ export default function PmRecord() {
 
   const handlePrint = () => {
     const list = activeTab === 'plans' ? plans : results;
-    if (list.length === 0) { alert('인쇄할 목록이 없습니다.'); return; }
+    if (list.length === 0) { toast.error('인쇄할 목록이 없습니다.'); return; }
 
     const user = useAuthStore.getState().user;
     const now = new Date();
     const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
 
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
-    if (!printWindow) { alert('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.'); return; }
+    if (!printWindow) { toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.'); return; }
 
     const tabLabel = activeTab === 'plans' ? '예방점검 계획' : '예방점검 실적';
     const rows = list.map(rec => `
@@ -365,12 +365,12 @@ th { background: #eee; font-weight: 600; }
 .no-print button { padding: 8px 20px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 10pt; }
 @media print { .no-print { display: none; } }
 </style></head><body>
+<div class="no-print"><button onclick="window.print()">인쇄</button></div>
 <h1>${tabLabel} 현황</h1>
 <div class="print-info"><span>회사: ${user?.companyName || user?.companyId || 'CMMS'}</span><span>출력자: ${user?.name || '-'} | 출력일시: ${stamp}</span></div>
 <table><thead><tr>
 <th>문서번호</th><th>제목</th><th>설비</th><th>부서</th><th>계획기간</th><th>점검일</th><th>작업자</th><th>상태</th>
 </tr></thead><tbody>${rows}</tbody></table>
-<div class="no-print"><button onclick="window.print()">인쇄</button></div>
 </body></html>`);
     printWindow.document.close();
     printWindow.focus();
@@ -380,10 +380,10 @@ th { background: #eee; font-weight: 600; }
     if (!confirm('이 예방점검 계획을 종료하시겠습니까? 종료 후 수정할 수 없습니다.')) return;
     try {
       await axiosInstance.patch(`/pm/plans/${record.id}/close?plantId=${record.plantId}`);
-      setMessage({ type: 'success', text: '계획이 종료되었습니다.' });
+      toast.success('계획이 종료되었습니다.');
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '종료 실패.') });
+      toast.error(getApiErrorMessage(err, '종료 실패.'));
     }
   };
 
@@ -391,24 +391,24 @@ th { background: #eee; font-weight: 600; }
     if (!confirm('정말 이 예방점검 문서를 삭제하시겠습니까?')) return;
     try {
       await axiosInstance.delete(`/pm/records?plantId=${record.plantId}&id=${record.id}`);
-      setMessage({ type: 'success', text: '예방점검 문서가 삭제되었습니다.' });
+      toast.success('예방점검 문서가 삭제되었습니다.');
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '삭제 실패.') });
+      toast.error(getApiErrorMessage(err, '삭제 실패.'));
     }
   };
 
   const validateForm = () => {
     if (!plantId || !equipmentId || !departmentId || !checkTypeCode || !workDate) {
-      setMessage({ type: 'error', text: '설비, 부서, 점검유형, 일자는 필수입니다.' });
+      toast.error('설비, 부서, 점검유형, 일자는 필수입니다.');
       return false;
     }
     if (stepStage === 'P' && checkItems.some((item) => !item.checkName?.trim())) {
-      setMessage({ type: 'error', text: '계획 점검항목명은 비워둘 수 없습니다.' });
+      toast.error('계획 점검항목명은 비워둘 수 없습니다.');
       return false;
     }
     if (stepStage === 'R' && !refNo) {
-      setMessage({ type: 'error', text: '실적은 확정된 계획번호를 참조해야 합니다.' });
+      toast.error('실적은 확정된 계획번호를 참조해야 합니다.');
       return false;
     }
     return true;
@@ -417,7 +417,6 @@ th { background: #eee; font-weight: 600; }
   const handleSave = async (submitStatus: 'T' | 'S' | 'P') => {
     if (!validateForm()) return;
     setIsLoading(true);
-    setMessage(null);
     try {
       const saveStatus = submitStatus === 'P' ? 'T' : submitStatus;
       const payload = {
@@ -461,18 +460,17 @@ th { background: #eee; font-weight: 600; }
         });
         return;
       }
-      setMessage({
-        type: 'success',
-        text: submitStatus === 'T'
+      toast.success(
+        submitStatus === 'T'
           ? '임시저장 되었습니다.'
           : stepStage === 'R'
             ? '예방점검 실적이 확정되었습니다. 점검주기가 갱신됩니다.'
             : '예방점검 계획이 확정되었습니다.',
-      });
+      );
       setIsFormOpen(false);
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '저장 중 오류가 발생했습니다.') });
+      toast.error(getApiErrorMessage(err, '저장 중 오류가 발생했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -581,17 +579,6 @@ th { background: #eee; font-weight: 600; }
           </div>
         </div>
       </div>
-
-      {message && (
-        <div className="p-3 rounded-lg border border-slate-800 bg-slate-900 text-xs text-center text-slate-200 print:hidden flex items-center justify-center gap-2">
-          {message.type === 'success' ? (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
-          )}
-          <span>{message.text}</span>
-        </div>
-      )}
 
       <div className={`bg-slate-900 border border-slate-800 rounded-xl p-6 print:border-0 print:bg-transparent print:p-0 print-landscape ${isFormOpen ? 'print:hidden' : ''}`}>
         <div className="space-y-4 print:block">
@@ -1076,7 +1063,7 @@ th { background: #eee; font-weight: 600; }
           setStatus('P');
           setApprovalRef(null);
           setIsFormOpen(false);
-          setMessage({ type: 'success', text: '예방점검 결재 문서가 상신되었습니다.' });
+          toast.success('예방점검 결재 문서가 상신되었습니다.');
           fetchData();
         }}
       />

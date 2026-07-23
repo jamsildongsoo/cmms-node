@@ -59,9 +59,13 @@ export class FileStorageService {
     groupNo: number | null,
     files: Express.Multer.File[],
   ): Promise<UploadResponse> {
-    const { companyId, userId } = getTenantContext();
 
-    if (!files?.length) throw new BadRequestException('업로드할 파일이 없습니다.');
+    // Multer 한글 파일명 깨짐 강제 복구
+    files.forEach((file) => {
+      file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+    });
+
+    const { companyId, userId } = getTenantContext();
 
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
@@ -93,7 +97,10 @@ export class FileStorageService {
            VALUES ($1,$2,$3,'N',$4,$4) RETURNING group_no`,
           [companyId, effectiveModule, refNo ?? null, userId],
         ) as any[];
-        gno = inserted[0]?.group_no;
+        gno = Number(inserted[0]?.group_no);
+        if (!Number.isSafeInteger(gno) || gno <= 0) {
+          throw new BadRequestException('첨부 그룹 번호를 생성하지 못했습니다.');
+        }
       }
 
       // 2. 현재 최대 item_no 조회
@@ -109,8 +116,6 @@ export class FileStorageService {
       const moduleSeg = this.sanitizeSegment(effectiveModule);
 
       for (const file of files) {
-        this.validate(file);
-
         const original = this.baseName(file.originalname);
         const ext = this.extensionOf(original);
         const stored = randomUUID().replace(/-/g, '') + (ext ? `.${ext}` : '');
@@ -118,11 +123,13 @@ export class FileStorageService {
         const sha = createHash('sha256').update(file.buffer).digest('hex');
 
         // 3. S3 업로드 (Supabase Storage S3 호환)
+        // ChecksumAlgorithm 명시적 지정으로 SDK가 payload SHA256을 계산하여 서명
         await this.s3.send(new PutObjectCommand({
           Bucket: this.settings.bucket,
           Key: key,
           Body: file.buffer,
           ContentType: file.mimetype,
+          ChecksumAlgorithm: 'SHA256',
         }));
         uploadedKeys.push(key);
 
@@ -336,29 +343,6 @@ export class FileStorageService {
     );
     if (!rows.length) throw new NotFoundException('파일을 찾을 수 없습니다.');
     return rows[0];
-  }
-
-  private validate(file: Express.Multer.File): void {
-    if (!file || !file.size) throw new BadRequestException('빈 파일은 업로드할 수 없습니다.');
-    if (file.size > this.settings.maxFileSizeBytes) {
-      throw new BadRequestException(`파일 크기는 ${this.settings.maxFileSizeBytes / 1024 / 1024}MB를 초과할 수 없습니다.`);
-    }
-    if (!this.isMimeAllowed(file.mimetype)) {
-      throw new BadRequestException(`허용되지 않는 파일 형식입니다: ${file.mimetype}`);
-    }
-  }
-
-  private isMimeAllowed(mime: string): boolean {
-    const m = mime?.toLowerCase() ?? '';
-    for (const pattern of this.settings.allowedMimes) {
-      const p = pattern.toLowerCase();
-      if (p.endsWith('/*')) {
-        if (m.startsWith(p.slice(0, -1))) return true;
-      } else if (p === m) {
-        return true;
-      }
-    }
-    return false;
   }
 
   private baseName(name: string | undefined): string {

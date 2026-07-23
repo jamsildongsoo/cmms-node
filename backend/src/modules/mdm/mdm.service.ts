@@ -358,7 +358,7 @@ export class MdmService {
   async getUsersByCompany(companyId: string): Promise<User[]> {
     const users = await this.userRepo.find({
       where: { companyId, deleteYn: 'N' },
-      order: { 'User.id': 'ASC' },
+      order: { id: 'ASC' },
       relations: ['department'],
       select: {
         id: true,

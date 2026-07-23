@@ -6,22 +6,43 @@ export interface BoardDetailResponse {
   comments: any[];
 }
 
+interface BoardRow {
+  id: string | number;
+  board_type_code: string;
+  title: string;
+  content: Record<string, unknown>;
+  notice_yn: string;
+  file_group_id: string | number | null;
+  ref_no: string | null;
+  ref_module: string | null;
+  created_at: string | Date;
+  created_by: string;
+  created_by_name?: string | null;
+  updated_at: string | Date;
+}
+
 @Injectable()
 export class BoardService {
   constructor(private readonly dataSource: DataSource) {}
 
   async getBoards(companyId: string): Promise<any[]> {
-    return this.dataSource.query(
-      `SELECT * FROM board 
-       WHERE company_id = $1 AND delete_yn = 'N' 
-       ORDER BY notice_yn DESC, created_at DESC`,
+    const rows = await this.dataSource.query<BoardRow[]>(
+      `SELECT b.*, u.name AS created_by_name
+       FROM board b
+       LEFT JOIN users u ON u.company_id = b.company_id AND u.id = b.created_by
+       WHERE b.company_id = $1 AND b.delete_yn = 'N'
+       ORDER BY b.notice_yn DESC, b.created_at DESC`,
       [companyId],
     );
+    return rows.map((row) => this.toBoardResponse(row));
   }
 
   async getBoardDetails(companyId: string, id: number): Promise<BoardDetailResponse> {
-    const boards = await this.dataSource.query(
-      `SELECT * FROM board WHERE company_id = $1 AND id = $2 AND delete_yn = 'N'`,
+    const boards = await this.dataSource.query<BoardRow[]>(
+      `SELECT b.*, u.name AS created_by_name
+       FROM board b
+       LEFT JOIN users u ON u.company_id = b.company_id AND u.id = b.created_by
+       WHERE b.company_id = $1 AND b.id = $2 AND b.delete_yn = 'N'`,
       [companyId, id],
     );
     if (!boards.length) {
@@ -42,7 +63,7 @@ export class BoardService {
     );
 
     return {
-      board: boards[0],
+      board: this.toBoardResponse(boards[0]),
       comments,
     };
   }
@@ -61,7 +82,7 @@ export class BoardService {
           board.refModule ?? null, operator
         ],
       );
-      return inserted[0];
+      return this.toBoardResponse(inserted[0] as BoardRow);
     } else {
       await this.dataSource.query(
         `UPDATE board 
@@ -78,8 +99,25 @@ export class BoardService {
         `SELECT * FROM board WHERE company_id = $1 AND id = $2`,
         [companyId, board.id],
       );
-      return updated[0];
+      return this.toBoardResponse(updated[0] as BoardRow);
     }
+  }
+
+  private toBoardResponse(row: BoardRow): any {
+    return {
+      id: Number(row.id),
+      boardTypeCode: row.board_type_code,
+      title: row.title,
+      content: row.content,
+      noticeYn: row.notice_yn,
+      fileGroupId: row.file_group_id == null ? null : Number(row.file_group_id),
+      refNo: row.ref_no,
+      refModule: row.ref_module,
+      createdAt: row.created_at,
+      createdBy: row.created_by,
+      createdByName: row.created_by_name ?? null,
+      updatedAt: row.updated_at,
+    };
   }
 
   async deleteBoard(companyId: string, id: number, operator: string): Promise<void> {

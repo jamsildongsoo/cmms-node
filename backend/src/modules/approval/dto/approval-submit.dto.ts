@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsOptional, IsArray, ValidateNested, IsIn, IsEnum } from 'class-validator';
+import { IsNotEmpty, IsString, IsOptional, IsArray, ValidateNested, IsIn, IsEnum, IsObject } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApprovalStepType } from '../../../common/constants/approval.constants';
 import { DocStatus } from '../../../common/constants/status.constants';
@@ -14,8 +14,8 @@ class ApprovalDto {
   title!: string;
 
   @IsOptional()
-  @IsString()
-  content?: string | null;
+  @IsObject()
+  content?: Record<string, unknown> | null;
 
   @IsOptional()
   fileGroupId?: string | number | null;

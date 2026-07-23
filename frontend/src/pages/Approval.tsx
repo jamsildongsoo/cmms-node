@@ -1,11 +1,23 @@
 import { useState, useEffect } from 'react';
+import { createRoot } from 'react-dom/client';
+import { toast } from 'sonner';
 import axiosInstance from '../api/axios';
 import { formatDateTime } from '../utils/datetime';
 import RichTextEditor from '../components/RichTextEditor';
+import RichTextViewer from '../components/RichTextViewer';
 import { getApiErrorMessage } from '../utils/apiError';
 import { useAuthStore } from '../store/useAuthStore';
 import FileUpload from '../components/FileUpload';
-import ApprovalDocPrint from '../components/ApprovalDocPrint';
+import ApprovalDocPrint, {
+  type ApprovalDocumentAttachment,
+  type ApprovalDocumentStep,
+} from '../components/ApprovalDocPrint';
+import {
+  createEmptyRichTextDocument,
+  isRichTextDocument,
+  isRichTextEmpty,
+  type RichTextDocument,
+} from '../types/richText';
 import {
   getCommonStatusLabel as getStatusLabel,
   getCommonStatusClass as getStatusClass,
@@ -18,7 +30,7 @@ import {
 interface ApprovalModel {
   id: string;
   title: string;
-  content: string | null;
+  content: RichTextDocument | null;
   drafterId: string;
   fileGroupId: number | null;
   status: string; // T: 임시, P: 진행, C: 완결승인, R: 반려, X: 취소
@@ -46,6 +58,8 @@ interface ApprovalStepModel {
   comments: string | null;
 }
 
+const SHOW_LEGACY_APPROVAL_DETAIL: boolean = false;
+
 export default function Approval() {
   const user = useAuthStore((s) => s.user);
   const [activeTab, setActiveTab] = useState<'pending' | 'sent' | 'referenced' | 'processed'>('pending');
@@ -57,6 +71,7 @@ export default function Approval() {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedApproval, setSelectedApproval] = useState<ApprovalModel | null>(null);
   const [approvalSteps, setApprovalSteps] = useState<ApprovalStepModel[]>([]);
+  const [approvalAttachments, setApprovalAttachments] = useState<ApprovalDocumentAttachment[]>([]);
 
   // Action input states
   const [comments, setComments] = useState('');
@@ -67,7 +82,7 @@ export default function Approval() {
   // New Draft Creation Modal
   const [isDraftModalOpen, setIsDraftModalOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
-  const [newContent, setNewContent] = useState('');
+  const [newContent, setNewContent] = useState<RichTextDocument>(createEmptyRichTextDocument);
   const [newRefNo, setNewRefNo] = useState('');
   const [newRefModule, setNewRefModule] = useState('');
   const [selectedLine, setSelectedLine] = useState<{ approverId: string; type: string }[]>([]);
@@ -76,6 +91,26 @@ export default function Approval() {
   const [newFileGroupId, setNewFileGroupId] = useState<number | null>(null);
   const [fileUploading, setFileUploading] = useState(false);
   const [editingApprovalId, setEditingApprovalId] = useState<string | null>(null);
+
+  // localStorage 자동 백업: 내용 변경 시 1초 디바운스로 저장
+  useEffect(() => {
+    if (!isDraftModalOpen) return;
+    const draftId = editingApprovalId || 'new';
+    const timer = setTimeout(() => {
+      if (newTitle || !isRichTextEmpty(newContent)) {
+        localStorage.setItem(`approval-draft-${draftId}`, JSON.stringify({
+          title: newTitle,
+          content: newContent,
+          steps: selectedLine,
+          fileGroupId: newFileGroupId,
+          refNo: newRefNo,
+          refModule: newRefModule,
+          autoSavedAt: new Date().toISOString()
+        }));
+      }
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [isDraftModalOpen, newTitle, newContent, selectedLine, newFileGroupId, newRefNo, newRefModule, editingApprovalId]);
 
   const fetchData = async () => {
     try {
@@ -87,7 +122,7 @@ export default function Approval() {
       setUsersList(userRes.data);
     } catch (err) {
       console.error(err);
-      alert(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
+      toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
     }
   };
 
@@ -99,10 +134,17 @@ export default function Approval() {
       const res = await axiosInstance.get(`/approval/${app.id}/details`);
       setSelectedApproval(res.data.approval);
       setApprovalSteps(res.data.steps || []);
+      const fileGroupId = res.data.approval.fileGroupId;
+      if (fileGroupId) {
+        const fileRes = await axiosInstance.get(`/files/${fileGroupId}`);
+        setApprovalAttachments(fileRes.data || []);
+      } else {
+        setApprovalAttachments([]);
+      }
       setComments('');
       setIsDetailOpen(true);
     } catch (err) {
-      alert(getApiErrorMessage(err, '결재 문서 정보를 불러오는데 실패했습니다.'));
+      toast.error(getApiErrorMessage(err, '결재 문서 정보를 불러오는데 실패했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -116,11 +158,11 @@ export default function Approval() {
         comments,
         action
       });
-      alert(action === 'APPROVE' ? '승인 처리되었습니다.' : '반려 처리되었습니다.');
+      toast.success(action === 'APPROVE' ? '승인 처리되었습니다.' : '반려 처리되었습니다.');
       setIsDetailOpen(false);
       fetchData();
     } catch (err) {
-      alert(getApiErrorMessage(err, '결재 처리 실패'));
+      toast.error(getApiErrorMessage(err, '결재 처리 실패'));
     } finally {
       setIsLoading(false);
     }
@@ -128,7 +170,7 @@ export default function Approval() {
 
   const handleOpenDraftModal = () => {
     setNewTitle('');
-    setNewContent('');
+    setNewContent(createEmptyRichTextDocument());
     setNewRefNo('');
     setNewRefModule('');
     setSelectedLine([]);
@@ -136,7 +178,32 @@ export default function Approval() {
     setLineType('A');
     setNewFileGroupId(null);
     setEditingApprovalId(null);
-    setNewContent('');
+    // localStorage에서 새 글 초안 복원 시도
+    const saved = localStorage.getItem('approval-draft-new');
+    if (saved) {
+      try {
+        const draft = JSON.parse(saved);
+        if (draft.title || draft.content) {
+          const autoTime = draft.autoSavedAt ? new Date(draft.autoSavedAt).toLocaleString('ko-KR') : '';
+          if (confirm(`자동 저장된 초안이 있습니다.${autoTime ? ` (${autoTime})` : ''}\n복원하시겠습니까?`)) {
+            setNewTitle(draft.title || '');
+            setNewContent(
+              isRichTextDocument(draft.content)
+                ? draft.content
+                : createEmptyRichTextDocument(),
+            );
+            setNewRefNo(draft.refNo || '');
+            setNewRefModule(draft.refModule || '');
+            setSelectedLine(draft.steps || []);
+            setNewFileGroupId(draft.fileGroupId ?? null);
+          } else {
+            localStorage.removeItem('approval-draft-new');
+          }
+        }
+      } catch {
+        localStorage.removeItem('approval-draft-new');
+      }
+    }
     setIsDraftModalOpen(true);
   };
 
@@ -145,7 +212,11 @@ export default function Approval() {
     try {
       const res = await axiosInstance.get(`/approval/${app.id}/details`);
       setNewTitle(res.data.approval.title);
-      setNewContent(res.data.approval.content || '');
+      setNewContent(
+        isRichTextDocument(res.data.approval.content)
+          ? res.data.approval.content
+          : createEmptyRichTextDocument(),
+      );
       setNewRefNo(res.data.approval.refNo || '');
       setNewRefModule(res.data.approval.refModule || '');
       setNewFileGroupId(res.data.approval.fileGroupId);
@@ -157,7 +228,7 @@ export default function Approval() {
       setEditingApprovalId(app.id);
       setIsDraftModalOpen(true);
     } catch (err) {
-      alert(getApiErrorMessage(err, '결재 문서 정보를 불러오는데 실패했습니다.'));
+      toast.error(getApiErrorMessage(err, '결재 문서 정보를 불러오는데 실패했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -174,17 +245,71 @@ export default function Approval() {
     setSelectedLine(selectedLine.filter((_, i) => i !== idx));
   };
 
-  const handleSaveDraft = async () => {
+  const handleSaveTemp = async () => {
     if (!newTitle.trim()) {
-      alert('결재 제목을 입력하세요.');
-      return;
-    }
-    if (selectedLine.filter(l => l.type === 'A').length === 0) {
-      alert('최소 한 명 이상의 결재선(A)을 지정해야 합니다.');
+      toast.error('결재 제목을 입력하세요.');
       return;
     }
     if (fileUploading) {
-      alert('첨부파일 업로드가 끝난 뒤 상신해 주세요.');
+      toast.error('첨부파일 업로드가 끝난 뒤 저장해 주세요.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const payload = {
+        approval: {
+          id: editingApprovalId || null,
+          title: newTitle,
+          content: newContent,
+          fileGroupId: newFileGroupId,
+          status: 'T'
+        },
+        steps: selectedLine.map(l => ({
+          approverId: l.approverId,
+          approvalType: l.type,
+        })),
+        refNo: newRefNo || null,
+        refModule: newRefModule || null
+      };
+
+      const res = await axiosInstance.post('/approval/submit', payload);
+      const savedId = res.data?.id || editingApprovalId;
+      // localStorage에도 백업 저장
+      if (savedId) {
+        localStorage.setItem(`approval-draft-${savedId}`, JSON.stringify({
+          title: newTitle,
+          content: newContent,
+          fileGroupId: newFileGroupId,
+          steps: selectedLine,
+          refNo: newRefNo,
+          refModule: newRefModule,
+          savedAt: new Date().toISOString()
+        }));
+      }
+      localStorage.removeItem('approval-draft-new');
+      toast.success('임시저장되었습니다. 나중에 계속 작성할 수 있습니다.');
+      setIsDraftModalOpen(false);
+      if (activeTab === 'sent') fetchData();
+      else setActiveTab('sent');
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, '임시저장 중 오류가 발생했습니다.'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!newTitle.trim()) {
+      toast.error('결재 제목을 입력하세요.');
+      return;
+    }
+    if (selectedLine.filter(l => l.type === 'A').length === 0) {
+      toast.error('최소 한 명 이상의 결재선(A)을 지정해야 합니다.');
+      return;
+    }
+    if (fileUploading) {
+      toast.error('첨부파일 업로드가 끝난 뒤 상신해 주세요.');
       return;
     }
 
@@ -206,11 +331,11 @@ export default function Approval() {
       };
 
       await axiosInstance.post('/approval/submit', payload);
-      alert(editingApprovalId ? '결재 문서가 수정되었습니다.' : '결재 문서가 상신되었습니다.');
+      toast.success(editingApprovalId ? '결재 문서가 수정되었습니다.' : '결재 문서가 상신되었습니다.');
       setIsDraftModalOpen(false);
       fetchData();
     } catch (err) {
-      alert(getApiErrorMessage(err, '상신 중 오류가 발생했습니다.'));
+      toast.error(getApiErrorMessage(err, '상신 중 오류가 발생했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -227,6 +352,88 @@ export default function Approval() {
       && (step.approvalType === 'A' || step.approvalType === 'G')
       && !step.approvalResult
   );
+
+  const getApprovalDocumentSteps = (): ApprovalDocumentStep[] => approvalSteps.map((step) => {
+    const approver = usersList.find((item) => item.id === step.approverId);
+    return {
+      stepNo: step.stepNo,
+      approverName: approver?.name || step.approverId,
+      approverTitle: approver?.title || approver?.position || null,
+      approvalType: step.approvalType,
+      approvalResult: step.approvalResult,
+      comments: step.comments,
+      actionAt: step.actionAt,
+    };
+  });
+
+  const handleDownloadApprovalAttachment = async (attachment: ApprovalDocumentAttachment) => {
+    if (!selectedApproval?.fileGroupId) return;
+    try {
+      const response = await axiosInstance.get(
+        `/files/${selectedApproval.fileGroupId}/${attachment.itemNo}/download`,
+        { responseType: 'blob' },
+      );
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = attachment.originalFileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      toast.error('첨부파일 다운로드에 실패했습니다.');
+    }
+  };
+
+  const handleOpenPrintPreview = () => {
+    if (!selectedApproval) return;
+    const printWindow = window.open('', '_blank', 'width=1100,height=850');
+    if (!printWindow) {
+      toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
+      return;
+    }
+
+    printWindow.document.write('<!doctype html><html><head><meta charset="utf-8"><title>결재 품의서 출력</title></head><body><div id="approval-print-root"></div></body></html>');
+    printWindow.document.close();
+    printWindow.document.documentElement.className = document.documentElement.className;
+    document.querySelectorAll('link[rel="stylesheet"], style').forEach((node) => {
+      printWindow.document.head.appendChild(node.cloneNode(true));
+    });
+
+    const container = printWindow.document.getElementById('approval-print-root');
+    if (!container) return;
+    const drafter = usersList.find((item) => item.id === selectedApproval.drafterId);
+    const root = createRoot(container);
+    root.render(
+      <div className="min-h-screen bg-white p-6 text-black">
+        <div className="no-print mb-4 flex justify-end">
+          <button
+            type="button"
+            onClick={() => printWindow.print()}
+            className="rounded-md border-0 bg-blue-600 px-5 py-2 text-sm font-semibold text-white cursor-pointer"
+          >
+            인쇄
+          </button>
+        </div>
+        <div className="mx-auto max-w-4xl">
+          <ApprovalDocPrint
+            mode="print"
+            id={selectedApproval.id}
+            status={selectedApproval.status}
+            title={selectedApproval.title}
+            content={selectedApproval.content}
+            createdAt={selectedApproval.createdAt}
+            drafterName={drafter?.name || selectedApproval.drafterId}
+            drafterDepartment={drafter?.departmentName || drafter?.departmentId || '-'}
+            steps={getApprovalDocumentSteps()}
+            attachments={approvalAttachments}
+          />
+        </div>
+      </div>,
+    );
+    printWindow.focus();
+  };
 
   const renderSignatureBox = (step: ApprovalStepModel) => {
     const matchedUser = usersList.find(u => u.id === step.approverId);
@@ -264,6 +471,9 @@ export default function Approval() {
         .approval-content th { background-color: #334155; color: #e2e8f0; font-weight: 600; }
         .approval-content tr:nth-child(even) td { background-color: #1e293b33; }
         .approval-content table, .approval-content td, .approval-content th { font-size: 0.75rem; }
+        html.light .approval-content td, html.light .approval-content th { border-color: #94a3b8; color: #0f172a; }
+        html.light .approval-content th { background-color: #e2e8f0; }
+        html.light .approval-content tr:nth-child(even) td { background-color: #f8fafc; }
         @media print {
           .approval-content td, .approval-content th { border-color: #94a3b8; }
           .approval-content th { background-color: #f1f5f9; color: #0f172a; }
@@ -372,7 +582,7 @@ export default function Approval() {
                           onClick={() => handleOpenDetail(app)}
                           className="bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 rounded-lg px-3 py-1.5 font-semibold text-[11px] border border-blue-500/20 hover:border-blue-500/40 flex items-center gap-1 cursor-pointer"
                         >
-                          <span>결재 보기</span>
+                          <span>{activeTab === 'pending' ? '결재 처리' : '결재 보기'}</span>
                           <ArrowRight size={12} />
                         </button>
                       </div>
@@ -397,7 +607,25 @@ export default function Approval() {
 
             {/* Body */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6 print:hidden">
+              <ApprovalDocPrint
+                mode="detail"
+                id={selectedApproval.id}
+                status={selectedApproval.status}
+                title={selectedApproval.title}
+                content={selectedApproval.content}
+                createdAt={selectedApproval.createdAt}
+                drafterName={usersList.find((item) => item.id === selectedApproval.drafterId)?.name || selectedApproval.drafterId}
+                drafterDepartment={
+                  usersList.find((item) => item.id === selectedApproval.drafterId)?.departmentName
+                  || usersList.find((item) => item.id === selectedApproval.drafterId)?.departmentId
+                  || '-'
+                }
+                steps={getApprovalDocumentSteps()}
+                attachments={approvalAttachments}
+                onDownloadAttachment={handleDownloadApprovalAttachment}
+              />
 
+              {SHOW_LEGACY_APPROVAL_DETAIL && <div>
               {/* Signature Block (4x2 layout) */}
               <div className="flex flex-col sm:flex-row justify-end items-end gap-6 border border-slate-800/60 p-4 rounded-xl bg-slate-950/20 print:border-0 print:p-0 print:bg-transparent">
                 
@@ -443,9 +671,16 @@ export default function Approval() {
 
                 <div>
                   <span className="text-[10px] font-bold text-slate-500 block mb-1.5">품의 내용 및 상세 본문</span>
-                  <div className="bg-slate-950/40 border border-slate-800 p-4 rounded-xl text-slate-300 font-sans text-xs min-h-[150px] leading-relaxed print:bg-white print:border-slate-350 print:text-black print:p-2 approval-content">
-                    {selectedApproval.content || '(본문 내용 없음)'}
-                  </div>
+                  {selectedApproval.content && !isRichTextEmpty(selectedApproval.content) ? (
+                    <RichTextViewer
+                      content={selectedApproval.content}
+                      className="bg-slate-950/40 border border-slate-800 p-4 rounded-xl text-slate-300 font-sans text-xs min-h-[150px] leading-relaxed print:bg-white print:border-slate-350 print:text-black print:p-2 approval-content"
+                    />
+                  ) : (
+                    <div className="bg-slate-950/40 border border-slate-800 p-4 rounded-xl text-slate-500 text-xs min-h-[150px]">
+                      (본문 내용 없음)
+                    </div>
+                  )}
                 </div>
 
                 <div className="print:hidden">
@@ -491,6 +726,7 @@ export default function Approval() {
                   </table>
                 </div>
               </div>
+              </div>}
 
               {/* Approval Active Action Area */}
               {isMyTurn && (
@@ -532,32 +768,18 @@ export default function Approval() {
 
             </div>
 
-            {/* 전용 인쇄뷰 (흑백) */}
-            <ApprovalDocPrint
-              id={selectedApproval.id}
-              status={selectedApproval.status}
-              title={selectedApproval.title}
-              content={selectedApproval.content}
-              steps={approvalSteps.map((s) => ({
-                stepNo: s.stepNo,
-                approverName: usersList.find((u) => u.id === s.approverId)?.name || s.approverId,
-                approvalType: s.approvalType,
-                approvalResult: s.approvalResult,
-                comments: s.comments,
-                actionAt: s.actionAt,
-              }))}
-            />
-
             {/* Footer */}
-            <div className="p-6 border-t border-slate-800 flex justify-between shrink-0 print:hidden">
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-750 px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <Printer size={14} />
-                인쇄 / PDF 저장
-              </button>
+            <div className="p-6 border-t border-slate-800 flex justify-end gap-2 shrink-0 print:hidden">
+              {selectedApproval.status !== 'T' && selectedApproval.status !== 'P' && (
+                <button
+                  type="button"
+                  onClick={handleOpenPrintPreview}
+                  className="bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-750 px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Printer size={14} />
+                  출력 보기
+                </button>
+              )}
 
               <button
                 type="button"
@@ -617,6 +839,7 @@ export default function Approval() {
                     className="flex-1 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none"
                   >
                     <option value="">사용자 선택</option>
+                    {/* 기안자는 step_no=0에 자동으로 배정되므로 결재선 선택 목록에서 제외 */}
                     {usersList.filter(u => u.id !== user?.id && u.useYn === 'Y').map(u => (
                       <option key={u.id} value={u.id}>{u.name}({u.id}) / {u.position || '-'} / {u.title || '-'} / {u.departmentName || '-'}</option>
                     ))}
@@ -695,8 +918,8 @@ export default function Approval() {
                 />
               </div>
 
-              {/* 연계 참조 (옵션) */}
-              <div className="grid grid-cols-2 gap-4 pt-3 border-t border-slate-800">
+              {/* 연계 참조 (옵션) — 연계모듈에서만 사용하므로 숨김 */}
+              {/* <div className="grid grid-cols-2 gap-4 pt-3 border-t border-slate-800">
                 <div>
                   <label className="block text-slate-400 mb-1.5">연계 참조 번호</label>
                   <input
@@ -717,12 +940,18 @@ export default function Approval() {
                     className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none font-mono"
                   />
                 </div>
-              </div>
+              </div> */}
             </div>
 
-            <div className="p-6 border-t border-slate-800 flex justify-end gap-2 shrink-0">
+            <div className="p-6 border-t border-slate-800 flex justify-between gap-2 shrink-0">
               <button onClick={() => setIsDraftModalOpen(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg py-2 px-4 border-0 cursor-pointer">취소</button>
-              <button onClick={handleSaveDraft} disabled={isLoading || fileUploading} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-5 border-0 cursor-pointer disabled:opacity-50">{fileUploading ? '업로드 중…' : (editingApprovalId ? '수정 상신' : '기안 상신')}</button>
+              <div className="flex gap-2">
+                <button onClick={handleSaveTemp} disabled={isLoading || fileUploading} className="bg-amber-600 hover:bg-amber-500 text-white rounded-lg py-2 px-4 border-0 cursor-pointer disabled:opacity-50 flex items-center gap-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="17 3 17 8 7 8"/></svg>
+                  임시저장
+                </button>
+                <button onClick={handleSaveDraft} disabled={isLoading || fileUploading} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-5 border-0 cursor-pointer disabled:opacity-50">{fileUploading ? '업로드 중…' : (editingApprovalId ? '수정 상신' : '기안 상신')}</button>
+              </div>
             </div>
           </div>
         </div>

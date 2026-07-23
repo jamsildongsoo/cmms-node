@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import axiosInstance from '../api/axios';
 import { Paperclip, UploadCloud, Trash2, Download, Loader2 } from 'lucide-react';
+import type { AxiosError } from 'axios';
 
 interface FileItem {
   itemNo: number;
@@ -9,6 +10,29 @@ interface FileItem {
   mimeType: string | null;
   fileSize: number;
 }
+
+interface FileUploadPolicy {
+  maxFileSizeBytes: number;
+  maxFileCount: number;
+  allowedMimeTypes: string[];
+}
+
+// 여러 화면에서 FileUpload를 사용해도 정책 API는 한 번만 호출한다.
+// 실패 시 캐시를 비워 다음 마운트에서 다시 조회할 수 있게 한다.
+let policyRequest: Promise<FileUploadPolicy> | null = null;
+
+const loadUploadPolicy = (): Promise<FileUploadPolicy> => {
+  if (!policyRequest) {
+    policyRequest = axiosInstance
+      .get<FileUploadPolicy>('/files/policy')
+      .then((response) => response.data)
+      .catch((error) => {
+        policyRequest = null;
+        throw error;
+      });
+  }
+  return policyRequest;
+};
 
 interface Props {
   /** 첨부 그룹 번호. 신규(미업로드)면 null. */
@@ -30,7 +54,15 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [dragOver, setDragOver] = useState(false);
+  const [policy, setPolicy] = useState<FileUploadPolicy | null>(null);
+  const [policyLoading, setPolicyLoading] = useState(!readOnly);
+  const [localError, setLocalError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const reportError = (message: string) => {
+    setLocalError(message);
+    onError?.(message);
+  };
 
   const loadItems = async (gno: number) => {
     try {
@@ -42,18 +74,83 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
   };
 
   useEffect(() => {
-    if (groupNo) loadItems(groupNo);
-    else setItems([]);
+    let active = true;
+    const request = groupNo
+      ? axiosInstance.get<FileItem[]>(`/files/${groupNo}`).then((response) => response.data)
+      : Promise.resolve([]);
+
+    request
+      .then((loadedItems) => {
+        if (active) setItems(loadedItems);
+      })
+      .catch(() => {
+        if (active) setItems([]);
+      });
+
+    return () => {
+      active = false;
+    };
   }, [groupNo]);
 
   useEffect(() => {
+    if (readOnly) return;
+
+    let active = true;
+    loadUploadPolicy()
+      .then((loadedPolicy) => {
+        if (active) setPolicy(loadedPolicy);
+      })
+      .catch(() => {
+        // 정책 조회 실패가 업로드 자체를 막지는 않는다.
+        // 최종 크기·개수·MIME 검사는 항상 백엔드가 수행한다.
+      })
+      .finally(() => {
+        if (active) setPolicyLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [readOnly]);
+
+  useEffect(() => {
     onUploadingChange?.(uploading);
-  }, [uploading]);
+  }, [onUploadingChange, uploading]);
 
   const handleFiles = async (files: FileList | null) => {
-    if (readOnly || !files || files.length === 0) return;
+    if (readOnly || uploading || !files || files.length === 0) return;
+    if (policyLoading) {
+      reportError('첨부파일 정책을 확인 중입니다. 잠시 후 다시 시도해 주세요.');
+      return;
+    }
+
+    const selectedFiles = Array.from(files);
+    if (policy) {
+      if (selectedFiles.length > policy.maxFileCount) {
+        reportError(`파일은 한 번에 최대 ${policy.maxFileCount}개까지 선택할 수 있습니다.`);
+        return;
+      }
+
+      const oversizedFile = selectedFiles.find((file) => file.size > policy.maxFileSizeBytes);
+      if (oversizedFile) {
+        reportError(
+          `'${oversizedFile.name}' 파일은 최대 크기(${fmtSize(policy.maxFileSizeBytes)})를 초과합니다.`,
+        );
+        return;
+      }
+
+      const disallowedFile = selectedFiles.find(
+        (file) => file.type && !isMimeAllowed(file.type, policy.allowedMimeTypes),
+      );
+      if (disallowedFile) {
+        reportError(`'${disallowedFile.name}' 파일 형식은 업로드할 수 없습니다.`);
+        return;
+      }
+    }
+
+    setLocalError(null);
     const form = new FormData();
-    Array.from(files).forEach((f) => form.append('files', f));
+    selectedFiles.forEach((f) => form.append('files', f));
     if (groupNo) form.append('groupNo', String(groupNo));
 
     setUploading(true);
@@ -64,17 +161,23 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
       if (groupNo) params.set('groupNo', String(groupNo));
 
       const res = await axiosInstance.post(`/files?${params.toString()}`, form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (e) => {
           if (e.total) setProgress(Math.round((e.loaded * 100) / e.total));
         },
       });
-      const newGroupNo: number = res.data.groupNo;
+      const newGroupNo = Number(res.data.groupNo);
+      if (!Number.isSafeInteger(newGroupNo) || newGroupNo <= 0) {
+        throw new Error('서버가 유효한 첨부 그룹 번호를 반환하지 않았습니다.');
+      }
       if (!groupNo && onGroupNoChange) onGroupNoChange(newGroupNo);
       await loadItems(newGroupNo);
-    } catch (err: any) {
-      const msg = err.response?.data?.message || '파일 업로드에 실패했습니다.';
-      onError?.(msg);
+    } catch (err: unknown) {
+      // AxiosError로 타입 지정
+      const axiosError = err as AxiosError<{ message: string }>;
+
+      const msg = axiosError.response?.data?.message
+        || (err instanceof Error ? err.message : '파일 업로드에 실패했습니다.');
+      reportError(msg);
     } finally {
       setUploading(false);
       setProgress(0);
@@ -97,7 +200,7 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
       a.remove();
       window.URL.revokeObjectURL(url);
     } catch {
-      onError?.('다운로드에 실패했습니다.');
+      reportError('다운로드에 실패했습니다.');
     }
   };
 
@@ -108,12 +211,22 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
       await axiosInstance.delete(`/files/${groupNo}/${item.itemNo}`);
       loadItems(groupNo);
     } catch {
-      onError?.('삭제에 실패했습니다.');
+      reportError('삭제에 실패했습니다.');
     }
   };
 
   const fmtSize = (n: number) =>
     n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+
+  const isMimeAllowed = (mime: string, allowedMimeTypes: string[]) => {
+    const normalized = mime.toLowerCase();
+    return allowedMimeTypes.some((pattern) => {
+      const normalizedPattern = pattern.toLowerCase();
+      return normalizedPattern.endsWith('/*')
+        ? normalized.startsWith(normalizedPattern.slice(0, -1))
+        : normalized === normalizedPattern;
+    });
+  };
 
   return (
     <div className="space-y-2">
@@ -141,6 +254,11 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
               <Loader2 size={18} className="animate-spin text-blue-400" />
               <span>업로드 중… {progress}%</span>
             </>
+          ) : policyLoading ? (
+            <>
+              <Loader2 size={18} className="animate-spin text-blue-400" />
+              <span>첨부파일 정책 확인 중…</span>
+            </>
           ) : (
             <>
               <UploadCloud size={18} />
@@ -151,10 +269,22 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
             ref={inputRef}
             type="file"
             multiple
+            accept={policy?.allowedMimeTypes.join(',')}
+            disabled={uploading || policyLoading}
             className="hidden"
             onChange={(e) => handleFiles(e.target.files)}
           />
         </div>
+      )}
+
+      {!readOnly && policy && (
+        <p className="text-[11px] text-slate-500">
+          파일당 최대 {fmtSize(policy.maxFileSizeBytes)} · 한 번에 최대 {policy.maxFileCount}개
+        </p>
+      )}
+
+      {!readOnly && localError && (
+        <p className="text-xs text-rose-400">{localError}</p>
       )}
 
       {items.length === 0 ? (

@@ -15,8 +15,8 @@ export class Board extends BaseEntity {
   @Column({ name: 'title', length: 200 })
   title!: string;
 
-  @Column({ name: 'content', type: 'text' })
-  content!: string;
+  @Column({ name: 'content', type: 'jsonb' })
+  content!: Record<string, unknown>;
 
   @Column({ name: 'notice_yn', length: 1, default: 'N' })
   noticeYn!: string;

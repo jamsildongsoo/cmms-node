@@ -133,7 +133,10 @@ export default function Login() {
         </div>
 
         {error && (
-          <div className="mb-6 p-4 rounded-lg bg-red-950/50 border border-red-800/80 text-red-400 text-sm text-center">
+          <div
+            role="alert"
+            className="mb-6 p-4 rounded-lg border border-slate-800 text-slate-300 text-sm text-center"
+          >
             {error}
           </div>
         )}

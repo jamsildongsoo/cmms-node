@@ -13,23 +13,39 @@ import {
   HttpCode,
   HttpStatus,
   Inject,
+  BadRequestException,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { Readable } from 'stream';
 import { FileStorageService, UploadResponse, FileItemResponse } from './file-storage.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { S3_CLIENT, STORAGE_SETTINGS, StorageSettings } from './storage.config';
+import {
+  FILE_UPLOAD_SETTINGS,
+  FileUploadPolicyResponse,
+  FileUploadSettings,
+} from './file-upload.config';
 
 @Controller('api/files')
 @UseGuards(JwtAuthGuard)
 export class FileController {
   constructor(
     private readonly fileService: FileStorageService,
-    @Inject(STORAGE_SETTINGS) private readonly settings: StorageSettings,
+    @Inject(FILE_UPLOAD_SETTINGS) private readonly uploadSettings: FileUploadSettings,
   ) {}
 
+  @Get('policy')
+  getPolicy(): FileUploadPolicyResponse {
+    return {
+      maxFileSizeBytes: this.uploadSettings.maxFileSizeBytes,
+      maxFileCount: this.uploadSettings.maxFileCount,
+      allowedMimeTypes: [...this.uploadSettings.allowedMimes],
+    };
+  }
+
   @Post()
+  // 크기와 개수는 FileModule의 Multer 설정이 컨트롤러 진입 전에 검사한다.
+  // 컨트롤러는 동일한 FILE_UPLOAD_SETTINGS로 방어 검증과 MIME 검사를 수행한다.
   @UseInterceptors(FilesInterceptor('files'))
   async upload(
     @UploadedFiles() files: Express.Multer.File[],
@@ -37,6 +53,7 @@ export class FileController {
     @Query('refNo') refNo?: string,
     @Query('groupNo') groupNoStr?: string,
   ): Promise<UploadResponse> {
+    this.validateUpload(files);
     const groupNo = groupNoStr ? parseInt(groupNoStr, 10) : null;
     return this.fileService.upload(
       refModule ?? null,
@@ -44,6 +61,44 @@ export class FileController {
       groupNo,
       files,
     );
+  }
+
+  private validateUpload(files: Express.Multer.File[]): void {
+    if (!files?.length) {
+      throw new BadRequestException('업로드할 파일이 없습니다.');
+    }
+
+    // Multer가 크기와 개수를 먼저 차단하지만, 라우팅/인터셉터 설정 변경 시에도
+    // 정책이 우회되지 않도록 같은 FILE_UPLOAD_SETTINGS 객체로 다시 확인한다.
+    if (files.length > this.uploadSettings.maxFileCount) {
+      throw new BadRequestException(
+        `파일은 한 번에 최대 ${this.uploadSettings.maxFileCount}개까지 업로드할 수 있습니다.`,
+      );
+    }
+
+    for (const file of files) {
+      if (!file.size) {
+        throw new BadRequestException('빈 파일은 업로드할 수 없습니다.');
+      }
+      if (file.size > this.uploadSettings.maxFileSizeBytes) {
+        throw new BadRequestException(
+          `파일 크기는 ${this.uploadSettings.maxFileSizeBytes / 1024 / 1024}MB를 초과할 수 없습니다.`,
+        );
+      }
+      if (!this.isMimeAllowed(file.mimetype)) {
+        throw new BadRequestException(`허용되지 않는 파일 형식입니다: ${file.mimetype}`);
+      }
+    }
+  }
+
+  private isMimeAllowed(mime: string): boolean {
+    const normalized = mime?.toLowerCase() ?? '';
+    return this.uploadSettings.allowedMimes.some((pattern) => {
+      if (pattern.endsWith('/*')) {
+        return normalized.startsWith(pattern.slice(0, -1));
+      }
+      return normalized === pattern;
+    });
   }
 
   @Get(':groupNo')
