@@ -12,6 +12,9 @@ import ApprovalDocPrint, {
   type ApprovalDocumentAttachment,
   type ApprovalDocumentStep,
 } from '../components/ApprovalDocPrint';
+import PrintWindowLayout from '../components/PrintWindowLayout';
+import { requestConfirmation } from '../utils/userActionDialog';
+import { openPrintWindow } from '../utils/printWindow';
 import {
   createEmptyRichTextDocument,
   isRichTextDocument,
@@ -76,7 +79,6 @@ export default function Approval() {
   // Action input states
   const [comments, setComments] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
 
   // New Draft Creation Modal
@@ -168,7 +170,7 @@ export default function Approval() {
     }
   };
 
-  const handleOpenDraftModal = () => {
+  const handleOpenDraftModal = async () => {
     setNewTitle('');
     setNewContent(createEmptyRichTextDocument());
     setNewRefNo('');
@@ -185,7 +187,7 @@ export default function Approval() {
         const draft = JSON.parse(saved);
         if (draft.title || draft.content) {
           const autoTime = draft.autoSavedAt ? new Date(draft.autoSavedAt).toLocaleString('ko-KR') : '';
-          if (confirm(`자동 저장된 초안이 있습니다.${autoTime ? ` (${autoTime})` : ''}\n복원하시겠습니까?`)) {
+          if (await requestConfirmation(`자동 저장된 초안이 있습니다.${autoTime ? ` (${autoTime})` : ''}\n복원하시겠습니까?`, '복원')) {
             setNewTitle(draft.title || '');
             setNewContent(
               isRichTextDocument(draft.content)
@@ -388,49 +390,32 @@ export default function Approval() {
 
   const handleOpenPrintPreview = () => {
     if (!selectedApproval) return;
-    const printWindow = window.open('', '_blank', 'width=1100,height=850');
-    if (!printWindow) {
+    const printTarget = openPrintWindow({
+      title: '결재 품의서 출력',
+      rootId: 'approval-print-root',
+    });
+    if (!printTarget) {
       toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
       return;
     }
-
-    printWindow.document.write('<!doctype html><html><head><meta charset="utf-8"><title>결재 품의서 출력</title></head><body><div id="approval-print-root"></div></body></html>');
-    printWindow.document.close();
-    printWindow.document.documentElement.className = document.documentElement.className;
-    document.querySelectorAll('link[rel="stylesheet"], style').forEach((node) => {
-      printWindow.document.head.appendChild(node.cloneNode(true));
-    });
-
-    const container = printWindow.document.getElementById('approval-print-root');
-    if (!container) return;
+    const { printWindow, container } = printTarget;
     const drafter = usersList.find((item) => item.id === selectedApproval.drafterId);
     const root = createRoot(container);
     root.render(
-      <div className="min-h-screen bg-white p-6 text-black">
-        <div className="no-print mb-4 flex justify-end">
-          <button
-            type="button"
-            onClick={() => printWindow.print()}
-            className="rounded-md border-0 bg-blue-600 px-5 py-2 text-sm font-semibold text-white cursor-pointer"
-          >
-            인쇄
-          </button>
-        </div>
-        <div className="mx-auto max-w-4xl">
-          <ApprovalDocPrint
-            mode="print"
-            id={selectedApproval.id}
-            status={selectedApproval.status}
-            title={selectedApproval.title}
-            content={selectedApproval.content}
-            createdAt={selectedApproval.createdAt}
-            drafterName={drafter?.name || selectedApproval.drafterId}
-            drafterDepartment={drafter?.departmentName || drafter?.departmentId || '-'}
-            steps={getApprovalDocumentSteps()}
-            attachments={approvalAttachments}
-          />
-        </div>
-      </div>,
+      <PrintWindowLayout printWindow={printWindow}>
+        <ApprovalDocPrint
+          mode="print"
+          id={selectedApproval.id}
+          status={selectedApproval.status}
+          title={selectedApproval.title}
+          content={selectedApproval.content}
+          createdAt={selectedApproval.createdAt}
+          drafterName={drafter?.name || selectedApproval.drafterId}
+          drafterDepartment={drafter?.departmentName || drafter?.departmentId || '-'}
+          steps={getApprovalDocumentSteps()}
+          attachments={approvalAttachments}
+        />
+      </PrintWindowLayout>,
     );
     printWindow.focus();
   };
@@ -806,16 +791,6 @@ export default function Approval() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-5 text-xs">
-              {message && (
-                <div className="p-3 rounded-lg border border-slate-800 bg-slate-900 text-xs text-center text-slate-200 flex items-center justify-center gap-2">
-                  {message.type === 'success' ? (
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
-                  ) : (
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
-                  )}
-                  <span>{message.text}</span>
-                </div>
-              )}
               {/* 1행: 품의 제목 */}
               <div>
                 <label className="block text-slate-400 mb-1.5 font-semibold">품의 제목 *</label>
@@ -914,7 +889,6 @@ export default function Approval() {
                   refModule="APR"
                   onGroupNoChange={setNewFileGroupId}
                   onUploadingChange={setFileUploading}
-                  onError={(msg) => setMessage({ type: 'error', text: msg })}
                 />
               </div>
 

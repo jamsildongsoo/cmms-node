@@ -25,7 +25,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
     { 
       category: '업무 트랜잭션', 
       items: [
-        { id: 'pm', label: '예방점검 기록', icon: ClipboardList },
+        { id: 'pm', label: '예방점검', icon: ClipboardList },
         { id: 'wo', label: '작업지시서', icon: ClipboardList },
         { id: 'wp', label: '작업허가서', icon: FileSignature },
         { id: 'procurement', label: '구매', icon: ShoppingCart },

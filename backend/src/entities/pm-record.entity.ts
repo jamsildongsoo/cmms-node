@@ -38,8 +38,8 @@ export class PmRecord extends BaseEntity {
   @Column({ name: 'close_yn', type: 'char', length: 1, default: 'N' })
   closeYn!: string;
 
-  @Column({ name: 'work_date', type: 'date' })
-  workDate!: Date | string;
+  @Column({ name: 'work_date', type: 'date', nullable: true })
+  workDate!: Date | string | null;
 
   @Column({ name: 'worker_id', length: 50 })
   workerId!: string;

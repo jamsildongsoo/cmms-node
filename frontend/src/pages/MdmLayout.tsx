@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
+import { requestConfirmation } from '../utils/userActionDialog';
 import axiosInstance from '../api/axios';
 import { getApiErrorMessage } from '../utils/apiError';
 import { 
@@ -17,12 +19,10 @@ interface CodeItem { id: string; name: string; legalInspectYn: string; sortOrder
 
 export default function MdmLayout() {
   const [subTab, setSubTab] = useState<'plant' | 'dept' | 'role' | 'user' | 'warehouse' | 'code'>('plant');
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-
   // Common Notification Helper
   const notify = (type: 'success' | 'error', text: string) => {
-    setMessage({ type, text });
-    setTimeout(() => setMessage(null), 3000);
+    if (type === 'success') toast.success(text);
+    else toast.error(text);
   };
 
   return (
@@ -51,7 +51,7 @@ export default function MdmLayout() {
             return (
               <button
                 key={tab}
-                onClick={() => { setSubTab(tab); setMessage(null); }}
+                onClick={() => setSubTab(tab)}
                 className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer border-0 outline-none ${
                   isActive 
                     ? 'bg-blue-600 text-white shadow-sm' 
@@ -64,17 +64,6 @@ export default function MdmLayout() {
           })}
         </div>
       </div>
-
-      {message && (
-        <div className="p-3 rounded-lg border border-slate-800 bg-slate-900 text-xs text-center text-slate-200 transition-all flex items-center justify-center gap-2">
-          {message.type === 'success' ? (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
-          )}
-          <span>{message.text}</span>
-        </div>
-      )}
 
       {/* Render sub components */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
@@ -129,7 +118,7 @@ function PlantManager({ notify }: { notify: (type: 'success' | 'error', t: strin
   };
 
   const handleDelete = async (plantId: string) => {
-    if (!confirm('정말 삭제하시겠습니까?')) return;
+    if (!(await requestConfirmation('정말 삭제하시겠습니까?'))) return;
     try {
       await axiosInstance.delete(`/mdm/plants/${plantId}`);
       notify('success', '플랜트가 삭제되었습니다.');
@@ -278,7 +267,7 @@ function DeptManager({ notify }: { notify: (type: 'success' | 'error', t: string
   };
 
   const handleDelete = async (deptId: string) => {
-    if (!confirm('정말 삭제하시겠습니까?')) return;
+    if (!(await requestConfirmation('정말 삭제하시겠습니까?'))) return;
     try {
       await axiosInstance.delete(`/mdm/departments/${deptId}`);
       notify('success', '부서가 삭제되었습니다.');
@@ -487,7 +476,7 @@ function UserManager({ notify }: { notify: (type: 'success' | 'error', t: string
   };
 
   const handleDelete = async (userId: string) => {
-    if (!confirm('정말 삭제(퇴사) 처리하시겠습니까?')) return;
+    if (!(await requestConfirmation('정말 삭제(퇴사) 처리하시겠습니까?'))) return;
     try {
       await axiosInstance.delete(`/mdm/users/${userId}`);
       notify('success', '사용자가 시스템에서 삭제되었습니다.');
@@ -987,7 +976,7 @@ function WarehouseManager({ notify }: { notify: (type: 'success' | 'error', t: s
   };
 
   const handleDelete = async (whId: string) => {
-    if (!confirm('정말 삭제하시겠습니까?')) return;
+    if (!(await requestConfirmation('정말 삭제하시겠습니까?'))) return;
     try {
       await axiosInstance.delete(`/mdm/warehouses/${whId}`);
       notify('success', '창고가 삭제되었습니다.');
@@ -1184,7 +1173,7 @@ function CodeManager({ notify }: { notify: (type: 'success' | 'error', t: string
   };
 
   const handleItemDelete = async (id: string) => {
-    if (!selectedGroupId || !confirm('정말 삭제하시겠습니까?')) return;
+    if (!selectedGroupId || !(await requestConfirmation('정말 삭제하시겠습니까?'))) return;
     try {
       await axiosInstance.delete(`/mdm/code-groups/${selectedGroupId}/items/${id}`);
       notify('success', '코드가 삭제되었습니다.');

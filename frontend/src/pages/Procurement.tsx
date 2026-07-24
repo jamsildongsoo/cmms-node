@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
+import { requestConfirmation } from '../utils/userActionDialog';
 import axiosInstance from '../api/axios';
 import ProcurementRequestPrint from '../components/ProcurementRequestPrint';
 import { useAuthStore } from '../store/useAuthStore';
@@ -90,8 +92,8 @@ export default function Procurement() {
   };
 
   const submitForm = async () => {
-    if (!formHeader.warehouseId) { alert('입고 저장소를 선택하세요.'); return; }
-    if (formItems.length === 0 || !formItems[0].inventoryId) { alert('자재 라인을 1개 이상 입력하세요.'); return; }
+    if (!formHeader.warehouseId) { toast.error('입고 저장소를 선택하세요.'); return; }
+    if (formItems.length === 0 || !formItems[0].inventoryId) { toast.error('자재 라인을 1개 이상 입력하세요.'); return; }
     try {
       await axiosInstance.post('/procurement/requests', {
         header: { ...formHeader, status: confirmOnSave ? 'S' : 'T' },
@@ -101,15 +103,15 @@ export default function Procurement() {
       setFormOpen(false);
       await loadRequests();
     } catch (e: any) {
-      alert(e.response?.data?.message || '저장 실패');
+      toast.error(e.response?.data?.message || '저장 실패');
     }
   };
 
   // 발주 / 배송 / 입고 / 종료 액션
   const confirmRequest = async (id: string) => {
-    if (!confirm('이 요청을 확정(S)하시겠습니까?')) return;
+    if (!(await requestConfirmation('이 요청을 확정(S)하시겠습니까?'))) return;
     try { await axiosInstance.post(`/procurement/requests/${id}/confirm`); await loadRequests(); }
-    catch (e: any) { alert(e.response?.data?.message || '실패'); }
+    catch (e: any) { toast.error(e.response?.data?.message || '실패'); }
   };
 
   // 발주 모달
@@ -120,7 +122,7 @@ export default function Procurement() {
       await axiosInstance.post('/procurement/orders', { requestId: orderModal.id, vendorId: orderModal.vendorId, orderDate: orderModal.orderDate, etaDate: orderModal.etaDate });
       setOrderModal(null);
       await loadRequests();
-    } catch (e: any) { alert(e.response?.data?.message || '발주 실패'); }
+    } catch (e: any) { toast.error(e.response?.data?.message || '발주 실패'); }
   };
 
   // 배송 시작 모달
@@ -131,7 +133,7 @@ export default function Procurement() {
       await axiosInstance.post('/procurement/shipments', { requestId: shipModal.id, shipStartDate: shipModal.shipStartDate });
       setShipModal(null);
       await loadRequests();
-    } catch (e: any) { alert(e.response?.data?.message || '배송 실패'); }
+    } catch (e: any) { toast.error(e.response?.data?.message || '배송 실패'); }
   };
 
   // 입고 모달
@@ -152,43 +154,43 @@ export default function Procurement() {
         unitPrice: '',
       }));
       setReceiveModal({ pr, lines, close: false, txDate: todayLocal() });
-    } catch (e: any) { alert(e.response?.data?.message || '상세 조회 실패'); }
+    } catch (e: any) { toast.error(e.response?.data?.message || '상세 조회 실패'); }
   };
   const submitReceive = async () => {
     if (!receiveModal) return;
     const lines: ReceiveLine[] = receiveModal.lines
       .filter((l: any) => Number(l.inputQty) > 0)
       .map((l: any) => ({ lineNo: l.lineNo, qty: Number(l.inputQty), unitPrice: l.unitPrice ? Number(l.unitPrice) : 0 }));
-    if (lines.length === 0) { alert('입고 수량을 1개 이상 입력하세요.'); return; }
+    if (lines.length === 0) { toast.error('입고 수량을 1개 이상 입력하세요.'); return; }
     try {
       await axiosInstance.post('/procurement/receipts', { requestId: receiveModal.pr.id, txDate: receiveModal.txDate, close: receiveModal.close, lines });
       setReceiveModal(null);
       await loadRequests();
-    } catch (e: any) { alert(e.response?.data?.message || '입고 실패'); }
+    } catch (e: any) { toast.error(e.response?.data?.message || '입고 실패'); }
   };
 
   const closeRequest = async (id: string) => {
-    if (!confirm('이 요청을 종료(E)하시겠습니까? (미입고 잔여는 닫힙니다)')) return;
+    if (!(await requestConfirmation('이 요청을 종료(E)하시겠습니까? (미입고 잔여는 닫힙니다)'))) return;
     try { await axiosInstance.post(`/procurement/requests/${id}/close`); await loadRequests(); }
-    catch (e: any) { alert(e.response?.data?.message || '종료 실패'); }
+    catch (e: any) { toast.error(e.response?.data?.message || '종료 실패'); }
   };
 
   const deleteRequest = async (id: string) => {
-    if (!confirm('이 저장중인 요청을 삭제하시겠습니까?')) return;
+    if (!(await requestConfirmation('이 저장중인 요청을 삭제하시겠습니까?'))) return;
     try { await axiosInstance.delete(`/procurement/requests/${id}`); await loadRequests(); }
-    catch (e: any) { alert(e.response?.data?.message || '삭제 실패'); }
+    catch (e: any) { toast.error(e.response?.data?.message || '삭제 실패'); }
   };
 
   // 목록 인쇄
   const handlePrint = () => {
     const list = tab === 'requests' ? requests : vendors;
-    if (list.length === 0) { alert('인쇄할 목록이 없습니다.'); return; }
+    if (list.length === 0) { toast.error('인쇄할 목록이 없습니다.'); return; }
     const user = useAuthStore.getState().user;
     const now = new Date();
     const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
 
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
-    if (!printWindow) { alert('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.'); return; }
+    if (!printWindow) { toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.'); return; }
 
     const tabLabel = tab === 'requests' ? '구매요청' : '벤더';
     const rows = tab === 'requests'
@@ -258,7 +260,7 @@ th { background: #eee; font-weight: 600; }
         },
         items: detail.data.items || [],
       });
-    } catch (e: any) { alert(e.response?.data?.message || '인쇄 실패'); }
+    } catch (e: any) { toast.error(e.response?.data?.message || '인쇄 실패'); }
   };
 
   // printPr가 실제 렌더된 직후 인쇄 (setTimeout 타이밍 추정 대신 렌더 동기 — 레이스 제거)
@@ -275,7 +277,7 @@ th { background: #eee; font-weight: 600; }
   const [vendorForm, setVendorForm] = useState<{ id: string; name: string; bizNo: string; contact: string; manager: string; remarks: string; editing?: boolean } | null>(null);
   const submitVendor = async () => {
     if (!vendorForm) return;
-    if (!vendorForm.id || !vendorForm.name) { alert('아이디·이름은 필수입니다.'); return; }
+    if (!vendorForm.id || !vendorForm.name) { toast.error('아이디·이름은 필수입니다.'); return; }
     try {
       if (vendorForm.editing) {
         await axiosInstance.put(`/vendors/${vendorForm.id}`, vendorForm);
@@ -284,12 +286,12 @@ th { background: #eee; font-weight: 600; }
       }
       setVendorForm(null);
       await loadRefs();
-    } catch (e: any) { alert(e.response?.data?.message || '저장 실패'); }
+    } catch (e: any) { toast.error(e.response?.data?.message || '저장 실패'); }
   };
   const deleteVendor = async (id: string) => {
-    if (!confirm('이 벤더를 삭제하시겠습니까?')) return;
+    if (!(await requestConfirmation('이 벤더를 삭제하시겠습니까?'))) return;
     try { await axiosInstance.delete(`/vendors/${id}`); await loadRefs(); }
-    catch (e: any) { alert(e.response?.data?.message || '삭제 실패'); }
+    catch (e: any) { toast.error(e.response?.data?.message || '삭제 실패'); }
   };
 
   return (

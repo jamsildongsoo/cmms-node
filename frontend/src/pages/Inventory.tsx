@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
+import { requestConfirmation } from '../utils/userActionDialog';
 import { useAuthStore } from '../store/useAuthStore';
 import axiosInstance from '../api/axios';
 import { getApiErrorMessage } from '../utils/apiError';
@@ -45,7 +47,6 @@ export default function Inventory() {
   const [remarks, setRemarks] = useState('');
 
   const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const fetchData = async () => {
     try {
@@ -57,7 +58,7 @@ export default function Inventory() {
       setDepts(deptRes.data);
     } catch (err) {
       console.error(err);
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '목록을 불러오지 못했습니다.') });
+      toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
     }
   };
 
@@ -100,13 +101,13 @@ export default function Inventory() {
   };
 
   const handleDelete = async (invId: string) => {
-    if (!confirm('정말 이 자재 품목을 삭제하시겠습니까?')) return;
+    if (!(await requestConfirmation('정말 이 자재 품목을 삭제하시겠습니까?'))) return;
     try {
       await axiosInstance.delete(`/master/inventories/${invId}`);
-      setMessage({ type: 'success', text: '자재 품목이 삭제되었습니다.' });
+      toast.success('자재 품목이 삭제되었습니다.');
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '삭제에 실패했습니다.') });
+      toast.error(getApiErrorMessage(err, '삭제에 실패했습니다.'));
     }
   };
 
@@ -115,7 +116,6 @@ export default function Inventory() {
     if (!id || !name) return;
 
     setIsLoading(true);
-    setMessage(null);
     try {
       const payload = {
         id, name, invTypeCode, departmentId: departmentId || null,
@@ -125,11 +125,11 @@ export default function Inventory() {
       };
 
       await axiosInstance.post('/master/inventories', payload);
-      setMessage({ type: 'success', text: '자재 마스터가 저장되었습니다.' });
+      toast.success('자재 마스터가 저장되었습니다.');
       setIsFormOpen(false);
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '저장 실패.') });
+      toast.error(getApiErrorMessage(err, '저장 실패.'));
     } finally {
       setIsLoading(false);
     }
@@ -147,7 +147,7 @@ export default function Inventory() {
       link.click();
       document.body.removeChild(link);
     } catch (err) {
-      alert(getApiErrorMessage(err, 'CSV 다운로드 실패'));
+      toast.error(getApiErrorMessage(err, 'CSV 다운로드 실패'));
     }
   };
 
@@ -166,7 +166,7 @@ export default function Inventory() {
 
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
     if (!printWindow) {
-      alert('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
+      toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
       return;
     }
 
@@ -277,17 +277,6 @@ export default function Inventory() {
           </button>
         </div>
       </div>
-
-      {message && (
-        <div className="p-3 rounded-lg border border-slate-800 bg-slate-900 text-xs text-center text-slate-200 print:hidden flex items-center justify-center gap-2">
-          {message.type === 'success' ? (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
-          )}
-          <span>{message.text}</span>
-        </div>
-      )}
 
       {/* Grid container */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 print:border-0 print:bg-transparent print:p-0">

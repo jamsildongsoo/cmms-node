@@ -41,24 +41,46 @@ export class WorkOrderService {
     private readonly sequenceService: SequenceService,
   ) {}
 
-  async getWorkOrdersByCompany(companyId: string, operator: string): Promise<any[]> {
+  async getWorkOrdersByCompany(
+    companyId: string,
+    operator: string,
+    searchType?: string,
+    searchValue?: string,
+  ): Promise<any[]> {
     const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator);
+    const conditions = [`wo.company_id = $1`, `wo.delete_yn = 'N'`];
+    const params: unknown[] = [companyId];
     if (activePlantId) {
-      return this.dataSource.query(
-        `SELECT * FROM work_order WHERE company_id = $1 AND plant_id = $2 AND delete_yn = 'N' ORDER BY id DESC`,
-        [companyId, activePlantId],
-      );
+      params.push(activePlantId);
+      conditions.push(`wo.plant_id = $${params.length}`);
+    }
+    if (searchValue && ['id', 'title', 'worker'].includes(searchType || '')) {
+      params.push(searchValue);
+      const index = params.length;
+      if (searchType === 'id') conditions.push(`wo.id ILIKE '%' || $${index} || '%'`);
+      if (searchType === 'title') conditions.push(`wo.title ILIKE '%' || $${index} || '%'`);
+      if (searchType === 'worker') {
+        conditions.push(`(wo.worker_id ILIKE '%' || $${index} || '%' OR worker.name ILIKE '%' || $${index} || '%')`);
+      }
     }
     return this.dataSource.query(
-      `SELECT * FROM work_order WHERE company_id = $1 AND delete_yn = 'N' ORDER BY id DESC`,
-      [companyId],
+      `SELECT wo.*, wo.created_at as "createdAt", wo.created_by as "createdBy"
+         FROM work_order wo
+         LEFT JOIN users worker
+           ON wo.company_id = worker.company_id
+          AND wo.worker_id = worker.id
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY wo.id DESC`,
+      params,
     );
   }
 
   async getWorkOrderDetails(companyId: string, plantId: string, id: string, operator: string): Promise<WorkOrderSaveRequest> {
     const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, plantId);
     const workOrders = await this.dataSource.query(
-      `SELECT * FROM work_order WHERE company_id = $1 AND plant_id = $2 AND id = $3 AND delete_yn = 'N'`,
+      `SELECT wo.*, wo.created_at as "createdAt", wo.created_by as "createdBy"
+         FROM work_order wo
+        WHERE company_id = $1 AND plant_id = $2 AND id = $3 AND delete_yn = 'N'`,
       [companyId, activePlantId, id],
     );
     if (!workOrders.length) {

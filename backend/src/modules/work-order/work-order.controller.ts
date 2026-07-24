@@ -22,9 +22,12 @@ export class WorkOrderController {
 
   @Get()
   @Permission(AppModule.WO, 'R')
-  async getWorkOrders(): Promise<any[]> {
+  async getWorkOrders(
+    @Query('searchType') searchType?: string,
+    @Query('searchValue') searchValue?: string,
+  ): Promise<any[]> {
     const { companyId, userId } = getTenantContext();
-    return this.workOrderService.getWorkOrdersByCompany(companyId, userId);
+    return this.workOrderService.getWorkOrdersByCompany(companyId, userId, searchType, searchValue);
   }
 
   @Get('details')

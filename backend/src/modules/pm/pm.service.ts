@@ -30,7 +30,7 @@ export interface PmRecordResponse {
   cycleFrom: string | null;
   cycleEnd: string | null;
   closeYn: string;
-  workDate: string;
+  workDate: string | null;
   workerId: string;
   judgeCode: string;
   remarks: string | null;
@@ -41,6 +41,8 @@ export interface PmRecordResponse {
   refNo: string | null;
   refModule: string | null;
   status: string;
+  createdAt: string;
+  createdBy: string;
 }
 
 export interface PmSaveRequest {
@@ -54,7 +56,7 @@ export interface PmSaveRequest {
     stepStage?: string | null;
     cycleFrom?: string | null;
     cycleEnd?: string | null;
-    workDate: string | Date;
+    workDate: string | Date | null;
     workerId: string;
     judgeCode: string;
     remarks?: string | null;
@@ -65,6 +67,8 @@ export interface PmSaveRequest {
     refNo?: string | null;
     refModule?: string | null;
     status: string;
+    createdAt?: string | null;
+    createdBy?: string | null;
   };
   checkItems: Array<{
     itemNo: number;
@@ -160,12 +164,17 @@ export class PmService {
         p.approval_id as "approvalId",
         p.ref_no as "refNo",
         p.ref_module as "refModule",
-        p.status
+        p.status,
+        p.created_at as "createdAt",
+        p.created_by as "createdBy"
       FROM pm_record p
       LEFT JOIN equipment e
         ON p.company_id = e.company_id
        AND p.plant_id = e.plant_id
-       AND p.equipment_id = e.id`;
+       AND p.equipment_id = e.id
+      LEFT JOIN users worker
+        ON p.company_id = worker.company_id
+       AND p.worker_id = worker.id`;
 
     // 동적 WHERE 조건 빌드
     const conditions: string[] = [`p.company_id = $1`];
@@ -195,12 +204,10 @@ export class PmService {
       let searchCond = '';
       if (searchType === 'id') {
         searchCond = `p.id ILIKE '%' || $${paramIdx} || '%'`;
-      } else if (searchType === 'equipment') {
-        searchCond = `(p.equipment_id ILIKE '%' || $${paramIdx} || '%' OR e.name ILIKE '%' || $${paramIdx} || '%')`;
       } else if (searchType === 'title') {
         searchCond = `p.title ILIKE '%' || $${paramIdx} || '%'`;
-      } else if (searchType === 'date') {
-        searchCond = `p.work_date::text = $${paramIdx}`;
+      } else if (searchType === 'author') {
+        searchCond = `(p.worker_id ILIKE '%' || $${paramIdx} || '%' OR worker.name ILIKE '%' || $${paramIdx} || '%')`;
       }
       if (searchCond) {
         conditions.push(`(${searchCond})`);
@@ -243,7 +250,9 @@ export class PmService {
         approval_id as "approvalId",
         ref_no as "refNo",
         ref_module as "refModule",
-        status
+        status,
+        created_at as "createdAt",
+        created_by as "createdBy"
        FROM pm_record WHERE company_id = $1 AND plant_id = $2 AND id = $3 AND delete_yn = 'N'`,
       [companyId, activePlantId, id],
     );
@@ -354,13 +363,25 @@ export class PmService {
         previousStatus = existing[0]?.status ?? null;
       }
 
-      const workDateStr = toDateOnly(pmRecord.workDate);
+      let workDateStr = pmRecord.workDate ? toDateOnly(pmRecord.workDate) : null;
       const certExpireDateStr = pmRecord.certExpireDate
         ? toDateOnly(pmRecord.certExpireDate)
         : null;
       const cycleFromStr = pmRecord.cycleFrom ? toDateOnly(pmRecord.cycleFrom) : null;
       const cycleEndStr = pmRecord.cycleEnd ? toDateOnly(pmRecord.cycleEnd) : null;
       const titleStr = pmRecord.title?.trim() || null;
+
+      const isRecurringPlan = stepStage === 'P' && !!cycleFromStr && !!cycleEndStr;
+      if (isRecurringPlan) workDateStr = null;
+      if (stepStage === 'P' && !isRecurringPlan && !workDateStr) {
+        throw new BadRequestException('단일 예방점검 계획은 계획일이 필요합니다.');
+      }
+      if (stepStage === 'P' && ((cycleFromStr && !cycleEndStr) || (!cycleFromStr && cycleEndStr))) {
+        throw new BadRequestException('반복작업은 시작일과 종료일을 모두 입력해야 합니다.');
+      }
+      if (stepStage === 'R' && !workDateStr) {
+        throw new BadRequestException('예방점검 실적은 점검일이 필요합니다.');
+      }
 
       if (isNew) {
         await qr.query(
@@ -447,13 +468,13 @@ export class PmService {
 
         if (cycles.length > 0) {
           const cycle = cycles[0];
-          const nextDateStr = addDateOnly(workDateStr, Number(cycle.cycle_val), cycle.cycle_unit);
+          const nextDateStr = addDateOnly(workDateStr!, Number(cycle.cycle_val), cycle.cycle_unit);
 
           await qr.query(
             `UPDATE equipment_check_cycle
              SET last_check_date = $5, next_check_date = $6, updated_by = $7
              WHERE company_id = $1 AND plant_id = $2 AND equipment_id = $3 AND check_type_code = $4`,
-            [companyId, activePlantId, pmRecord.equipmentId, pmRecord.checkTypeCode, workDateStr, nextDateStr, operator],
+            [companyId, activePlantId, pmRecord.equipmentId, pmRecord.checkTypeCode, workDateStr!, nextDateStr, operator],
           );
         }
       }

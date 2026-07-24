@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { useAuthStore } from '../store/useAuthStore';
 import { useThemeStore } from '../store/useThemeStore';
 import { Building2, User, Lock, Mail, Phone, Briefcase, ChevronRight, Sun, Moon } from 'lucide-react';
@@ -84,7 +85,7 @@ export default function Login() {
         position: signupPosition,
         title: signupTitle,
       });
-      alert('회원가입 신청이 완료되었습니다. 관리자 승인 후 로그인할 수 있습니다.');
+      toast.success('회원가입 신청이 완료되었습니다. 관리자 승인 후 로그인할 수 있습니다.');
       setIsSignUp(false);
       // Reset signup fields
       setSignupCompanyId('');

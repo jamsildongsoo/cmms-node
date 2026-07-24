@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
+import { requestConfirmation } from '../utils/userActionDialog';
 import { useAuthStore } from '../store/useAuthStore';
 import axiosInstance from '../api/axios';
 import { getApiErrorMessage } from '../utils/apiError';
@@ -59,7 +61,6 @@ export default function Equipment() {
   const [checkCycles, setCheckCycles] = useState<CheckCycle[]>([]);
 
   const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const fetchData = async () => {
     try {
@@ -74,7 +75,7 @@ export default function Equipment() {
       }
     } catch (err) {
       console.error(err);
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '목록을 불러오지 못했습니다.') });
+      toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
     }
   };
 
@@ -127,18 +128,18 @@ export default function Equipment() {
       
       setIsFormOpen(true);
     } catch (err) {
-      alert(getApiErrorMessage(err, '설비 상세 내역을 불러오지 못했습니다.'));
+      toast.error(getApiErrorMessage(err, '설비 상세 내역을 불러오지 못했습니다.'));
     }
   };
 
   const handleDelete = async (eq: EquipmentType) => {
-    if (!confirm('정말 이 설비를 삭제하시겠습니까?')) return;
+    if (!(await requestConfirmation('정말 이 설비를 삭제하시겠습니까?'))) return;
     try {
       await axiosInstance.delete(`/master/equipments?plantId=${eq.plantId}&id=${eq.id}`);
-      setMessage({ type: 'success', text: '설비가 성공적으로 삭제되었습니다.' });
+      toast.success('설비가 성공적으로 삭제되었습니다.');
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '설비 삭제 실패.') });
+      toast.error(getApiErrorMessage(err, '설비 삭제 실패.'));
     }
   };
 
@@ -164,7 +165,6 @@ export default function Equipment() {
     if (!id || !name || !plantId) return;
 
     setIsLoading(true);
-    setMessage(null);
     try {
       const payload = {
         equipment: {
@@ -183,11 +183,11 @@ export default function Equipment() {
       };
 
       await axiosInstance.post('/master/equipments', payload);
-      setMessage({ type: 'success', text: '설비 정보가 성공적으로 저장되었습니다.' });
+      toast.success('설비 정보가 성공적으로 저장되었습니다.');
       setIsFormOpen(false);
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '저장 중 오류가 발생했습니다.') });
+      toast.error(getApiErrorMessage(err, '저장 중 오류가 발생했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -205,7 +205,7 @@ export default function Equipment() {
       link.click();
       document.body.removeChild(link);
     } catch (err) {
-      alert(getApiErrorMessage(err, 'CSV 다운로드 실패'));
+      toast.error(getApiErrorMessage(err, 'CSV 다운로드 실패'));
     }
   };
 
@@ -224,7 +224,7 @@ export default function Equipment() {
 
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
     if (!printWindow) {
-      alert('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
+      toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
       return;
     }
 
@@ -344,17 +344,6 @@ export default function Equipment() {
           </button>
         </div>
       </div>
-
-      {message && (
-        <div className="p-3 rounded-lg border border-slate-800 bg-slate-900 text-xs text-center text-slate-200 print:hidden flex items-center justify-center gap-2">
-          {message.type === 'success' ? (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
-          )}
-          <span>{message.text}</span>
-        </div>
-      )}
 
       {/* Filter and Grid (print:block) */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 print:border-0 print:bg-transparent print:p-0">

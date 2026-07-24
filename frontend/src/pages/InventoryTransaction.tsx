@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
+import { requestConfirmation } from '../utils/userActionDialog';
 import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import PrintHeader from '../components/PrintHeader';
@@ -66,7 +68,6 @@ export default function InventoryTransaction() {
   const [txGrid, setTxGrid] = useState<TxGridItem[]>([]);
 
   const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const fetchData = async () => {
     try {
@@ -85,7 +86,7 @@ export default function InventoryTransaction() {
       setInventories(invRes.data);
     } catch (err) {
       console.error(err);
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '재고 데이터를 불러오지 못했습니다.') });
+      toast.error(getApiErrorMessage(err, '재고 데이터를 불러오지 못했습니다.'));
     }
   };
 
@@ -137,14 +138,13 @@ export default function InventoryTransaction() {
   const handleSaveTransactions = async () => {
     if (txGrid.length === 0) return;
     setIsLoading(true);
-    setMessage(null);
     try {
       await axiosInstance.post('/inventory-tx', { items: txGrid });
-      setMessage({ type: 'success', text: '재고 처리가 완료되었습니다.' });
+      toast.success('재고 처리가 완료되었습니다.');
       setIsTxModalOpen(false);
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '처리 오류 발생') });
+      toast.error(getApiErrorMessage(err, '처리 오류 발생'));
     } finally {
       setIsLoading(false);
     }
@@ -152,18 +152,17 @@ export default function InventoryTransaction() {
 
   const handleRunClosing = async () => {
     if (!closingYm || closingYm.length !== 6) {
-      alert('마감 년월 6자리(YYYYMM)를 확인해주세요.');
+      toast.error('마감 년월 6자리(YYYYMM)를 확인해주세요.');
       return;
     }
     setIsLoading(true);
-    setMessage(null);
     try {
       await axiosInstance.post(`/inventory-tx/close?closingYm=${closingYm}`);
-      setMessage({ type: 'success', text: `${closingYm.substring(0, 4)}년 ${closingYm.substring(4, 6)}월 재고 마감이 처리되었습니다.` });
+      toast.success(`${closingYm.substring(0, 4)}년 ${closingYm.substring(4, 6)}월 재고 마감이 처리되었습니다.`);
       setIsClosingModalOpen(false);
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '마감 처리 오류') });
+      toast.error(getApiErrorMessage(err, '마감 처리 오류'));
     } finally {
       setIsLoading(false);
     }
@@ -323,17 +322,6 @@ export default function InventoryTransaction() {
           </div>
         </div>
       </div>
-
-      {message && (
-        <div className="p-3 rounded-lg border border-slate-800 bg-slate-900 text-xs text-center text-slate-200 print:hidden flex items-center justify-center gap-2">
-          {message.type === 'success' ? (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
-          )}
-          <span>{message.text}</span>
-        </div>
-      )}
 
       {/* Main Grid View */}
       <div className={`bg-slate-900 border border-slate-800 rounded-xl p-6 print:border-0 print:bg-transparent print:p-0 print-landscape ${isSlipOpen ? 'print:hidden' : ''}`}>
@@ -792,15 +780,15 @@ export default function InventoryTransaction() {
                   type="button"
                   onClick={async () => {
                     const label = selectedSlip.txTypeCode === 'IN' ? '입고' : '출고';
-                    if (!confirm(`전표 ${selectedSlip.docNo}을(를) 역분개로 취소합니다.\n이 ${label} 이후 동일 품목·창고에 거래가 없을 때만 가능합니다. 진행할까요?`)) return;
+                    if (!(await requestConfirmation(`전표 ${selectedSlip.docNo}을(를) 역분개로 취소합니다.\n이 ${label} 이후 동일 품목·창고에 거래가 없을 때만 가능합니다. 진행할까요?`))) return;
                     try {
                       await axiosInstance.post(`/procurement/slips/cancel/${encodeURIComponent(selectedSlip.docNo!)}`);
-                      alert(`${label} 전표가 역분개로 취소되었습니다.`);
+                      toast.success(`${label} 전표가 역분개로 취소되었습니다.`);
                       setIsSlipOpen(false);
                       const res = await axiosInstance.get('/inventory-tx/history');
                       setHistoryList(res.data || []);
                     } catch (e: any) {
-                      alert(e.response?.data?.message || '취소 실패');
+                      toast.error(e.response?.data?.message || '취소 실패');
                     }
                   }}
                   className="bg-rose-700 hover:bg-rose-600 text-white rounded-lg py-2 px-4 text-xs font-semibold cursor-pointer border-0"

@@ -22,9 +22,12 @@ export class WorkPermitController {
 
   @Get()
   @Permission(AppModule.WP, 'R')
-  async getWorkPermits(): Promise<any[]> {
+  async getWorkPermits(
+    @Query('searchType') searchType?: string,
+    @Query('searchValue') searchValue?: string,
+  ): Promise<any[]> {
     const { companyId, userId } = getTenantContext();
-    return this.workPermitService.getWorkPermitsByCompany(companyId, userId);
+    return this.workPermitService.getWorkPermitsByCompany(companyId, userId, searchType, searchValue);
   }
 
   @Get('details')

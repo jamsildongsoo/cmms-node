@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import { requestConfirmation } from '../utils/userActionDialog';
 import axiosInstance from '../api/axios';
 import { formatDateTime } from '../utils/datetime';
 import { ShieldCheck, Users, History, Building2, Plus } from 'lucide-react';
@@ -29,7 +31,6 @@ interface LoginHist {
 export default function SystemAdmin() {
   const [tab, setTab] = useState<'companies' | 'users' | 'history'>('companies');
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // 회사 생성 폼
   const [coId, setCoId] = useState('');
@@ -56,7 +57,7 @@ export default function SystemAdmin() {
       const res = await axiosInstance.get('/mdm/companies');
       setCompanies(res.data);
     } catch {
-      setMessage({ type: 'error', text: '회사 목록을 불러오지 못했습니다.' });
+      toast.error('회사 목록을 불러오지 못했습니다.');
     }
   };
 
@@ -64,11 +65,11 @@ export default function SystemAdmin() {
 
   const createCompany = async () => {
     if (!coId.trim() || !coName.trim()) {
-      setMessage({ type: 'error', text: '회사 코드와 회사명은 필수입니다.' });
+      toast.error('회사 코드와 회사명은 필수입니다.');
       return;
     }
     if (!coAdminId.trim() || !coAdminName.trim() || !coAdminPw) {
-      setMessage({ type: 'error', text: '관리자 ID·이름·초기 비밀번호는 필수입니다.' });
+      toast.error('관리자 ID·이름·초기 비밀번호는 필수입니다.');
       return;
     }
     setCoSaving(true);
@@ -82,12 +83,12 @@ export default function SystemAdmin() {
         adminName: coAdminName.trim(),
         adminPassword: coAdminPw,
       });
-      setMessage({ type: 'success', text: `회사 '${coId.trim().toUpperCase()}' + 관리자 '${coAdminId.trim()}'(ADMIN) 생성 완료. 첫 로그인 시 비밀번호 변경이 필요합니다.` });
+      toast.success(`회사 '${coId.trim().toUpperCase()}' + 관리자 '${coAdminId.trim()}'(ADMIN) 생성 완료. 첫 로그인 시 비밀번호 변경이 필요합니다.`);
       setCoId(''); setCoName(''); setCoBizNo(''); setCoEmail('');
       setCoAdminId(''); setCoAdminName(''); setCoAdminPw('');
       fetchCompanies();
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.response?.data?.message || '회사 생성 실패' });
+      toast.error(err.response?.data?.message || '회사 생성 실패');
     } finally {
       setCoSaving(false);
     }
@@ -98,7 +99,7 @@ export default function SystemAdmin() {
       const res = await axiosInstance.get('/system/users', { params: userCompanyId ? { companyId: userCompanyId } : {} });
       setUsers(res.data);
     } catch {
-      setMessage({ type: 'error', text: '사용자 목록을 불러오지 못했습니다.' });
+      toast.error('사용자 목록을 불러오지 못했습니다.');
     }
   };
 
@@ -110,7 +111,7 @@ export default function SystemAdmin() {
       const res = await axiosInstance.get('/system/login-history', { params });
       setHistory(res.data);
     } catch {
-      setMessage({ type: 'error', text: '로그인 이력을 불러오지 못했습니다.' });
+      toast.error('로그인 이력을 불러오지 못했습니다.');
     }
   };
 
@@ -119,13 +120,13 @@ export default function SystemAdmin() {
 
   const toggleUseYn = async (u: SysUser) => {
     const next = u.useYn === 'Y' ? 'N' : 'Y';
-    if (!confirm(`[${u.companyId}] ${u.id} 사용여부를 ${next === 'Y' ? '활성(Y)' : '비활성(N)'}으로 변경할까요?`)) return;
+    if (!(await requestConfirmation(`[${u.companyId}] ${u.id} 사용여부를 ${next === 'Y' ? '활성(Y)' : '비활성(N)'}으로 변경할까요?`))) return;
     try {
       await axiosInstance.put(`/system/users/${u.companyId}/${u.id}/use-yn`, { useYn: next });
-      setMessage({ type: 'success', text: '사용여부를 변경했습니다.' });
+      toast.success('사용여부를 변경했습니다.');
       fetchUsers();
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.response?.data?.message || '변경 실패' });
+      toast.error(err.response?.data?.message || '변경 실패');
     }
   };
 
@@ -137,14 +138,6 @@ export default function SystemAdmin() {
         </h2>
         <p className="text-slate-400 text-xs mt-1">플랫폼 관리자 전용 — 모든 회사의 사용자/로그인 이력 관리</p>
       </div>
-
-      {message && (
-        <div className={`text-xs px-3 py-2 rounded-lg border ${message.type === 'success'
-          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-800'
-          : 'bg-red-500/10 text-red-400 border-red-800'}`}>
-          {message.text}
-        </div>
-      )}
 
       <div className="flex gap-2">
         <button onClick={() => setTab('companies')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold ${tab === 'companies' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300'}`}>

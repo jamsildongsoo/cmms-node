@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import { toast } from 'sonner';
 import axiosInstance from '../api/axios';
 
 interface User {
@@ -177,7 +178,7 @@ export const useAuthStore = create<AuthState>()(
         const remaining = expiresAt ? Math.floor((expiresAt - Date.now()) / 1000) : 0;
         if (remaining <= 0) {
           get().logout();
-          alert('세션이 만료되어 로그아웃되었습니다.');
+          toast.error('세션이 만료되어 로그아웃되었습니다.');
         } else {
           set({ timeRemaining: remaining });
         }

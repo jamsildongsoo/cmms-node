@@ -134,6 +134,16 @@ html.light {
   }
 }
 
+@page portrait {
+  size: A4 portrait;
+  margin: 14mm 10mm;
+}
+
+@page landscape {
+  size: A4 landscape;
+  margin: 14mm 10mm;
+}
+
 @media print {
   body {
     background-color: white !important;
@@ -171,6 +181,25 @@ html.light {
     display: block !important;
     margin: 0 !important;
     padding: 0 !important;
+  }
+
+  .print-section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-section:has(.print-table) {
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+
+  .print-table thead {
+    display: table-header-group;
+  }
+
+  .print-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   /* space-y-* 마진 인쇄 시 제거 */

@@ -11,24 +11,46 @@ export class WorkPermitService {
     private readonly sequenceService: SequenceService,
   ) {}
 
-  async getWorkPermitsByCompany(companyId: string, operator: string): Promise<any[]> {
+  async getWorkPermitsByCompany(
+    companyId: string,
+    operator: string,
+    searchType?: string,
+    searchValue?: string,
+  ): Promise<any[]> {
     const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator);
+    const conditions = [`wp.company_id = $1`, `wp.delete_yn = 'N'`];
+    const params: unknown[] = [companyId];
     if (activePlantId) {
-      return this.dataSource.query(
-        `SELECT * FROM work_permit WHERE company_id = $1 AND plant_id = $2 AND delete_yn = 'N' ORDER BY id DESC`,
-        [companyId, activePlantId],
-      );
+      params.push(activePlantId);
+      conditions.push(`wp.plant_id = $${params.length}`);
+    }
+    if (searchValue && ['id', 'title', 'supervisor'].includes(searchType || '')) {
+      params.push(searchValue);
+      const index = params.length;
+      if (searchType === 'id') conditions.push(`wp.id ILIKE '%' || $${index} || '%'`);
+      if (searchType === 'title') conditions.push(`wp.title ILIKE '%' || $${index} || '%'`);
+      if (searchType === 'supervisor') {
+        conditions.push(`(wp.supervisor_id ILIKE '%' || $${index} || '%' OR supervisor.name ILIKE '%' || $${index} || '%')`);
+      }
     }
     return this.dataSource.query(
-      `SELECT * FROM work_permit WHERE company_id = $1 AND delete_yn = 'N' ORDER BY id DESC`,
-      [companyId],
+      `SELECT wp.*, wp.created_at as "createdAt", wp.created_by as "createdBy"
+         FROM work_permit wp
+         LEFT JOIN users supervisor
+           ON wp.company_id = supervisor.company_id
+          AND wp.supervisor_id = supervisor.id
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY wp.id DESC`,
+      params,
     );
   }
 
   async getWorkPermitDetails(companyId: string, plantId: string, id: string, operator: string): Promise<any> {
     const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, plantId);
     const permits = await this.dataSource.query(
-      `SELECT * FROM work_permit WHERE company_id = $1 AND plant_id = $2 AND id = $3 AND delete_yn = 'N'`,
+      `SELECT wp.*, wp.created_at as "createdAt", wp.created_by as "createdBy"
+         FROM work_permit wp
+        WHERE company_id = $1 AND plant_id = $2 AND id = $3 AND delete_yn = 'N'`,
       [companyId, activePlantId, id],
     );
     if (!permits.length) {

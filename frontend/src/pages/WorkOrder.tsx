@@ -1,4 +1,7 @@
 import { useState, useEffect } from 'react';
+import { createRoot } from 'react-dom/client';
+import { toast } from 'sonner';
+import { requestConfirmation } from '../utils/userActionDialog';
 import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import { getCommonStatusLabel as getStatusLabel, getCommonStatusClass as getStatusClass } from '../constants/status';
@@ -6,6 +9,8 @@ import { formatDateOnly, todayLocal } from '../utils/datetime';
 import { getApiErrorMessage } from '../utils/apiError';
 import PrintHeader from '../components/PrintHeader';
 import WorkOrderPrint from '../components/WorkOrderPrint';
+import PrintWindowLayout from '../components/PrintWindowLayout';
+import { openPrintWindow } from '../utils/printWindow';
 import ApprovalSubmitModal from '../components/ApprovalSubmitModal';
 import { 
   ClipboardList, Edit2, Trash2, Printer, X, Plus, Trash 
@@ -30,6 +35,8 @@ interface WorkOrderModel {
   refModule: string | null;
   approvalId: string | null;
   status: string; // T, S, P, C, R, X
+  createdAt?: string | null;
+  createdBy?: string | null;
 }
 
 interface WorkOrderItemModel {
@@ -42,6 +49,8 @@ interface WorkOrderItemModel {
 export default function WorkOrder() {
   const user = useAuthStore((s) => s.user);
   const [activeSubTab, setActiveSubTab] = useState<'plan' | 'history'>('plan');
+  const [searchType, setSearchType] = useState<'id' | 'title' | 'worker'>('id');
+  const [searchValue, setSearchValue] = useState('');
 
   const [workOrders, setWorkOrders] = useState<WorkOrderModel[]>([]);
   const [equipments, setEquipments] = useState<{ id: string; name: string; plantId: string }[]>([]);
@@ -69,19 +78,24 @@ export default function WorkOrder() {
   const [refNo, setRefNo] = useState('');
   const [refModule, setRefModule] = useState('');
   const [approvalId, setApprovalId] = useState('');
-  const [status, setStatus] = useState('T');
+  const [createdAt, setCreatedAt] = useState('');
+  const [createdBy, setCreatedBy] = useState('');
 
   const [workItems, setWorkItems] = useState<WorkOrderItemModel[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [approvalRef, setApprovalRef] = useState<{ refNo: string; title: string } | null>(null);
 
   const canDirectConfirm = user?.permissions?.WO?.A === 'Y';
 
   const fetchData = async () => {
     try {
+      const params = new URLSearchParams();
+      if (searchValue) {
+        params.set('searchType', searchType);
+        params.set('searchValue', searchValue);
+      }
       const [woRes, eqRes, deptRes, userRes] = await Promise.all([
-        axiosInstance.get('/work-order'),
+        axiosInstance.get(`/work-order?${params.toString()}`),
         axiosInstance.get('/master/equipments'),
         axiosInstance.get('/mdm/departments'),
         axiosInstance.get('/mdm/users')
@@ -94,8 +108,7 @@ export default function WorkOrder() {
       setDepts(deptRes.data);
       setUsersList(userRes.data);
     } catch (err) {
-      console.error(err);
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '목록을 불러오지 못했습니다.') });
+      toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
     }
   };
 
@@ -119,7 +132,8 @@ export default function WorkOrder() {
     setRefNo('');
     setRefModule('');
     setApprovalId('');
-    setStatus('T');
+    setCreatedAt('');
+    setCreatedBy('');
     setWorkItems([]);
     setIsFormOpen(true);
   };
@@ -150,25 +164,26 @@ export default function WorkOrder() {
       setRefNo(w.refNo || '');
       setRefModule(w.refModule || '');
       setApprovalId(w.approvalId || '');
-      setStatus(w.status);
+      setCreatedAt(w.createdAt || '');
+      setCreatedBy(w.createdBy || '');
       setWorkItems(data.workItems || []);
       
       setIsFormOpen(true);
     } catch (err) {
-      alert(getApiErrorMessage(err, '작업지시 상세 기록을 불러오지 못했습니다.'));
+      toast.error(getApiErrorMessage(err, '작업지시 상세 기록을 불러오지 못했습니다.'));
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleDelete = async (wo: WorkOrderModel) => {
-    if (!confirm('정말 이 작업지시를 삭제하시겠습니까?')) return;
+    if (!(await requestConfirmation('정말 이 작업지시를 삭제하시겠습니까?'))) return;
     try {
       await axiosInstance.delete(`/work-order?plantId=${wo.plantId}&id=${wo.id}`);
-      setMessage({ type: 'success', text: '작업지시가 삭제되었습니다.' });
+      toast.success('작업지시가 삭제되었습니다.');
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '삭제 실패.') });
+      toast.error(getApiErrorMessage(err, '삭제 실패.'));
     }
   };
 
@@ -196,11 +211,10 @@ export default function WorkOrder() {
 
   const handleSave = async (submitStatus: 'T' | 'S' | 'P') => {
     if (!title.trim()) {
-      alert('지시명(제목)을 입력해주세요.');
+      toast.error('지시명(제목)을 입력해주세요.');
       return;
     }
     setIsLoading(true);
-    setMessage(null);
     try {
       const saveStatus = submitStatus === 'P' ? 'T' : submitStatus;
       const payload = {
@@ -230,20 +244,14 @@ export default function WorkOrder() {
       if (submitStatus === 'P') {
         const savedId = response.data.id;
         setWoNo(savedId);
-        setStatus('T');
         setApprovalRef({ refNo: savedId, title: `[작업지시] ${title}` });
         return;
       }
-      setMessage({ 
-        type: 'success', 
-        text: submitStatus === 'T' 
-          ? '임시저장 되었습니다.' 
-          : '작업지시가 직접 확정 완료되었습니다.'
-      });
+      toast.success(submitStatus === 'T' ? '임시저장 되었습니다.' : '작업지시가 직접 확정 완료되었습니다.');
       setIsFormOpen(false);
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '저장 중 오류가 발생했습니다.') });
+      toast.error(getApiErrorMessage(err, '저장 중 오류가 발생했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -268,14 +276,53 @@ export default function WorkOrder() {
     }[code] || code;
   };
 
+  const openPrintDocument = async (wo: WorkOrderModel) => {
+    const printTarget = openPrintWindow({ title: '작업지시서 출력', rootId: 'wo-print-root' });
+    if (!printTarget) {
+      toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
+      return;
+    }
+    const { printWindow, container } = printTarget;
+    try {
+      const response = await axiosInstance.get(`/work-order/details?plantId=${wo.plantId}&id=${wo.id}`);
+      const detail = { ...wo, ...response.data.workOrder } as WorkOrderModel;
+      createRoot(container).render(
+        <PrintWindowLayout printWindow={printWindow} contentClassName="max-w-[180mm]">
+          <WorkOrderPrint
+            woNo={detail.id}
+            title={detail.title}
+            status={detail.status}
+            approvalId={detail.approvalId}
+            createdAt={formatDateOnly(detail.createdAt)}
+            authorName={usersList.find((item) => item.id === detail.createdBy)?.name || detail.createdBy || '-'}
+            deptName={depts.find((item) => item.id === detail.departmentId)?.name || detail.departmentId}
+            workDate={detail.workDate || '-'}
+            equipmentId={detail.equipmentId}
+            equipmentName={equipments.find((item) => item.id === detail.equipmentId)?.name || detail.equipmentId}
+            woTypeCode={getWoTypeLabel(detail.woTypeCode)}
+            cost={detail.cost}
+            manHours={detail.manHours}
+            manHoursUnit={detail.manHoursUnit}
+            remarks={detail.remarks || undefined}
+            workItems={response.data.workItems || []}
+          />
+        </PrintWindowLayout>,
+      );
+      printWindow.focus();
+    } catch (err) {
+      printWindow.close();
+      toast.error(getApiErrorMessage(err, '출력 문서를 불러오지 못했습니다.'));
+    }
+  };
+
   const handlePrint = () => {
-    if (workOrders.length === 0) { alert('인쇄할 목록이 없습니다.'); return; }
+    if (workOrders.length === 0) { toast.error('인쇄할 목록이 없습니다.'); return; }
     const user = useAuthStore.getState().user;
     const now = new Date();
     const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
 
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
-    if (!printWindow) { alert('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.'); return; }
+    if (!printWindow) { toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.'); return; }
 
     const rows = workOrders.map(wo => `
       <tr>
@@ -374,16 +421,34 @@ th { background: #eee; font-weight: 600; }
         </div>
       </div>
 
-      {message && (
-        <div className="p-3 rounded-lg border border-slate-800 bg-slate-900 text-xs text-center text-slate-200 print:hidden flex items-center justify-center gap-2">
-          {message.type === 'success' ? (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
-          )}
-          <span>{message.text}</span>
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 print:hidden">
+        <div className="flex flex-wrap items-center gap-3">
+          <select
+            value={searchType}
+            onChange={(event) => setSearchType(event.target.value as 'id' | 'title' | 'worker')}
+            className="bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-3 text-xs text-slate-300 outline-none"
+          >
+            <option value="id">문서번호</option>
+            <option value="title">타이틀</option>
+            <option value="worker">담당자</option>
+          </select>
+          <input
+            type="text"
+            value={searchValue}
+            onChange={(event) => setSearchValue(event.target.value)}
+            onKeyDown={(event) => event.key === 'Enter' && fetchData()}
+            placeholder="검색어 입력"
+            className="flex-1 min-w-[200px] bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-3 text-xs text-slate-300 outline-none"
+          />
+          <button
+            type="button"
+            onClick={fetchData}
+            className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-1.5 text-xs font-semibold cursor-pointer border-0"
+          >
+            검색
+          </button>
         </div>
-      )}
+      </div>
 
       {/* Main Grid View */}
       <div className={`bg-slate-900 border border-slate-800 rounded-xl p-6 print:border-0 print:bg-transparent print:p-0 print-landscape ${isFormOpen ? 'print:hidden' : ''}`}>
@@ -415,7 +480,16 @@ th { background: #eee; font-weight: 600; }
               ) : (
                 (activeSubTab === 'plan' ? plans : history).map((wo) => (
                   <tr key={wo.id} className="border-b border-slate-900 hover:bg-slate-900/30 text-slate-300 print:border-slate-200 print:text-slate-800 print:hover:bg-transparent">
-                    <td className="p-3 font-mono text-slate-400 print:text-slate-600">{wo.id}</td>
+                    <td className="p-3 font-mono">
+                      <button
+                        type="button"
+                        onClick={() => openPrintDocument(wo)}
+                        className="no-print bg-transparent border-0 p-0 text-blue-400 hover:text-blue-300 hover:underline font-mono cursor-pointer"
+                      >
+                        {wo.id}
+                      </button>
+                      <span className="hidden print:inline text-slate-600">{wo.id}</span>
+                    </td>
                     <td className="p-3 font-semibold text-slate-200 print:text-slate-900">{wo.title}</td>
                     <td className="p-3 font-mono text-slate-400">{wo.equipmentId}</td>
                     <td className="p-3">{getWoTypeLabel(wo.woTypeCode)}</td>
@@ -472,28 +546,26 @@ th { background: #eee; font-weight: 600; }
             <div className="flex-1 overflow-y-auto p-6 space-y-6 print:hidden">
 
               {/* Status Header Area */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs print:bg-slate-50 print:border-slate-300">
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-4 text-xs">
                 <div>
-                  <span className="text-slate-500 block mb-0.5 print:text-slate-600">지시 번호</span>
-                  <span className="font-mono font-semibold text-slate-300 print:text-slate-800">{woNo || '(저장 시 자동발행)'}</span>
+                  <span className="text-slate-500 block mb-0.5">문서번호</span>
+                  <span className="font-mono font-semibold text-slate-300">{woNo || '(저장 시 자동발행)'}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block mb-0.5 print:text-slate-600">문서 상태</span>
-                  <div>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getStatusClass(status)}`}>
-                      {getStatusLabel(status)}
-                    </span>
-                  </div>
+                  <span className="text-slate-500 block mb-0.5">작성일</span>
+                  <span className="font-mono text-slate-300">{formatDateOnly(createdAt) || (woNo ? '-' : '저장 시 기록')}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block mb-0.5 print:text-slate-600">결재 문서 번호</span>
-                  <span className="font-mono text-slate-300 print:text-slate-800">{approvalId || '미연계 (결재 상신 전)'}</span>
+                  <span className="text-slate-500 block mb-0.5">부서</span>
+                  <span className="text-slate-300">{departmentId || '-'} / {depts.find((item) => item.id === departmentId)?.name || '-'}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block mb-0.5 print:text-slate-600">작업 담당자</span>
-                  <span className="text-slate-300 print:text-slate-800">
-                    {usersList.find(u => u.id === workerId)?.name || workerId || '-'}
-                  </span>
+                  <span className="text-slate-500 block mb-0.5">작성자</span>
+                  <span className="text-slate-300">{createdBy || user?.id || '-'} / {usersList.find((item) => item.id === (createdBy || user?.id))?.name || user?.name || '-'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block mb-0.5">단계</span>
+                  <span className="text-slate-300">{stepStage === 'P' ? '계획(P)' : '실적(R)'}</span>
                 </div>
               </div>
 
@@ -526,18 +598,6 @@ th { background: #eee; font-weight: 600; }
                         >
                           {equipments.map(eq => (
                             <option key={eq.id} value={eq.id}>{eq.name} [{eq.id}]</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-slate-400 mb-1.5 print:text-slate-600 font-semibold">담당 부서 <span className="text-rose-500 print:hidden">*</span></label>
-                        <select
-                          value={departmentId}
-                          onChange={(e) => setDepartmentId(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none print:bg-white print:border-slate-300 print:text-slate-800"
-                        >
-                          {depts.map(d => (
-                            <option key={d.id} value={d.id}>{d.name}</option>
                           ))}
                         </select>
                       </div>
@@ -584,19 +644,6 @@ th { background: #eee; font-weight: 600; }
                           onChange={(e) => setWorkDate(e.target.value)}
                           className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none print:bg-white print:border-slate-300 print:text-slate-800"
                         />
-                      </div>
-                      <div>
-                        <label className="block text-slate-400 mb-1.5 print:text-slate-600">담당 작업자</label>
-                        <select
-                          value={workerId}
-                          onChange={(e) => setWorkerId(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none print:bg-white print:border-slate-300 print:text-slate-800"
-                        >
-                          <option value="">(미배정)</option>
-                          {usersList.map(u => (
-                            <option key={u.id} value={u.id}>{u.name} [{u.id}]</option>
-                          ))}
-                        </select>
                       </div>
                       <div>
                         <label className="block text-slate-400 mb-1.5 print:text-slate-600 font-semibold">소요 공수시간(M/H)</label>
@@ -751,39 +798,9 @@ th { background: #eee; font-weight: 600; }
               </div>
             </div>
 
-            {/* 전용 인쇄뷰 (흑백) — 화면 숨김, 인쇄/PDF 저장 시에만 노출 */}
-            <WorkOrderPrint
-              woNo={woNo}
-              title={title}
-              status={status}
-              approvalId={approvalId}
-              deptName={depts.find((d) => d.id === departmentId)?.name || departmentId}
-              workerId={workerId}
-              workDate={workDate}
-              equipmentName={equipmentName}
-              woTypeCode={woTypeCode}
-              stepStage={stepStage}
-              cost={cost}
-              manHours={manHours}
-              manHoursUnit={manHoursUnit}
-              remarks={remarks}
-              workItems={workItems}
-            />
-
             {/* Modal Footer */}
             <div className="p-6 border-t border-slate-800 flex justify-between items-center shrink-0 print:hidden">
-              <div>
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  className="bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-750 px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <Printer size={14} />
-                  인쇄 / PDF 저장
-                </button>
-              </div>
-              
-              <div className="flex gap-2">
+              <div className="flex gap-2 ml-auto">
                 <button
                   type="button"
                   onClick={() => setIsFormOpen(false)}
@@ -829,10 +846,9 @@ th { background: #eee; font-weight: 600; }
         onClose={() => setApprovalRef(null)}
         onSubmitted={(newApprovalId) => {
           setApprovalId(newApprovalId);
-          setStatus('P');
           setApprovalRef(null);
           setIsFormOpen(false);
-          setMessage({ type: 'success', text: '작업지시 결재 문서가 상신되었습니다.' });
+          toast.success('작업지시 결재 문서가 상신되었습니다.');
           fetchData();
         }}
       />

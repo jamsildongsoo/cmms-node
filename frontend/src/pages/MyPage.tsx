@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { useAuthStore } from '../store/useAuthStore';
 import axiosInstance from '../api/axios';
 import { User, Mail, Phone, Briefcase, Lock, Save, Shield } from 'lucide-react';
@@ -19,7 +20,6 @@ export default function MyPage() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -42,7 +42,6 @@ export default function MyPage() {
   const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    setMessage(null);
     try {
       await axiosInstance.put('/auth/me', {
         name,
@@ -52,10 +51,10 @@ export default function MyPage() {
         title
       });
       updateUser({ name, position, title });
-      setMessage({ type: 'success', text: '프로필 정보가 수정되었습니다.' });
+      toast.success('프로필 정보가 수정되었습니다.');
     } catch (err: any) {
       const errMsg = err.response?.data?.message || '프로필 수정에 실패했습니다.';
-      setMessage({ type: 'error', text: errMsg });
+      toast.error(errMsg);
     } finally {
       setIsLoading(false);
     }
@@ -64,27 +63,26 @@ export default function MyPage() {
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentPassword || !newPassword || !confirmPassword) {
-      setMessage({ type: 'error', text: '모든 비밀번호 필드를 입력하세요.' });
+      toast.error('모든 비밀번호 필드를 입력하세요.');
       return;
     }
     if (newPassword !== confirmPassword) {
-      setMessage({ type: 'error', text: '새 비밀번호가 일치하지 않습니다.' });
+      toast.error('새 비밀번호가 일치하지 않습니다.');
       return;
     }
     setPasswordLoading(true);
-    setMessage(null);
     try {
       await axiosInstance.put('/auth/me/password', {
         currentPassword,
         newPassword
       });
-      setMessage({ type: 'success', text: '비밀번호가 성공적으로 변경되었습니다.' });
+      toast.success('비밀번호가 성공적으로 변경되었습니다.');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (err: any) {
       const errMsg = err.response?.data?.message || '비밀번호 변경에 실패했습니다. 현재 비밀번호를 확인하세요.';
-      setMessage({ type: 'error', text: errMsg });
+      toast.error(errMsg);
     } finally {
       setPasswordLoading(false);
     }
@@ -101,17 +99,6 @@ export default function MyPage() {
         </h1>
         <p className="text-slate-400 text-sm mt-1">개인 프로필 정보를 조회 및 수정하고 비밀번호를 변경할 수 있습니다.</p>
       </div>
-
-      {message && (
-        <div className="mb-6 p-4 rounded-lg border border-slate-800 bg-slate-900 text-sm text-center text-slate-200 flex items-center justify-center gap-2">
-          {message.type === 'success' ? (
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
-          )}
-          <span>{message.text}</span>
-        </div>
-      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col items-center justify-center text-center">

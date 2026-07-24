@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
+import { requestConfirmation } from '../utils/userActionDialog';
 import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import FileUpload from '../components/FileUpload';
@@ -72,7 +74,7 @@ export default function Board() {
       setPosts(res.data);
     } catch (err) {
       console.error(err);
-      alert(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
+      toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
     }
   };
 
@@ -86,7 +88,7 @@ export default function Board() {
       .catch((err) => {
         if (!active) return;
         console.error(err);
-        alert(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
+        toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
       });
 
     return () => {
@@ -103,7 +105,7 @@ export default function Board() {
       setNewCommentContent('');
       setIsDetailOpen(true);
     } catch (err) {
-      alert(getApiErrorMessage(err, '게시글 상세 내역을 불러오는데 실패했습니다.'));
+      toast.error(getApiErrorMessage(err, '게시글 상세 내역을 불러오는데 실패했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -131,11 +133,11 @@ export default function Board() {
 
   const handleSavePost = async () => {
     if (!formTitle.trim() || isRichTextEmpty(formContent)) {
-      alert('제목과 내용을 모두 기입해 주세요.');
+      toast.error('제목과 내용을 모두 기입해 주세요.');
       return;
     }
     if (fileUploading) {
-      alert('첨부파일 업로드가 끝난 뒤 저장해 주세요.');
+      toast.error('첨부파일 업로드가 끝난 뒤 저장해 주세요.');
       return;
     }
     setIsLoading(true);
@@ -149,7 +151,7 @@ export default function Board() {
         fileGroupId: formFileGroupId
       };
       await axiosInstance.post('/board', payload);
-      alert('저장 완료되었습니다.');
+      toast.success('저장 완료되었습니다.');
       setIsFormOpen(false);
       fetchData();
       if (formId && selectedPost && selectedPost.id === formId) {
@@ -158,21 +160,21 @@ export default function Board() {
         setSelectedPost(updated.data.board);
       }
     } catch (err) {
-      alert(getApiErrorMessage(err, '저장 오류 발생'));
+      toast.error(getApiErrorMessage(err, '저장 오류 발생'));
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleDeletePost = async (post: BoardModel) => {
-    if (!confirm('정말 이 게시글을 삭제하시겠습니까?')) return;
+    if (!(await requestConfirmation('정말 이 게시글을 삭제하시겠습니까?'))) return;
     try {
       await axiosInstance.delete(`/board/${post.id}`);
-      alert('삭제되었습니다.');
+      toast.success('삭제되었습니다.');
       setIsDetailOpen(false);
       fetchData();
     } catch (err) {
-      alert(getApiErrorMessage(err, '삭제 오류 발생'));
+      toast.error(getApiErrorMessage(err, '삭제 오류 발생'));
     }
   };
 
@@ -191,12 +193,12 @@ export default function Board() {
       const res = await axiosInstance.get(`/board/${selectedPost.id}/details`);
       setComments(res.data.comments || []);
     } catch (err) {
-      alert(getApiErrorMessage(err, '댓글 등록 중 오류 발생'));
+      toast.error(getApiErrorMessage(err, '댓글 등록 중 오류 발생'));
     }
   };
 
   const handleDeleteComment = async (comment: BoardCommentModel) => {
-    if (!confirm('댓글을 삭제하시겠습니까?')) return;
+    if (!(await requestConfirmation('댓글을 삭제하시겠습니까?'))) return;
     try {
       await axiosInstance.delete(`/board/comment?boardId=${comment.boardId}&commentNo=${comment.commentNo}`);
       
@@ -204,7 +206,7 @@ export default function Board() {
       const res = await axiosInstance.get(`/board/${comment.boardId}/details`);
       setComments(res.data.comments || []);
     } catch (err) {
-      alert(getApiErrorMessage(err, '댓글 삭제 오류'));
+      toast.error(getApiErrorMessage(err, '댓글 삭제 오류'));
     }
   };
 

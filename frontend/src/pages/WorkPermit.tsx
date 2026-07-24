@@ -1,4 +1,7 @@
 import { useState, useEffect } from 'react';
+import { createRoot } from 'react-dom/client';
+import { toast } from 'sonner';
+import { requestConfirmation } from '../utils/userActionDialog';
 import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import { getCommonStatusLabel as getStatusLabel, getCommonStatusClass as getStatusClass } from '../constants/status';
@@ -6,6 +9,8 @@ import { formatDateTime, nowLocalInput, utcToInput, inputToUtc } from '../utils/
 import { getApiErrorMessage } from '../utils/apiError';
 import PrintHeader from '../components/PrintHeader';
 import WorkPermitPrint from '../components/WorkPermitPrint';
+import PrintWindowLayout from '../components/PrintWindowLayout';
+import { openPrintWindow } from '../utils/printWindow';
 import ApprovalSubmitModal from '../components/ApprovalSubmitModal';
 import { 
   ClipboardList, Edit2, Trash2, Printer, X, Plus, CheckSquare, Square, ChevronDown, ChevronUp 
@@ -39,6 +44,8 @@ interface WorkPermitModel {
   refModule: string | null;
   approvalId: string | null;
   status: string; // T, S, P, C, R, X
+  createdAt?: string | null;
+  createdBy?: string | null;
 }
 
 interface CheckItem {
@@ -91,6 +98,8 @@ const INITIAL_HEAVY_LOAD: CheckItem[] = [
 
 export default function WorkPermit() {
   const user = useAuthStore((s) => s.user);
+  const [searchType, setSearchType] = useState<'id' | 'title' | 'supervisor'>('id');
+  const [searchValue, setSearchValue] = useState('');
 
 
   const [permits, setPermits] = useState<WorkPermitModel[]>([]);
@@ -122,7 +131,8 @@ export default function WorkPermit() {
   const [refNo, setRefNo] = useState('');
   const [refModule, setRefModule] = useState('');
   const [approvalId, setApprovalId] = useState('');
-  const [status, setStatus] = useState('T');
+  const [createdAt, setCreatedAt] = useState('');
+  const [createdBy, setCreatedBy] = useState('');
 
   // JSON Checksheets
   const [genChecks, setGenChecks] = useState<CheckItem[]>(INITIAL_GENERAL);
@@ -145,15 +155,19 @@ export default function WorkPermit() {
   });
 
   const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [approvalRef, setApprovalRef] = useState<{ refNo: string; title: string } | null>(null);
 
   const canDirectConfirm = user?.permissions?.WP?.A === 'Y';
 
   const fetchData = async () => {
     try {
+      const params = new URLSearchParams();
+      if (searchValue) {
+        params.set('searchType', searchType);
+        params.set('searchValue', searchValue);
+      }
       const [wpRes, eqRes, deptRes, userRes, woRes] = await Promise.all([
-        axiosInstance.get('/work-permit'),
+        axiosInstance.get(`/work-permit?${params.toString()}`),
         axiosInstance.get('/master/equipments'),
         axiosInstance.get('/mdm/departments'),
         axiosInstance.get('/mdm/users'),
@@ -165,8 +179,7 @@ export default function WorkPermit() {
       setUsersList(userRes.data);
       setWorkOrders(woRes.data);
     } catch (err) {
-      console.error(err);
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '목록을 불러오지 못했습니다.') });
+      toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
     }
   };
 
@@ -223,7 +236,8 @@ export default function WorkPermit() {
     setRefNo('');
     setRefModule('');
     setApprovalId('');
-    setStatus('T');
+    setCreatedAt('');
+    setCreatedBy('');
 
     // Reset checksheets
     setGenChecks(INITIAL_GENERAL);
@@ -268,7 +282,8 @@ export default function WorkPermit() {
       setRefNo(w.refNo || '');
       setRefModule(w.refModule || '');
       setApprovalId(w.approvalId || '');
-      setStatus(w.status);
+      setCreatedAt(w.createdAt || '');
+      setCreatedBy(w.createdBy || '');
 
       // Parse JSON checksheets
       setGenChecks(w.jsonGeneral ? JSON.parse(w.jsonGeneral) : INITIAL_GENERAL);
@@ -293,30 +308,29 @@ export default function WorkPermit() {
 
       setIsFormOpen(true);
     } catch (err) {
-      alert(getApiErrorMessage(err, '작업허가서 상세 기록을 불러오지 못했습니다.'));
+      toast.error(getApiErrorMessage(err, '작업허가서 상세 기록을 불러오지 못했습니다.'));
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleDelete = async (wp: WorkPermitModel) => {
-    if (!confirm('정말 이 작업허가서를 삭제하시겠습니까?')) return;
+    if (!(await requestConfirmation('정말 이 작업허가서를 삭제하시겠습니까?'))) return;
     try {
       await axiosInstance.delete(`/work-permit?plantId=${wp.plantId}&id=${wp.id}`);
-      setMessage({ type: 'success', text: '작업허가서가 삭제되었습니다.' });
+      toast.success('작업허가서가 삭제되었습니다.');
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '삭제 실패.') });
+      toast.error(getApiErrorMessage(err, '삭제 실패.'));
     }
   };
 
   const handleSave = async (submitStatus: 'T' | 'S' | 'P') => {
     if (!title.trim()) {
-      alert('허가서 제목을 입력해주세요.');
+      toast.error('허가서 제목을 입력해주세요.');
       return;
     }
     setIsLoading(true);
-    setMessage(null);
     try {
       const saveStatus = submitStatus === 'P' ? 'T' : submitStatus;
       const payload = {
@@ -352,20 +366,14 @@ export default function WorkPermit() {
       if (submitStatus === 'P') {
         const savedId = response.data.id;
         setWpNo(savedId);
-        setStatus('T');
         setApprovalRef({ refNo: savedId, title: `[작업허가서] ${title}` });
         return;
       }
-      setMessage({ 
-        type: 'success', 
-        text: submitStatus === 'T' 
-          ? '임시저장 되었습니다.' 
-          : '안전작업허가서가 직접 확정 발급 완료되었습니다.'
-      });
+      toast.success(submitStatus === 'T' ? '임시저장 되었습니다.' : '안전작업허가서가 직접 확정 발급 완료되었습니다.');
       setIsFormOpen(false);
       fetchData();
     } catch (err) {
-      setMessage({ type: 'error', text: getApiErrorMessage(err, '저장 중 오류가 발생했습니다.') });
+      toast.error(getApiErrorMessage(err, '저장 중 오류가 발생했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -393,14 +401,68 @@ export default function WorkPermit() {
     }[code] || code;
   };
 
+  const openPrintDocument = async (wp: WorkPermitModel) => {
+    const printTarget = openPrintWindow({ title: '안전작업허가서 출력', rootId: 'wp-print-root' });
+    if (!printTarget) {
+      toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
+      return;
+    }
+    const { printWindow, container } = printTarget;
+    try {
+      const { data } = await axiosInstance.get(`/work-permit/details?plantId=${wp.plantId}&id=${wp.id}`);
+      const detail = { ...wp, ...data } as WorkPermitModel;
+      const types = detail.permitTypeCodes.split(',');
+      const parseChecks = (value: string | null, fallback: CheckItem[]) => value ? JSON.parse(value) : fallback;
+      const printChecksheets = [
+        { id: 'GENERAL', name: '일반위험작업 체크시트', state: parseChecks(detail.jsonGeneral, INITIAL_GENERAL) },
+        { id: 'FIRE', name: '화기작업 체크시트', state: parseChecks(detail.jsonFire, INITIAL_FIRE) },
+        { id: 'CONFINED', name: '밀폐공간출입 체크시트', state: parseChecks(detail.jsonConfined, INITIAL_CONFINED) },
+        { id: 'ELECTRIC', name: '정전작업 체크시트', state: parseChecks(detail.jsonElectric, INITIAL_ELECTRIC) },
+        { id: 'HIGH_PLACE', name: '고소작업 체크시트', state: parseChecks(detail.jsonHighPlace, INITIAL_HIGH_PLACE) },
+        { id: 'EXCAVATION', name: '굴착작업 체크시트', state: parseChecks(detail.jsonExcavation, INITIAL_EXCAVATION) },
+        { id: 'HEAVY_LOAD', name: '중량물취급 체크시트', state: parseChecks(detail.jsonHeavyLoad, INITIAL_HEAVY_LOAD) },
+      ];
+      createRoot(container).render(
+        <PrintWindowLayout printWindow={printWindow} contentClassName="max-w-[180mm]">
+          <WorkPermitPrint
+            wpNo={detail.id}
+            title={detail.title}
+            status={detail.status}
+            approvalId={detail.approvalId}
+            createdAt={detail.createdAt ? formatDateTime(detail.createdAt).slice(0, 10) : '-'}
+            authorName={usersList.find((item) => item.id === detail.createdBy)?.name || detail.createdBy || '-'}
+            deptName={depts.find((item) => item.id === detail.departmentId)?.name || detail.departmentId}
+            supervisorName={usersList.find((item) => item.id === detail.supervisorId)?.name || detail.supervisorId}
+            startAt={detail.startAt || ''}
+            endAt={detail.endAt || ''}
+            equipmentId={detail.equipmentId}
+            equipmentName={equipments.find((item) => item.id === detail.equipmentId)?.name || detail.equipmentId}
+            workOrderId={detail.workOrderId || '-'}
+            permitTypeLabel={types.map(getWpTypeLabel).join(', ')}
+            workSummary={detail.workSummary || undefined}
+            riskFactors={detail.riskFactors || undefined}
+            safetyMeasures={detail.safetyMeasures || undefined}
+            remarks={detail.remarks || undefined}
+            checksheets={printChecksheets}
+            selectedTypes={types}
+          />
+        </PrintWindowLayout>,
+      );
+      printWindow.focus();
+    } catch (err) {
+      printWindow.close();
+      toast.error(getApiErrorMessage(err, '출력 문서를 불러오지 못했습니다.'));
+    }
+  };
+
   const handlePrint = () => {
-    if (permits.length === 0) { alert('인쇄할 목록이 없습니다.'); return; }
+    if (permits.length === 0) { toast.error('인쇄할 목록이 없습니다.'); return; }
     const user = useAuthStore.getState().user;
     const now = new Date();
     const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
 
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
-    if (!printWindow) { alert('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.'); return; }
+    if (!printWindow) { toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.'); return; }
 
     const rows = permits.map(wp => `
       <tr>
@@ -485,16 +547,30 @@ th { background: #eee; font-weight: 600; }
         </div>
       </div>
 
-      {message && (
-        <div className="p-3 rounded-lg border border-slate-800 bg-slate-900 text-xs text-center text-slate-200 print:hidden flex items-center justify-center gap-2">
-          {message.type === 'success' ? (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
-          )}
-          <span>{message.text}</span>
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 print:hidden">
+        <div className="flex flex-wrap items-center gap-3">
+          <select
+            value={searchType}
+            onChange={(event) => setSearchType(event.target.value as 'id' | 'title' | 'supervisor')}
+            className="bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-3 text-xs text-slate-300 outline-none"
+          >
+            <option value="id">문서번호</option>
+            <option value="title">타이틀</option>
+            <option value="supervisor">담당자</option>
+          </select>
+          <input
+            type="text"
+            value={searchValue}
+            onChange={(event) => setSearchValue(event.target.value)}
+            onKeyDown={(event) => event.key === 'Enter' && fetchData()}
+            placeholder="검색어 입력"
+            className="flex-1 min-w-[200px] bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-3 text-xs text-slate-300 outline-none"
+          />
+          <button type="button" onClick={fetchData} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-1.5 text-xs font-semibold cursor-pointer border-0">
+            검색
+          </button>
         </div>
-      )}
+      </div>
 
       {/* Main Grid View — 모달(허가서) 열림 시 인쇄 제외(전용뷰와 중복 방지) */}
       <div className={`bg-slate-900 border border-slate-800 rounded-xl p-6 print:border-0 print:bg-transparent print:p-0 print-landscape ${isFormOpen ? 'print:hidden' : ''}`}>
@@ -526,7 +602,12 @@ th { background: #eee; font-weight: 600; }
               ) : (
                 permits.map((wp) => (
                   <tr key={wp.id} className="border-b border-slate-900 hover:bg-slate-900/30 text-slate-300 print:border-slate-200 print:text-slate-800 print:hover:bg-transparent">
-                    <td className="p-3 font-mono text-slate-400 print:text-slate-600">{wp.id}</td>
+                    <td className="p-3 font-mono">
+                      <button type="button" onClick={() => openPrintDocument(wp)} className="no-print bg-transparent border-0 p-0 text-blue-400 hover:text-blue-300 hover:underline font-mono cursor-pointer">
+                        {wp.id}
+                      </button>
+                      <span className="hidden print:inline text-slate-600">{wp.id}</span>
+                    </td>
                     <td className="p-3 font-semibold text-slate-200 print:text-slate-900">{wp.title}</td>
                     <td className="p-3 font-mono text-slate-400">{wp.equipmentId}</td>
                     <td className="p-3">
@@ -594,28 +675,26 @@ th { background: #eee; font-weight: 600; }
               <div className="space-y-6">
 
                 {/* Status Header Area */}
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs print:bg-slate-50 print:border-slate-300">
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-4 text-xs">
                   <div>
-                    <span className="text-slate-500 block mb-0.5 print:text-slate-600">허가서 번호</span>
-                    <span className="font-mono font-semibold text-slate-300 print:text-slate-800">{wpNo || '(저장 시 자동발행)'}</span>
+                    <span className="text-slate-500 block mb-0.5">문서번호</span>
+                    <span className="font-mono font-semibold text-slate-300">{wpNo || '(저장 시 자동발행)'}</span>
                   </div>
                   <div>
-                    <span className="text-slate-500 block mb-0.5 print:text-slate-600">문서 상태</span>
-                    <div>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getStatusClass(status)}`}>
-                        {getStatusLabel(status)}
-                      </span>
-                    </div>
+                    <span className="text-slate-500 block mb-0.5">작성일</span>
+                    <span className="font-mono text-slate-300">{createdAt ? formatDateTime(createdAt).slice(0, 10) : (wpNo ? '-' : '저장 시 기록')}</span>
                   </div>
                   <div>
-                    <span className="text-slate-500 block mb-0.5 print:text-slate-600">결재 문서 번호</span>
-                    <span className="font-mono text-slate-300 print:text-slate-800">{approvalId || '미연계 (결재 상신 전)'}</span>
+                    <span className="text-slate-500 block mb-0.5">부서</span>
+                    <span className="text-slate-300">{departmentId || '-'} / {depts.find((item) => item.id === departmentId)?.name || '-'}</span>
                   </div>
                   <div>
-                    <span className="text-slate-500 block mb-0.5 print:text-slate-600">안전 감독자</span>
-                    <span className="text-slate-300 print:text-slate-800">
-                      {usersList.find(u => u.id === supervisorId)?.name || supervisorId}
-                    </span>
+                    <span className="text-slate-500 block mb-0.5">작성자</span>
+                    <span className="text-slate-300">{createdBy || user?.id || '-'} / {usersList.find((item) => item.id === (createdBy || user?.id))?.name || user?.name || '-'}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block mb-0.5">단계</span>
+                    <span className="text-slate-300">{stepStage === 'P' ? '계획(P)' : '실적(R)'}</span>
                   </div>
                 </div>
 
@@ -648,30 +727,6 @@ th { background: #eee; font-weight: 600; }
                           >
                             {equipments.map(eq => (
                               <option key={eq.id} value={eq.id}>{eq.name} [{eq.id}]</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-slate-400 mb-1.5 print:text-slate-600 font-semibold">담당 부서 <span className="text-rose-500 print:hidden">*</span></label>
-                          <select
-                            value={departmentId}
-                            onChange={(e) => setDepartmentId(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none print:bg-white print:border-slate-300 print:text-slate-800"
-                          >
-                            {depts.map(d => (
-                              <option key={d.id} value={d.id}>{d.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-slate-400 mb-1.5 print:text-slate-600 font-semibold">안전 감독자 <span className="text-rose-500 print:hidden">*</span></label>
-                          <select
-                            value={supervisorId}
-                            onChange={(e) => setSupervisorId(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none print:bg-white print:border-slate-300 print:text-slate-800"
-                          >
-                            {usersList.map(u => (
-                              <option key={u.id} value={u.id}>{u.name} [{u.id}]</option>
                             ))}
                           </select>
                         </div>
@@ -875,42 +930,9 @@ th { background: #eee; font-weight: 600; }
 
             </div>
 
-            {/* 전용 인쇄뷰 (흑백) — LOTO 체크시트 포함, 시트별 페이지 분할 */}
-            <WorkPermitPrint
-              wpNo={wpNo}
-              title={title}
-              status={status}
-              approvalId={approvalId}
-              deptName={depts.find((d) => d.id === departmentId)?.name || departmentId}
-              supervisorName={usersList.find((u) => u.id === supervisorId)?.name || supervisorId}
-              startAt={startAt}
-              endAt={endAt}
-              equipmentName={equipmentName}
-              workOrderId={workOrderId}
-              permitTypeLabel={selectedTypes.map(getWpTypeLabel).join(', ')}
-              stepStage={stepStage}
-              workSummary={workSummary}
-              riskFactors={riskFactors}
-              safetyMeasures={safetyMeasures}
-              remarks={remarks}
-              checksheets={checksheets}
-              selectedTypes={selectedTypes}
-            />
-
             {/* Modal Footer */}
             <div className="p-6 border-t border-slate-800 flex justify-between items-center shrink-0 print:hidden">
-              <div>
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  className="bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-750 px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <Printer size={14} />
-                  인쇄 / PDF 저장
-                </button>
-              </div>
-              
-              <div className="flex gap-2">
+              <div className="flex gap-2 ml-auto">
                 <button
                   type="button"
                   onClick={() => setIsFormOpen(false)}
@@ -956,10 +978,9 @@ th { background: #eee; font-weight: 600; }
         onClose={() => setApprovalRef(null)}
         onSubmitted={(newApprovalId) => {
           setApprovalId(newApprovalId);
-          setStatus('P');
           setApprovalRef(null);
           setIsFormOpen(false);
-          setMessage({ type: 'success', text: '작업허가서 결재 문서가 상신되었습니다.' });
+          toast.success('작업허가서 결재 문서가 상신되었습니다.');
           fetchData();
         }}
       />

@@ -1,5 +1,5 @@
 import PrintHeader from './PrintHeader';
-import { PrintSection, PrintField, PrintFieldGrid, PrintTable } from './PrintDoc';
+import { PrintSection, PrintField, PrintTable } from './PrintDoc';
 import { getCommonStatusLabel } from '../constants/status';
 import { formatDateTime } from '../utils/datetime';
 
@@ -19,14 +19,16 @@ interface WorkPermitPrintProps {
   title: string;
   status: string;
   approvalId?: string | null;
+  createdAt?: string | null;
+  authorName: string;
   deptName: string;
   supervisorName: string;
   startAt: string;
   endAt: string;
   equipmentName: string;
+  equipmentId: string;
   workOrderId: string;
   permitTypeLabel: string;
-  stepStage: string;
   workSummary?: string;
   riskFactors?: string;
   safetyMeasures?: string;
@@ -41,29 +43,37 @@ export default function WorkPermitPrint(p: WorkPermitPrintProps) {
   const activeSheets = p.checksheets.filter((c) => p.selectedTypes.includes(c.id));
 
   return (
-    <div className="hidden print:block bg-white text-black">
+    <article className="print-area print-portrait bg-white text-black border border-gray-500 p-5 print:border-0 print:p-0">
       <PrintHeader approvalNo={p.approvalId} />
       <h1 className="text-center text-lg font-bold tracking-widest mb-4">안 전 작 업 허 가 서</h1>
 
-      <PrintSection title="일반 정보">
-        <PrintFieldGrid cols={3}>
-          <PrintField label="번호" value={p.wpNo} />
-          <PrintField label="내용" value={p.title} />
-          <PrintField label="상태" value={getCommonStatusLabel(p.status)} />
-          <PrintField label="부서" value={p.deptName} />
-          <PrintField label="감독자" value={p.supervisorName} />
-          <PrintField label="작업기간" value={`${fmt(p.startAt)} ~ ${fmt(p.endAt)}`} />
-        </PrintFieldGrid>
-      </PrintSection>
+      <section className="border-y-2 border-black mb-5 text-[10px]">
+        <dl className="p-3 space-y-2">
+          <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">문서번호</dt><dd className="font-mono">{p.wpNo}</dd></div>
+          <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">작성일자</dt><dd className="font-mono">{p.createdAt || '-'}</dd></div>
+          <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">부서명</dt><dd>{p.deptName || '-'}</dd></div>
+          <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">작성자</dt><dd>{p.authorName || '-'}</dd></div>
+        </dl>
+      </section>
 
-      <PrintSection title="작업 정보">
-        <PrintFieldGrid cols={3}>
-          <PrintField label="대상설비" value={p.equipmentName} />
-          <PrintField label="허가유형" value={p.permitTypeLabel} />
-          <PrintField label="단계" value={p.stepStage} />
-          <PrintField label="연계 작업지시" value={p.workOrderId} />
-        </PrintFieldGrid>
+      <PrintSection title="문서 정보">
+        <div className="divide-y divide-gray-300 border-y border-gray-400">
+          <div className="grid grid-cols-2 gap-4 py-2">
+            <PrintField label="제목" value={p.title} />
+            <PrintField label="상태" value={getCommonStatusLabel(p.status)} />
+          </div>
+          <div className="grid grid-cols-2 gap-4 py-2">
+            <PrintField label="대상설비 번호/이름" value={`${p.equipmentId} / ${p.equipmentName}`} />
+            <PrintField label="허가유형" value={p.permitTypeLabel} />
+          </div>
+          <div className="grid grid-cols-3 gap-4 py-2">
+            <PrintField label="작업 시작" value={fmt(p.startAt)} />
+            <PrintField label="작업 종료" value={fmt(p.endAt)} />
+            <PrintField label="감독자" value={p.supervisorName} />
+          </div>
+        </div>
         <div className="mt-2 space-y-1">
+          <PrintField label="연계 작업지시" value={p.workOrderId} />
           <PrintField label="작업개요" value={p.workSummary} />
           <PrintField label="위험요인" value={p.riskFactors} />
           <PrintField label="안전대책" value={p.safetyMeasures} />
@@ -87,6 +97,6 @@ export default function WorkPermitPrint(p: WorkPermitPrintProps) {
           <div className="text-[10px] whitespace-pre-wrap">{p.remarks}</div>
         </PrintSection>
       )}
-    </div>
+    </article>
   );
 }

@@ -9,7 +9,7 @@ import type { ReactNode } from 'react';
 /** 라벨 섹션 (제목 + 하단 구분선) */
 export function PrintSection({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="mb-4">
+    <section className="print-section mb-4">
       <h2 className="text-[11px] font-bold text-black border-b border-black pb-1 mb-2">{title}</h2>
       {children}
     </section>
@@ -34,7 +34,7 @@ export function PrintFieldGrid({ cols = 3, children }: { cols?: number; children
 /** 표 (얇은 검정/회색 테두리, 회색 헤더) */
 export function PrintTable({ columns, rows }: { columns: string[]; rows: ReactNode[][] }) {
   return (
-    <table className="w-full border-collapse text-[10px]">
+    <table className="print-table w-full border-collapse text-[10px]">
       <thead>
         <tr>
           {columns.map((c, i) => (

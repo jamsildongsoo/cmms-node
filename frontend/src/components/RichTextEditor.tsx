@@ -2,6 +2,7 @@ import { useEditor, EditorContent } from '@tiptap/react';
 import { AlignCenter, AlignLeft, AlignRight } from 'lucide-react';
 import { createTiptapExtensions } from './tiptapExtensions';
 import type { RichTextDocument } from '../types/richText';
+import { requestTextInput } from '../utils/userActionDialog';
 
 const TEXT_COLORS = [
   { label: '기본 글자색', value: '' },
@@ -80,8 +81,11 @@ export default function RichTextEditor({ content, onChange, placeholder, minHeig
         <button type="button" onClick={() => editor.chain().focus().deleteColumn().run()} className={btn(false)}>열-</button>
         <button type="button" onClick={() => editor.chain().focus().deleteTable().run()} className={btn(false)}>표 삭제</button>
         <span className="text-slate-700 mx-1">|</span>
-        <button type="button" onClick={() => {
-          const url = window.prompt('URL 입력:');
+        <button type="button" onClick={async () => {
+          const url = await requestTextInput('연결할 URL을 입력하세요.', {
+            placeholder: 'https://example.com',
+            confirmLabel: '링크 적용',
+          });
           if (url) editor.chain().focus().setLink({ href: url }).run();
         }} className={btn(editor.isActive('link'))}>링크</button>
         <button type="button" onClick={() => editor.chain().focus().unsetLink().run()} className={btn(false)} disabled={!editor.isActive('link')}>링크 해제</button>

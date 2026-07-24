@@ -1,4 +1,5 @@
 import RichTextViewer from './RichTextViewer';
+import PrintHeader from './PrintHeader';
 import { formatDateTime } from '../utils/datetime';
 import { isRichTextEmpty, type RichTextDocument } from '../types/richText';
 
@@ -98,6 +99,7 @@ export default function ApprovalDocPrint(props: ApprovalDocPrintProps) {
           color: #000;
         }
       `}</style>
+      <PrintHeader approvalNo={props.id} />
       <h1 className="text-center text-xl font-bold tracking-[0.35em] mb-5">결 재 품 의 서</h1>
 
       <section className="grid grid-cols-2 border-y-2 border-black mb-5">

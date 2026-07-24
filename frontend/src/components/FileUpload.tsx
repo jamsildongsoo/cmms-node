@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { requestConfirmation } from '../utils/userActionDialog';
 import axiosInstance from '../api/axios';
 import { Paperclip, UploadCloud, Trash2, Download, Loader2 } from 'lucide-react';
 import type { AxiosError } from 'axios';
@@ -206,7 +207,7 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
 
   const handleDelete = async (item: FileItem) => {
     if (!groupNo) return;
-    if (!confirm(`'${item.originalFileName}' 첨부를 삭제하시겠습니까?`)) return;
+    if (!(await requestConfirmation(`'${item.originalFileName}' 첨부를 삭제하시겠습니까?`))) return;
     try {
       await axiosInstance.delete(`/files/${groupNo}/${item.itemNo}`);
       loadItems(groupNo);
