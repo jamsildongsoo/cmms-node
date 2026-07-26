@@ -24,6 +24,11 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionGuard, Permission } from '../../common/guards/permission.guard';
 import { AppModule, AppModuleLabel } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
+import { Company } from '../../entities/company.entity';
+import {
+  CreateCompanyDto,
+  CreateCompanyResponseDto,
+} from './dto/create-company.dto';
 
 @Controller('api/mdm')
 @UseGuards(JwtAuthGuard, PermissionGuard)
@@ -46,6 +51,13 @@ export class MdmController {
   @Get('plants')
   @Permission(AppModule.MDM, 'R')
   async getPlants(): Promise<Plant[]> {
+    const { companyId } = getTenantContext();
+    return this.mdmService.getPlantsByCompany(companyId);
+  }
+
+  /** 업무 입력화면의 선택 목록용 — 인증된 사용자는 회사 내 플랜트를 조회할 수 있다. */
+  @Get('refs/plants')
+  async getPlantsForUse(): Promise<Plant[]> {
     const { companyId } = getTenantContext();
     return this.mdmService.getPlantsByCompany(companyId);
   }
@@ -189,6 +201,20 @@ export class MdmController {
     return this.mdmService.getWarehousesByCompany(companyId);
   }
 
+  /** 결재선·작성자 표시 등 업무화면에서 사용하는 읽기 전용 사용자 참조 API. */
+  @Get('refs/users')
+  async getUsersForUse(): Promise<User[]> {
+    const { companyId } = getTenantContext();
+    return this.mdmService.getUsersByCompany(companyId);
+  }
+
+  /** 업무 입력화면의 선택 목록용 — 변경 권한과 분리된 읽기 전용 참조 API. */
+  @Get('refs/warehouses')
+  async getWarehousesForUse(): Promise<Warehouse[]> {
+    const { companyId } = getTenantContext();
+    return this.mdmService.getWarehousesByCompany(companyId);
+  }
+
   @Post('warehouses')
   @Permission(AppModule.MDM, 'C')
   async createWarehouse(@Body() warehouse: Partial<Warehouse>): Promise<Warehouse> {
@@ -289,14 +315,16 @@ export class MdmController {
   }
 
   @Get('companies')
-  async getCompanies(): Promise<any[]> {
+  async getCompanies(): Promise<Company[]> {
     const { companyId, roleId, userId } = getTenantContext();
     await this.validateSystemAdmin(companyId, roleId || '', userId);
     return this.mdmService.getCompanies();
   }
 
   @Post('companies')
-  async createCompany(@Body() body: any): Promise<any> {
+  async createCompany(
+    @Body() body: CreateCompanyDto,
+  ): Promise<CreateCompanyResponseDto> {
     const { companyId, roleId, userId } = getTenantContext();
     await this.validateSystemAdmin(companyId, roleId || '', userId);
     return this.mdmService.createCompany(body, userId);

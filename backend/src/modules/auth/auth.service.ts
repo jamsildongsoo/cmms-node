@@ -14,7 +14,8 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import {
   JwtPayload,
@@ -26,6 +27,12 @@ import {
   UserProfileResponse,
 } from './auth.interfaces';
 import { AppModule } from '../../common/constants/module.constants';
+import { User } from '../../entities/users.entity';
+import { Role } from '../../entities/role.entity';
+import { Plant } from '../../entities/plant.entity';
+import { Company } from '../../entities/company.entity';
+import { RoleDetail } from '../../entities/role-detail.entity';
+import { LoginHistory } from '../../entities/login-history.entity';
 
 @Injectable()
 export class AuthService {
@@ -35,8 +42,19 @@ export class AuthService {
 
   constructor(
     private readonly jwtService: JwtService,
-    private readonly dataSource: DataSource,
     private readonly config: ConfigService,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    @InjectRepository(Role)
+    private readonly roleRepository: Repository<Role>,
+    @InjectRepository(Plant)
+    private readonly plantRepository: Repository<Plant>,
+    @InjectRepository(Company)
+    private readonly companyRepository: Repository<Company>,
+    @InjectRepository(RoleDetail)
+    private readonly roleDetailRepository: Repository<RoleDetail>,
+    @InjectRepository(LoginHistory)
+    private readonly loginHistoryRepository: Repository<LoginHistory>,
   ) {
     this.passwordExpiryDays = config.get<number>('PASSWORD_EXPIRY_DAYS', 90);
     this.maxFailedAttempts = config.get<number>('PASSWORD_MAX_FAILED', 5);
@@ -50,15 +68,7 @@ export class AuthService {
     const companyId = req.companyId.toUpperCase().trim();
 
     // 1. 사용자 조회
-    const users = await this.dataSource.query<any[]>(
-      `SELECT u.*, r.multi_plant
-       FROM users u
-       LEFT JOIN role r ON r.company_id = u.company_id AND r.id = u.role_id
-       WHERE u.company_id = $1 AND u.id = $2
-         AND u.delete_yn = 'N' AND u.use_yn = 'Y'`,
-      [companyId, req.id],
-    );
-    const user = users[0];
+    const { user, multiPlant } = await this.findActiveUser(companyId, req.id);
     if (!user) {
       await this.recordLoginHistory(companyId, req.id, ipAddress, 'FAIL');
       throw new UnauthorizedException('존재하지 않거나 사용 중지된 사용자입니다.');
@@ -67,32 +77,32 @@ export class AuthService {
     const now = new Date();
 
     // 2. 계정 잠금 확인
-    if (user.account_locked_until && new Date(user.account_locked_until) > now) {
+    if (user.accountLockedUntil && user.accountLockedUntil > now) {
       await this.recordLoginHistory(companyId, req.id, ipAddress, 'FAIL');
       throw new UnauthorizedException(
-        `계정이 잠겼습니다. ${user.account_locked_until} 이후 다시 시도하세요.`,
+        `계정이 잠겼습니다. ${user.accountLockedUntil} 이후 다시 시도하세요.`,
       );
     }
 
     // 3. 비밀번호 검증
-    const passwordMatch = await bcrypt.compare(req.password, user.password_hash);
+    const passwordMatch = await bcrypt.compare(req.password, user.passwordHash);
     if (!passwordMatch) {
-      const fails = (user.failed_login_count ?? 0) + 1;
+      const fails = (user.failedLoginCount ?? 0) + 1;
       let lockedUntil: Date | null = null;
       let msg: string;
 
       if (fails >= this.maxFailedAttempts) {
         lockedUntil = new Date(now.getTime() + this.lockMinutes * 60 * 1000);
         msg = `비밀번호 ${this.maxFailedAttempts}회 오류로 ${this.lockMinutes}분간 잠겼습니다.`;
-        await this.dataSource.query(
-          `UPDATE users SET failed_login_count=0, account_locked_until=$1 WHERE company_id=$2 AND id=$3`,
-          [lockedUntil, companyId, req.id],
+        await this.userRepository.update(
+          { companyId, id: req.id },
+          { failedLoginCount: 0, accountLockedUntil: lockedUntil },
         );
       } else {
         msg = `비밀번호가 일치하지 않습니다. (실패 ${fails}/${this.maxFailedAttempts})`;
-        await this.dataSource.query(
-          `UPDATE users SET failed_login_count=$1 WHERE company_id=$2 AND id=$3`,
-          [fails, companyId, req.id],
+        await this.userRepository.update(
+          { companyId, id: req.id },
+          { failedLoginCount: fails },
         );
       }
       await this.recordLoginHistory(companyId, req.id, ipAddress, 'FAIL');
@@ -100,65 +110,69 @@ export class AuthService {
     }
 
     // 4. 플랜트 자동 해소: lastLoginPlantId null이면 첫 활성 플랜트 자동 매핑
-    let plantId: string | null = user.last_login_plant_id;
+    let plantId: string | null = user.lastLoginPlantId;
     if (!plantId) {
-      const plants = await this.dataSource.query<{ id: string }[]>(
-        `SELECT id FROM plant WHERE company_id=$1 AND delete_yn='N' ORDER BY id LIMIT 1`,
-        [companyId],
-      );
-      plantId = plants[0]?.id ?? null;
+      const plant = await this.plantRepository.findOne({
+        select: { id: true },
+        where: { companyId, deleteYn: 'N' },
+        order: { id: 'ASC' },
+      });
+      plantId = plant?.id ?? null;
     }
 
     // 5. 성공 처리
-    await this.dataSource.query(
-      `UPDATE users
-       SET failed_login_count=0, account_locked_until=NULL,
-           last_login_at=$1, last_login_ip=$2, last_login_plant_id=$3
-       WHERE company_id=$4 AND id=$5`,
-      [now, ipAddress, plantId, companyId, req.id],
+    await this.userRepository.update(
+      { companyId, id: req.id },
+      {
+        failedLoginCount: 0,
+        accountLockedUntil: null,
+        lastLoginAt: now,
+        lastLoginIp: ipAddress,
+        lastLoginPlantId: plantId,
+      },
     );
     await this.recordLoginHistory(companyId, req.id, ipAddress, 'SUCCESS');
 
     // 6. 비밀번호 만료 판단
     const expired =
-      user.password_changed_at &&
-      new Date(user.password_changed_at).getTime() +
+      user.passwordChangedAt &&
+      user.passwordChangedAt.getTime() +
         this.passwordExpiryDays * 86400000 <
         now.getTime();
     const mustChange =
-      user.must_change_password === 'Y' || expired;
+      user.mustChangePassword === 'Y' || expired;
 
     // 7. [B안] JWT 페이로드에 roleId, departmentId, lastLoginPlantId 포함
     const payload: JwtPayload = {
       sub: `${companyId}:${req.id}`,
       companyId,
       userId: req.id,
-      roleId: user.role_id ?? '',
-      departmentId: user.department_id ?? null,
+      roleId: user.roleId ?? '',
+      departmentId: user.departmentId ?? null,
       lastLoginPlantId: plantId,
-      multiPlant: user.multi_plant === 'Y' ? 'Y' : 'N',
+      multiPlant,
     };
     const accessToken = this.jwtService.sign(payload);
 
     // 8. 회사명 조회
-    const companies = await this.dataSource.query<{ name: string }[]>(
-      `SELECT name FROM company WHERE id=$1`,
-      [companyId],
-    );
-    const companyName = companies[0]?.name ?? companyId;
-    const permissionRows = await this.dataSource.query<any[]>(
-      `SELECT module_detail, perm_c, perm_r, perm_u, perm_d, perm_a
-       FROM role_detail WHERE company_id = $1 AND role_id = $2`,
-      [companyId, user.role_id],
-    );
-    const permissions = user.role_id?.toUpperCase() === 'SYSTEM' && companyId === 'SYSTEM'
+    const company = await this.companyRepository.findOne({
+      select: { name: true },
+      where: { id: companyId },
+    });
+    const companyName = company?.name ?? companyId;
+    const permissionRows = user.roleId
+      ? await this.roleDetailRepository.find({
+          where: { companyId, roleId: user.roleId },
+        })
+      : [];
+    const permissions = user.roleId?.toUpperCase() === 'SYSTEM' && companyId === 'SYSTEM'
       ? Object.fromEntries(Object.values(AppModule).map((module) => [
           module,
           { C: 'Y', R: 'Y', U: 'Y', D: 'Y', A: 'Y' },
         ]))
       : Object.fromEntries(permissionRows.map((row) => [
-          row.module_detail,
-          { C: row.perm_c, R: row.perm_r, U: row.perm_u, D: row.perm_d, A: row.perm_a },
+          row.moduleDetail,
+          { C: row.permC, R: row.permR, U: row.permU, D: row.permD, A: row.permA },
         ]));
 
     return {
@@ -167,12 +181,12 @@ export class AuthService {
       companyName,
       id: req.id,
       name: user.name,
-      roleId: user.role_id ?? '',
-      departmentId: user.department_id ?? null,
+      roleId: user.roleId ?? '',
+      departmentId: user.departmentId ?? null,
       position: user.position ?? null,
       title: user.title ?? null,
       lastLoginPlantId: plantId,
-      multiPlant: user.multi_plant === 'Y' ? 'Y' : 'N',
+      multiPlant,
       mustChangePassword: !!mustChange,
       passwordExpired: !!expired,
       permissions,
@@ -191,23 +205,20 @@ export class AuthService {
     }
 
     // refresh 시 DB에서 최신 사용자 정보 재조회 → roleId 변경 즉시 반영
-    const users = await this.dataSource.query<any[]>(
-      `SELECT u.*, r.multi_plant FROM users u
-       LEFT JOIN role r ON r.company_id=u.company_id AND r.id=u.role_id
-       WHERE u.company_id=$1 AND u.id=$2 AND u.delete_yn='N' AND u.use_yn='Y'`,
-      [decoded.companyId, decoded.userId],
+    const { user, multiPlant } = await this.findActiveUser(
+      decoded.companyId,
+      decoded.userId,
     );
-    const user = users[0];
     if (!user) throw new UnauthorizedException('사용자를 찾을 수 없습니다.');
 
     const payload: JwtPayload = {
       sub: `${decoded.companyId}:${decoded.userId}`,
       companyId: decoded.companyId,
       userId: decoded.userId,
-      roleId: user.role_id ?? '',
-      departmentId: user.department_id ?? null,
-      lastLoginPlantId: user.last_login_plant_id ?? null,
-      multiPlant: user.multi_plant === 'Y' ? 'Y' : 'N',
+      roleId: user.roleId ?? '',
+      departmentId: user.departmentId ?? null,
+      lastLoginPlantId: user.lastLoginPlantId ?? null,
+      multiPlant,
     };
     return this.jwtService.sign(payload);
   }
@@ -218,57 +229,64 @@ export class AuthService {
   async signUp(req: SignUpRequest): Promise<void> {
     const companyId = req.companyId.toUpperCase().trim();
 
-    const companies = await this.dataSource.query(
-      `SELECT id FROM company WHERE id=$1 AND delete_yn='N'`,
-      [companyId],
-    );
-    if (!companies.length) {
+    const company = await this.companyRepository.findOne({
+      select: { id: true },
+      where: { id: companyId, deleteYn: 'N' },
+    });
+    if (!company) {
       throw new BadRequestException('존재하지 않는 회사 코드입니다.');
     }
 
-    const existing = await this.dataSource.query(
-      `SELECT id FROM users WHERE company_id=$1 AND id=$2`,
-      [companyId, req.id],
-    );
-    if (existing.length) {
+    const existing = await this.userRepository.findOne({
+      select: { id: true },
+      where: { companyId, id: req.id },
+    });
+    if (existing) {
       throw new BadRequestException('이미 사용 중인 아이디입니다.');
     }
 
     const hash = await bcrypt.hash(req.password, 12);
-    await this.dataSource.query(
-      `INSERT INTO users (company_id, id, name, password_hash, department_id,
-        role_id, use_yn, delete_yn, created_by, updated_by)
-       VALUES ($1,$2,$3,$4,$5,NULL,'N','N',$2,$2)`,
-      [companyId, req.id, req.name, hash, req.departmentId ?? null],
-    );
+    await this.userRepository.save(this.userRepository.create({
+      companyId,
+      id: req.id,
+      name: req.name,
+      passwordHash: hash,
+      departmentId: req.departmentId ?? null,
+      roleId: null,
+      email: req.email?.trim() || null,
+      phone: req.phone?.trim() || null,
+      position: req.position?.trim() || null,
+      title: req.title?.trim() || null,
+      useYn: 'N',
+      deleteYn: 'N',
+      createdBy: req.id,
+      updatedBy: req.id,
+    }));
   }
 
   // =========================================================================
   // 내 정보 조회
   // =========================================================================
   async getMyProfile(companyId: string, userId: string): Promise<UserProfileResponse> {
-    const users = await this.dataSource.query<any[]>(
-      `SELECT u.*, r.multi_plant FROM users u
-       LEFT JOIN role r ON r.company_id=u.company_id AND r.id=u.role_id
-       WHERE u.company_id=$1 AND u.id=$2 AND u.delete_yn='N'`,
-      [companyId, userId],
-    );
-    const u = users[0];
-    if (!u) throw new UnauthorizedException('사용자를 찾을 수 없습니다.');
+    const user = await this.userRepository.findOne({
+      where: { companyId, id: userId, deleteYn: 'N' },
+    });
+    if (!user) throw new UnauthorizedException('사용자를 찾을 수 없습니다.');
+    const multiPlant = await this.getMultiPlant(companyId, user.roleId);
 
     return {
-      companyId: u.company_id,
-      id: u.id,
-      name: u.name,
-      email: u.email ?? null,
-      phone: u.phone ?? null,
-      position: u.position ?? null,
-      title: u.title ?? null,
-      departmentId: u.department_id ?? null,
-      roleId: u.role_id ?? '',
-      lastLoginPlantId: u.last_login_plant_id ?? null,
-      multiPlant: u.multi_plant === 'Y' ? 'Y' : 'N',
-      mustChangePassword: u.must_change_password === 'Y',
+      companyId: user.companyId,
+      id: user.id,
+      name: user.name,
+      email: user.email ?? null,
+      phone: user.phone ?? null,
+      position: user.position ?? null,
+      title: user.title ?? null,
+      departmentId: user.departmentId ?? null,
+      roleId: user.roleId ?? '',
+      lastLoginPlantId: user.lastLoginPlantId ?? null,
+      multiPlant,
+      mustChangePassword: user.mustChangePassword === 'Y',
     };
   }
 
@@ -280,10 +298,16 @@ export class AuthService {
     userId: string,
     req: UserUpdateRequest,
   ): Promise<void> {
-    await this.dataSource.query(
-      `UPDATE users SET name=$1, email=$2, phone=$3, position=$4, title=$5, updated_by=$6
-       WHERE company_id=$7 AND id=$8 AND delete_yn='N'`,
-      [req.name, req.email, req.phone, req.position, req.title, userId, companyId, userId],
+    await this.userRepository.update(
+      { companyId, id: userId, deleteYn: 'N' },
+      {
+        ...(req.name !== undefined ? { name: req.name } : {}),
+        ...(req.email !== undefined ? { email: req.email ?? null } : {}),
+        ...(req.phone !== undefined ? { phone: req.phone ?? null } : {}),
+        ...(req.position !== undefined ? { position: req.position ?? null } : {}),
+        ...(req.title !== undefined ? { title: req.title ?? null } : {}),
+        updatedBy: userId,
+      },
     );
   }
 
@@ -295,21 +319,24 @@ export class AuthService {
     userId: string,
     req: PasswordChangeRequest,
   ): Promise<void> {
-    const users = await this.dataSource.query<{ password_hash: string }[]>(
-      `SELECT password_hash FROM users WHERE company_id=$1 AND id=$2 AND delete_yn='N'`,
-      [companyId, userId],
-    );
-    if (!users.length) throw new UnauthorizedException('사용자를 찾을 수 없습니다.');
+    const user = await this.userRepository.findOne({
+      select: { passwordHash: true },
+      where: { companyId, id: userId, deleteYn: 'N' },
+    });
+    if (!user) throw new UnauthorizedException('사용자를 찾을 수 없습니다.');
 
-    const match = await bcrypt.compare(req.currentPassword, users[0].password_hash);
+    const match = await bcrypt.compare(req.currentPassword, user.passwordHash);
     if (!match) throw new BadRequestException('현재 비밀번호가 일치하지 않습니다.');
 
     const hash = await bcrypt.hash(req.newPassword, 12);
-    await this.dataSource.query(
-      `UPDATE users
-       SET password_hash=$1, password_changed_at=NOW(), must_change_password='N', updated_by=$2
-       WHERE company_id=$3 AND id=$4`,
-      [hash, userId, companyId, userId],
+    await this.userRepository.update(
+      { companyId, id: userId },
+      {
+        passwordHash: hash,
+        passwordChangedAt: new Date(),
+        mustChangePassword: 'N',
+        updatedBy: userId,
+      },
     );
   }
 
@@ -322,10 +349,48 @@ export class AuthService {
     ipAddress: string,
     result: 'SUCCESS' | 'FAIL',
   ): Promise<void> {
-    await this.dataSource.query(
-      `INSERT INTO login_history (company_id, user_id, login_ip, login_result, login_at)
-       VALUES ($1, $2, $3, $4, NOW())`,
-      [companyId, userId, ipAddress, result],
-    );
+    await this.loginHistoryRepository.createQueryBuilder()
+      .insert()
+      .into(LoginHistory)
+      .values({
+        companyId,
+        userId,
+        loginIp: ipAddress,
+        loginResult: result,
+        loginAt: () => 'CURRENT_TIMESTAMP',
+      })
+      .execute();
+  }
+
+  private async findActiveUser(
+    companyId: string,
+    userId: string,
+  ): Promise<{ user: User | null; multiPlant: 'Y' | 'N' }> {
+    const user = await this.userRepository.findOne({
+      where: {
+        companyId,
+        id: userId,
+        deleteYn: 'N',
+        useYn: 'Y',
+      },
+    });
+    return {
+      user,
+      multiPlant: user
+        ? await this.getMultiPlant(companyId, user.roleId)
+        : 'N',
+    };
+  }
+
+  private async getMultiPlant(
+    companyId: string,
+    roleId: string | null,
+  ): Promise<'Y' | 'N'> {
+    if (!roleId) return 'N';
+    const role = await this.roleRepository.findOne({
+      select: { multiPlant: true },
+      where: { companyId, id: roleId },
+    });
+    return role?.multiPlant === 'Y' ? 'Y' : 'N';
   }
 }

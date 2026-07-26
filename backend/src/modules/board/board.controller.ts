@@ -11,7 +11,12 @@ import {
   HttpStatus,
   ParseIntPipe,
 } from '@nestjs/common';
-import { BoardService, BoardDetailResponse } from './board.service';
+import { BoardService } from './board.service';
+import {
+  BoardCommentResponseDto,
+  BoardDetailResponseDto,
+  BoardResponseDto,
+} from './dto/board-response.dto';
 import { SaveBoardDto } from './dto/save-board.dto';
 import { SaveCommentDto } from './dto/save-comment.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -26,7 +31,7 @@ export class BoardController {
 
   @Get()
   @Permission(AppModule.BRD, 'R')
-  async getBoards(): Promise<any[]> {
+  async getBoards(): Promise<BoardResponseDto[]> {
     const { companyId } = getTenantContext();
     return this.boardService.getBoards(companyId);
   }
@@ -35,14 +40,14 @@ export class BoardController {
   @Permission(AppModule.BRD, 'R')
   async getBoardDetails(
     @Param('id', ParseIntPipe) id: number,
-  ): Promise<BoardDetailResponse> {
+  ): Promise<BoardDetailResponseDto> {
     const { companyId } = getTenantContext();
     return this.boardService.getBoardDetails(companyId, id);
   }
 
   @Post()
   @Permission(AppModule.BRD, 'C')
-  async saveBoard(@Body() board: SaveBoardDto): Promise<any> {
+  async saveBoard(@Body() board: SaveBoardDto): Promise<BoardResponseDto> {
     const { companyId, userId } = getTenantContext();
     return this.boardService.saveBoard(companyId, board, userId);
   }
@@ -59,7 +64,9 @@ export class BoardController {
 
   @Post('comment')
   @Permission(AppModule.BRD, 'C')
-  async saveComment(@Body() comment: SaveCommentDto): Promise<any> {
+  async saveComment(
+    @Body() comment: SaveCommentDto,
+  ): Promise<BoardCommentResponseDto> {
     const { companyId, userId } = getTenantContext();
     return this.boardService.saveComment(companyId, comment, userId);
   }

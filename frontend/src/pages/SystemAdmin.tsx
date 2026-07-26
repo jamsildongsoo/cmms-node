@@ -4,6 +4,7 @@ import { requestConfirmation } from '../utils/userActionDialog';
 import axiosInstance from '../api/axios';
 import { formatDateTime } from '../utils/datetime';
 import { ShieldCheck, Users, History, Building2, Plus } from 'lucide-react';
+import ListBadge from '../components/ListBadge';
 
 interface SysUser {
   companyId: string;
@@ -266,7 +267,7 @@ export default function SystemAdmin() {
                     <td className="px-2 py-2 text-slate-400">{formatDateTime(h.loginAt)}</td>
                     <td className="px-2 py-2 font-mono text-slate-500">{h.loginIp || '-'}</td>
                     <td className="px-2 py-2">
-                      <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${h.loginResult === 'SUCCESS' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'}`}>{h.loginResult}</span>
+                      <ListBadge>{h.loginResult}</ListBadge>
                     </td>
                   </tr>
                 ))}

@@ -1,4 +1,6 @@
 import { DataSource } from 'typeorm';
+import { User } from '../../entities/users.entity';
+import { Role } from '../../entities/role.entity';
 
 /**
  * 사용자의 권한 역할(Role)에 맞춰 접근 권한이 있는 플랜트 ID를 결정합니다.
@@ -12,25 +14,33 @@ export async function resolveActivePlantId(
   operatorId: string,
   reqPlantId?: string | null,
 ): Promise<string | null> {
-  const userRows = await dataSource.query(
-    `SELECT role_id, last_login_plant_id FROM users WHERE company_id = $1 AND id = $2`,
-    [companyId, operatorId],
-  );
-  if (!userRows.length) return null;
-  const user = userRows[0];
+  const user = await dataSource.getRepository(User).findOne({
+    select: {
+      roleId: true,
+      lastLoginPlantId: true,
+    },
+    where: {
+      companyId,
+      id: operatorId,
+    },
+  });
+  if (!user) return null;
 
-  if (!user.role_id) {
-    return user.last_login_plant_id;
+  if (!user.roleId) {
+    return user.lastLoginPlantId;
   }
 
-  const roleRows = await dataSource.query(
-    `SELECT multi_plant FROM role WHERE company_id = $1 AND id = $2`,
-    [companyId, user.role_id],
-  );
-  const isMulti = roleRows[0]?.multi_plant === 'Y';
+  const role = await dataSource.getRepository(Role).findOne({
+    select: { multiPlant: true },
+    where: {
+      companyId,
+      id: user.roleId,
+    },
+  });
+  const isMulti = role?.multiPlant === 'Y';
 
   if (!isMulti) {
-    return user.last_login_plant_id;
+    return user.lastLoginPlantId;
   }
-  return reqPlantId ?? user.last_login_plant_id ?? null;
+  return reqPlantId ?? user.lastLoginPlantId ?? null;
 }

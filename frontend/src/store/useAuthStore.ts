@@ -19,6 +19,18 @@ interface User {
   permissions: Record<string, { C: string; R: string; U: string; D: string; A: string }>;
 }
 
+interface SignUpData {
+  companyId: string;
+  id: string;
+  name: string;
+  password: string;
+  departmentId?: string;
+  email?: string;
+  phone?: string;
+  position?: string;
+  title?: string;
+}
+
 const SESSION_MS = 1800 * 1000; // 30분 (서버 JWT 만료와 동일)
 
 interface AuthState {
@@ -31,7 +43,7 @@ interface AuthState {
   activePlantId: string | null;  // 멀티 사용자가 선택한 활성 플랜트(null=전체)
   login: (companyId: string, id: string, password: string) => Promise<boolean>;
   logout: () => void;
-  signUp: (data: any) => Promise<void>;
+  signUp: (data: SignUpData) => Promise<void>;
   extendSession: () => Promise<void>;
   updateUser: (data: Partial<User>) => void;
   setActivePlantId: (plantId: string | null) => void;

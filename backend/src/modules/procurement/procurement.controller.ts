@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Delete,
   Body,
   Param,
@@ -10,7 +11,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ProcurementService, SaveRequest, OrderRequest, ShipRequest, ReceiveRequest, RequestDetail } from './procurement.service';
+import { ProcurementService, SaveRequest, OrderRequest, ShipRequest, ReceiveRequest, RequestDetail, VendorRequest } from './procurement.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionGuard, Permission } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
@@ -21,6 +22,37 @@ import { getTenantContext } from '../../common/context/tenant.context';
 export class ProcurementController {
   constructor(private readonly procurementService: ProcurementService) {}
 
+  @Get('vendors')
+  async getVendors(): Promise<any[]> {
+    const { companyId } = getTenantContext();
+    return this.procurementService.getVendors(companyId);
+  }
+
+  @Post('vendors')
+  @Permission(AppModule.PUR, 'A')
+  async createVendor(@Body() request: VendorRequest): Promise<any> {
+    const { companyId, userId } = getTenantContext();
+    return this.procurementService.createVendor(companyId, request, userId);
+  }
+
+  @Put('vendors/:id')
+  @Permission(AppModule.PUR, 'A')
+  async updateVendor(
+    @Param('id') id: string,
+    @Body() request: VendorRequest,
+  ): Promise<any> {
+    const { companyId, userId } = getTenantContext();
+    return this.procurementService.updateVendor(companyId, id, request, userId);
+  }
+
+  @Delete('vendors/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Permission(AppModule.PUR, 'A')
+  async deleteVendor(@Param('id') id: string): Promise<void> {
+    const { companyId, userId } = getTenantContext();
+    await this.procurementService.deleteVendor(companyId, id, userId);
+  }
+
   @Get('requests')
   @Permission(AppModule.PUR, 'R')
   async getRequests(
@@ -28,6 +60,34 @@ export class ProcurementController {
   ): Promise<any[]> {
     const { companyId, userId } = getTenantContext();
     return this.procurementService.getRequests(companyId, userId, plantId);
+  }
+
+  @Get('management/requests')
+  @Permission(AppModule.PUR, 'A')
+  async getManagementRequests(): Promise<any[]> {
+    const { companyId } = getTenantContext();
+    return this.procurementService.getManagementRequests(companyId);
+  }
+
+  @Get('management/requests/:id')
+  @Permission(AppModule.PUR, 'A')
+  async getManagementRequest(@Param('id') id: string): Promise<RequestDetail> {
+    const { companyId } = getTenantContext();
+    return this.procurementService.getRequestDetail(companyId, id);
+  }
+
+  @Get('receipts/request/:id')
+  @Permission(AppModule.STK, 'C')
+  async getReceivableRequest(@Param('id') id: string): Promise<RequestDetail> {
+    const { companyId } = getTenantContext();
+    return this.procurementService.getReceivableRequest(companyId, id);
+  }
+
+  @Get('receipts/requests')
+  @Permission(AppModule.STK, 'C')
+  async getReceivableRequests(): Promise<any[]> {
+    const { companyId } = getTenantContext();
+    return this.procurementService.getReceivableRequests(companyId);
   }
 
   @Get('requests/:id')
@@ -54,14 +114,14 @@ export class ProcurementController {
   }
 
   @Post('orders')
-  @Permission(AppModule.PUR, 'U')
+  @Permission(AppModule.PUR, 'A')
   async placeOrder(@Body() request: OrderRequest): Promise<any> {
     const { companyId, userId } = getTenantContext();
     return this.procurementService.placeOrder(companyId, request, userId);
   }
 
   @Post('shipments')
-  @Permission(AppModule.PUR, 'U')
+  @Permission(AppModule.PUR, 'A')
   async startShipping(@Body() request: ShipRequest): Promise<any> {
     const { companyId, userId } = getTenantContext();
     return this.procurementService.startShipping(companyId, request, userId);
@@ -89,7 +149,7 @@ export class ProcurementController {
   }
 
   @Post('requests/:id/close')
-  @Permission(AppModule.PUR, 'U')
+  @Permission(AppModule.PUR, 'A')
   async close(@Param('id') id: string): Promise<any> {
     const { companyId, userId } = getTenantContext();
     return this.procurementService.close(companyId, id, userId);

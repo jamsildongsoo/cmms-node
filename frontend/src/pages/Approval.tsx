@@ -1,34 +1,32 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
 import axiosInstance from '../api/axios';
 import { formatDateTime } from '../utils/datetime';
-import RichTextEditor from '../components/RichTextEditor';
 import RichTextViewer from '../components/RichTextViewer';
+import FileUpload from '../components/FileUpload';
 import { getApiErrorMessage } from '../utils/apiError';
 import { useAuthStore } from '../store/useAuthStore';
-import FileUpload from '../components/FileUpload';
+import ApprovalDraftModal from '../components/ApprovalDraftModal';
 import ApprovalDocPrint, {
   type ApprovalDocumentAttachment,
   type ApprovalDocumentStep,
 } from '../components/ApprovalDocPrint';
 import PrintWindowLayout from '../components/PrintWindowLayout';
-import { requestConfirmation } from '../utils/userActionDialog';
 import { openPrintWindow } from '../utils/printWindow';
 import {
-  createEmptyRichTextDocument,
-  isRichTextDocument,
   isRichTextEmpty,
   type RichTextDocument,
 } from '../types/richText';
 import {
   getCommonStatusLabel as getStatusLabel,
-  getCommonStatusClass as getStatusClass,
   getStepTypeLabel,
 } from '../constants/status';
 import {
-  FileSignature, Check, X, Printer, ArrowRight, Plus, Pencil
+  FileSignature, Check, X, Printer, Pencil, Plus
 } from 'lucide-react';
+import ListBadge from '../components/ListBadge';
+import ListIconButton from '../components/ListIconButton';
 
 interface ApprovalModel {
   id: string;
@@ -69,6 +67,18 @@ export default function Approval() {
 
   const [approvals, setApprovals] = useState<ApprovalModel[]>([]);
   const [usersList, setUsersList] = useState<User[]>([]);
+  const [searchType, setSearchType] = useState<'id' | 'title' | 'owner'>('id');
+  const [searchValue, setSearchValue] = useState('');
+  const filteredApprovals = useMemo(() => {
+    const keyword = searchValue.trim().toLowerCase();
+    if (!keyword) return approvals;
+    return approvals.filter((approval) => {
+      if (searchType === 'id') return approval.id.toLowerCase().includes(keyword);
+      if (searchType === 'title') return approval.title.toLowerCase().includes(keyword);
+      const drafter = usersList.find((candidate) => candidate.id === approval.drafterId);
+      return `${approval.drafterId} ${drafter?.name || ''}`.toLowerCase().includes(keyword);
+    });
+  }, [approvals, searchType, searchValue, usersList]);
 
   // Modal / Detail states
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -83,36 +93,7 @@ export default function Approval() {
 
   // New Draft Creation Modal
   const [isDraftModalOpen, setIsDraftModalOpen] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
-  const [newContent, setNewContent] = useState<RichTextDocument>(createEmptyRichTextDocument);
-  const [newRefNo, setNewRefNo] = useState('');
-  const [newRefModule, setNewRefModule] = useState('');
-  const [selectedLine, setSelectedLine] = useState<{ approverId: string; type: string }[]>([]);
-  const [lineUserId, setLineUserId] = useState('');
-  const [lineType, setLineType] = useState<'A' | 'G' | 'R'>('A');
-  const [newFileGroupId, setNewFileGroupId] = useState<number | null>(null);
-  const [fileUploading, setFileUploading] = useState(false);
   const [editingApprovalId, setEditingApprovalId] = useState<string | null>(null);
-
-  // localStorage 자동 백업: 내용 변경 시 1초 디바운스로 저장
-  useEffect(() => {
-    if (!isDraftModalOpen) return;
-    const draftId = editingApprovalId || 'new';
-    const timer = setTimeout(() => {
-      if (newTitle || !isRichTextEmpty(newContent)) {
-        localStorage.setItem(`approval-draft-${draftId}`, JSON.stringify({
-          title: newTitle,
-          content: newContent,
-          steps: selectedLine,
-          fileGroupId: newFileGroupId,
-          refNo: newRefNo,
-          refModule: newRefModule,
-          autoSavedAt: new Date().toISOString()
-        }));
-      }
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [isDraftModalOpen, newTitle, newContent, selectedLine, newFileGroupId, newRefNo, newRefModule, editingApprovalId]);
 
   const fetchData = async () => {
     try {
@@ -170,177 +151,14 @@ export default function Approval() {
     }
   };
 
-  const handleOpenDraftModal = async () => {
-    setNewTitle('');
-    setNewContent(createEmptyRichTextDocument());
-    setNewRefNo('');
-    setNewRefModule('');
-    setSelectedLine([]);
-    setLineUserId('');
-    setLineType('A');
-    setNewFileGroupId(null);
+  const handleOpenDraftModal = () => {
     setEditingApprovalId(null);
-    // localStorage에서 새 글 초안 복원 시도
-    const saved = localStorage.getItem('approval-draft-new');
-    if (saved) {
-      try {
-        const draft = JSON.parse(saved);
-        if (draft.title || draft.content) {
-          const autoTime = draft.autoSavedAt ? new Date(draft.autoSavedAt).toLocaleString('ko-KR') : '';
-          if (await requestConfirmation(`자동 저장된 초안이 있습니다.${autoTime ? ` (${autoTime})` : ''}\n복원하시겠습니까?`, '복원')) {
-            setNewTitle(draft.title || '');
-            setNewContent(
-              isRichTextDocument(draft.content)
-                ? draft.content
-                : createEmptyRichTextDocument(),
-            );
-            setNewRefNo(draft.refNo || '');
-            setNewRefModule(draft.refModule || '');
-            setSelectedLine(draft.steps || []);
-            setNewFileGroupId(draft.fileGroupId ?? null);
-          } else {
-            localStorage.removeItem('approval-draft-new');
-          }
-        }
-      } catch {
-        localStorage.removeItem('approval-draft-new');
-      }
-    }
     setIsDraftModalOpen(true);
   };
 
-  const handleEditDraft = async (app: ApprovalModel) => {
-    setIsLoading(true);
-    try {
-      const res = await axiosInstance.get(`/approval/${app.id}/details`);
-      setNewTitle(res.data.approval.title);
-      setNewContent(
-        isRichTextDocument(res.data.approval.content)
-          ? res.data.approval.content
-          : createEmptyRichTextDocument(),
-      );
-      setNewRefNo(res.data.approval.refNo || '');
-      setNewRefModule(res.data.approval.refModule || '');
-      setNewFileGroupId(res.data.approval.fileGroupId);
-      // 기존 결재선 로드 (step_no > 0만, 기안 제외)
-      const existingSteps = (res.data.steps || [])
-        .filter((s: any) => s.stepNo > 0)
-        .map((s: any) => ({ approverId: s.approverId, type: s.approvalType }));
-      setSelectedLine(existingSteps);
-      setEditingApprovalId(app.id);
-      setIsDraftModalOpen(true);
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, '결재 문서 정보를 불러오는데 실패했습니다.'));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleAddLineApprover = () => {
-    if (!lineUserId) return;
-    if (selectedLine.some(l => l.approverId === lineUserId)) return;
-    setSelectedLine([...selectedLine, { approverId: lineUserId, type: lineType }]);
-    setLineUserId('');
-  };
-
-  const handleRemoveLineApprover = (idx: number) => {
-    setSelectedLine(selectedLine.filter((_, i) => i !== idx));
-  };
-
-  const handleSaveTemp = async () => {
-    if (!newTitle.trim()) {
-      toast.error('결재 제목을 입력하세요.');
-      return;
-    }
-    if (fileUploading) {
-      toast.error('첨부파일 업로드가 끝난 뒤 저장해 주세요.');
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const payload = {
-        approval: {
-          id: editingApprovalId || null,
-          title: newTitle,
-          content: newContent,
-          fileGroupId: newFileGroupId,
-          status: 'T'
-        },
-        steps: selectedLine.map(l => ({
-          approverId: l.approverId,
-          approvalType: l.type,
-        })),
-        refNo: newRefNo || null,
-        refModule: newRefModule || null
-      };
-
-      const res = await axiosInstance.post('/approval/submit', payload);
-      const savedId = res.data?.id || editingApprovalId;
-      // localStorage에도 백업 저장
-      if (savedId) {
-        localStorage.setItem(`approval-draft-${savedId}`, JSON.stringify({
-          title: newTitle,
-          content: newContent,
-          fileGroupId: newFileGroupId,
-          steps: selectedLine,
-          refNo: newRefNo,
-          refModule: newRefModule,
-          savedAt: new Date().toISOString()
-        }));
-      }
-      localStorage.removeItem('approval-draft-new');
-      toast.success('임시저장되었습니다. 나중에 계속 작성할 수 있습니다.');
-      setIsDraftModalOpen(false);
-      if (activeTab === 'sent') fetchData();
-      else setActiveTab('sent');
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, '임시저장 중 오류가 발생했습니다.'));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSaveDraft = async () => {
-    if (!newTitle.trim()) {
-      toast.error('결재 제목을 입력하세요.');
-      return;
-    }
-    if (selectedLine.filter(l => l.type === 'A').length === 0) {
-      toast.error('최소 한 명 이상의 결재선(A)을 지정해야 합니다.');
-      return;
-    }
-    if (fileUploading) {
-      toast.error('첨부파일 업로드가 끝난 뒤 상신해 주세요.');
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const payload = {
-        approval: {
-          id: editingApprovalId || null,
-          title: newTitle,
-          content: newContent,
-          fileGroupId: newFileGroupId
-        },
-        steps: selectedLine.map(l => ({
-          approverId: l.approverId,
-          approvalType: l.type,
-        })),
-        refNo: newRefNo || null,
-        refModule: newRefModule || null
-      };
-
-      await axiosInstance.post('/approval/submit', payload);
-      toast.success(editingApprovalId ? '결재 문서가 수정되었습니다.' : '결재 문서가 상신되었습니다.');
-      setIsDraftModalOpen(false);
-      fetchData();
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, '상신 중 오류가 발생했습니다.'));
-    } finally {
-      setIsLoading(false);
-    }
+  const handleEditDraft = (app: ApprovalModel) => {
+    setEditingApprovalId(app.id);
+    setIsDraftModalOpen(true);
   };
 
   // Filter steps for signature box
@@ -525,6 +343,14 @@ export default function Approval() {
 
       {/* Main Grid List */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 print:border-0 print:bg-transparent print:p-0">
+        <div className="mb-4 flex gap-2 print:hidden">
+          <select value={searchType} onChange={(event) => setSearchType(event.target.value as typeof searchType)} className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300 outline-none">
+            <option value="id">문서번호</option>
+            <option value="title">제목</option>
+            <option value="owner">담당자</option>
+          </select>
+          <input value={searchValue} onChange={(event) => setSearchValue(event.target.value)} placeholder="검색어를 입력하세요" className="flex-1 min-w-[200px] bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300 outline-none" />
+        </div>
         <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/40">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
@@ -533,43 +359,42 @@ export default function Approval() {
                 <th className="p-3 font-semibold">결재 제목</th>
                 <th className="p-3 font-semibold">기안자</th>
                 <th className="p-3 font-semibold">상신일시</th>
-                <th className="p-3 font-semibold">진행 상태</th>
+                <th className="p-3 font-semibold">결재상태</th>
                 <th className="p-3 font-semibold text-right">작업</th>
               </tr>
             </thead>
             <tbody>
-              {approvals.length === 0 ? (
+              {filteredApprovals.length === 0 ? (
                 <tr><td colSpan={6} className="p-8 text-center text-slate-600">조회된 결재 문서가 없습니다.</td></tr>
               ) : (
-                approvals.map((app) => (
+                filteredApprovals.map((app) => (
                   <tr key={app.id} className="border-b border-slate-900 hover:bg-slate-900/30 text-slate-300">
-                    <td className="p-3 font-mono text-slate-400">{app.id}</td>
+                    <td className="p-3 font-mono">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenDetail(app)}
+                        className="bg-transparent border-0 p-0 text-blue-400 hover:text-blue-300 hover:underline font-mono cursor-pointer"
+                        title="결재문 출력 화면"
+                      >
+                        {app.id}
+                      </button>
+                    </td>
                     <td className="p-3 font-semibold text-slate-200">{app.title}</td>
                     <td className="p-3">{usersList.find(u => u.id === app.drafterId)?.name || app.drafterId}</td>
                     <td className="p-3 font-mono text-slate-400">{formatDateTime(app.createdAt)}</td>
                     <td className="p-3">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getStatusClass(app.status)}`}>
-                        {getStatusLabel(app.status)}
-                      </span>
+                      <ListBadge>{getStatusLabel(app.status)}</ListBadge>
                     </td>
                     <td className="p-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         {app.status === 'T' && app.drafterId === user?.id && (
-                          <button
+                          <ListIconButton
                             onClick={() => handleEditDraft(app)}
-                            className="bg-amber-600/10 hover:bg-amber-600/20 text-amber-400 rounded-lg px-3 py-1.5 font-semibold text-[11px] border border-amber-500/20 hover:border-amber-500/40 flex items-center gap-1 cursor-pointer"
-                          >
-                            <Pencil size={12} />
-                            <span>수정</span>
-                          </button>
+                            label={`${app.id} 수정`}
+                            icon={Pencil}
+                            tone="accent"
+                          />
                         )}
-                        <button
-                          onClick={() => handleOpenDetail(app)}
-                          className="bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 rounded-lg px-3 py-1.5 font-semibold text-[11px] border border-blue-500/20 hover:border-blue-500/40 flex items-center gap-1 cursor-pointer"
-                        >
-                          <span>{activeTab === 'pending' ? '결재 처리' : '결재 보기'}</span>
-                          <ArrowRight size={12} />
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -779,157 +604,23 @@ export default function Approval() {
         </div>
       )}
 
-      {/* DRAFT SUBMISSION MODAL */}
-      {isDraftModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl">
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0">
-              <h2 className="text-lg font-bold text-slate-200">
-                {editingApprovalId ? '결재 기안서 수정' : '일반 결재 기안서 상신'}
-              </h2>
-              <button onClick={() => setIsDraftModalOpen(false)} className="text-slate-500 hover:text-slate-300 border-0 cursor-pointer bg-transparent"><X size={20} /></button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 space-y-5 text-xs">
-              {/* 1행: 품의 제목 */}
-              <div>
-                <label className="block text-slate-400 mb-1.5 font-semibold">품의 제목 *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="결재 기안서 제목을 입력해주세요."
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none"
-                />
-              </div>
-
-              {/* 2행: 결재선 */}
-              <div>
-                <label className="block text-slate-400 mb-2 font-semibold">결재선 구성 (기안자 제외 순차 지정)</label>
-                <div className="flex gap-2 mb-3">
-                  <select
-                    value={lineUserId}
-                    onChange={(e) => setLineUserId(e.target.value)}
-                    className="flex-1 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none"
-                  >
-                    <option value="">사용자 선택</option>
-                    {/* 기안자는 step_no=0에 자동으로 배정되므로 결재선 선택 목록에서 제외 */}
-                    {usersList.filter(u => u.id !== user?.id && u.useYn === 'Y').map(u => (
-                      <option key={u.id} value={u.id}>{u.name}({u.id}) / {u.position || '-'} / {u.title || '-'} / {u.departmentName || '-'}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={lineType}
-                    onChange={(e) => setLineType(e.target.value as 'A' | 'G' | 'R')}
-                    className="w-28 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none"
-                  >
-                    <option value="A">결재</option>
-                    <option value="G">합의</option>
-                    <option value="R">참조</option>
-                  </select>
-                  <button
-                    onClick={handleAddLineApprover}
-                    disabled={!lineUserId}
-                    className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-lg px-3 flex items-center gap-1 border-0 cursor-pointer"
-                  >
-                    <Plus size={14} /> 추가
-                  </button>
-                </div>
-                {selectedLine.length === 0 ? (
-                  <div className="text-center py-3 text-slate-600 bg-slate-950/50 rounded-lg border border-slate-800">
-                    결재선을 지정해주세요.
-                  </div>
-                ) : (
-                  <div className="space-y-1">
-                    {selectedLine.map((line, idx) => {
-                      const u = usersList.find(usr => usr.id === line.approverId);
-                      const typeLabel = line.type === 'A' ? '결재' : line.type === 'G' ? '합의' : '참조';
-                      const typeColor = line.type === 'A' ? 'text-blue-400' : line.type === 'G' ? 'text-purple-400' : 'text-slate-400';
-                      return (
-                        <div key={idx} className="flex justify-between items-center bg-slate-950 px-3 py-2 rounded border border-slate-800">
-                          <div className="flex items-center gap-2">
-                            <span className="text-slate-500 font-mono w-5">{idx + 1}</span>
-                            <span className={`font-semibold text-[10px] ${typeColor} w-10`}>{typeLabel}</span>
-                            <span className="text-slate-200">{u?.name}</span>
-                            <span className="text-slate-500 text-[10px]">({u?.position || '-'}) / {u?.departmentName || '-'}</span>
-                          </div>
-                          <button
-                            onClick={() => handleRemoveLineApprover(idx)}
-                            className="text-slate-600 hover:text-rose-400 bg-transparent border-0 cursor-pointer text-xs"
-                          >
-                            <X size={14} />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* 3행: 본문 (Tiptap 에디터) */}
-              <div>
-                <label className="block text-slate-400 mb-1.5 font-semibold">상세 내용</label>
-                <div className="bg-slate-950 border border-slate-800 rounded-lg overflow-hidden">
-                  <RichTextEditor
-                    key={editingApprovalId || 'new'}
-                    content={newContent}
-                    onChange={setNewContent}
-                    placeholder="품의 내용을 구체적으로 작성하세요."
-                    minHeight="200px"
-                  />
-                </div>
-              </div>
-
-              {/* 4행: 첨부파일 */}
-              <div>
-                <label className="block text-slate-400 mb-1.5 font-semibold">첨부파일</label>
-                <FileUpload
-                  groupNo={newFileGroupId}
-                  refModule="APR"
-                  onGroupNoChange={setNewFileGroupId}
-                  onUploadingChange={setFileUploading}
-                />
-              </div>
-
-              {/* 연계 참조 (옵션) — 연계모듈에서만 사용하므로 숨김 */}
-              {/* <div className="grid grid-cols-2 gap-4 pt-3 border-t border-slate-800">
-                <div>
-                  <label className="block text-slate-400 mb-1.5">연계 참조 번호</label>
-                  <input
-                    type="text"
-                    placeholder="예: WO-202605-0001"
-                    value={newRefNo}
-                    onChange={(e) => setNewRefNo(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 mb-1.5">연계 참조 모듈</label>
-                  <input
-                    type="text"
-                    placeholder="예: WO, PM"
-                    value={newRefModule}
-                    onChange={(e) => setNewRefModule(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none font-mono"
-                  />
-                </div>
-              </div> */}
-            </div>
-
-            <div className="p-6 border-t border-slate-800 flex justify-between gap-2 shrink-0">
-              <button onClick={() => setIsDraftModalOpen(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg py-2 px-4 border-0 cursor-pointer">취소</button>
-              <div className="flex gap-2">
-                <button onClick={handleSaveTemp} disabled={isLoading || fileUploading} className="bg-amber-600 hover:bg-amber-500 text-white rounded-lg py-2 px-4 border-0 cursor-pointer disabled:opacity-50 flex items-center gap-1">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="17 3 17 8 7 8"/></svg>
-                  임시저장
-                </button>
-                <button onClick={handleSaveDraft} disabled={isLoading || fileUploading} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-5 border-0 cursor-pointer disabled:opacity-50">{fileUploading ? '업로드 중…' : (editingApprovalId ? '수정 상신' : '기안 상신')}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <ApprovalDraftModal
+        open={isDraftModalOpen}
+        mode="standalone"
+        approvalId={editingApprovalId}
+        users={usersList}
+        currentUserId={user?.id}
+        onClose={() => setIsDraftModalOpen(false)}
+        onSaved={() => {
+          setIsDraftModalOpen(false);
+          if (activeTab === 'sent') fetchData();
+          else setActiveTab('sent');
+        }}
+        onSubmitted={() => {
+          setIsDraftModalOpen(false);
+          fetchData();
+        }}
+      />
 
     </div>
     </>

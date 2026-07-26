@@ -23,11 +23,15 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { createHash, randomUUID } from 'crypto';
-import { DataSource } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import { getTenantContext } from '../../common/context/tenant.context';
 import { AppModule } from '../../common/constants/module.constants';
 import type { PermAction } from '../../common/constants/permission.constants';
 import { S3_CLIENT, STORAGE_SETTINGS, StorageSettings } from './storage.config';
+import { FileAttachment } from '../../entities/file-attachment.entity';
+import { FileAttachmentItem } from '../../entities/file-attachment-item.entity';
+import { RoleDetail } from '../../entities/role-detail.entity';
+import { User } from '../../entities/users.entity';
 
 export interface FileItemResponse {
   itemNo: number;
@@ -78,39 +82,44 @@ export class FileStorageService {
       let gno: number;
       let effectiveModule: AppModule;
       if (groupNo) {
-        const rows = await qr.query(
-          `SELECT group_no, ref_module FROM file_attachment
-           WHERE company_id=$1 AND group_no=$2 AND delete_yn='N'`,
-          [companyId, groupNo],
-        ) as any[];
-        if (!rows || !rows.length) throw new NotFoundException('첨부 그룹을 찾을 수 없습니다.');
+        // 그룹 행을 잠가 동일 그룹 동시 업로드의 itemNo 충돌을 방지한다.
+        const group = await qr.manager.getRepository(FileAttachment)
+          .createQueryBuilder('attachment')
+          .setLock('pessimistic_write')
+          .where('attachment.companyId = :companyId', { companyId })
+          .andWhere('attachment.groupNo = :groupNo', { groupNo })
+          .andWhere('attachment.deleteYn = :deleteYn', { deleteYn: 'N' })
+          .getOne();
+        if (!group) throw new NotFoundException('첨부 그룹을 찾을 수 없습니다.');
         gno = groupNo;
-        effectiveModule = this.parseAppModule(rows[0].ref_module);
+        effectiveModule = this.parseAppModule(group.refModule);
         await this.assertModulePermission(effectiveModule, ['U']);
       } else {
         effectiveModule = this.parseAppModule(refModule);
         await this.assertModulePermission(effectiveModule, ['C', 'U']);
 
-        // IDENTITY PK: INSERT RETURNING으로 group_no 즉시 획득
-        const inserted = await qr.query(
-          `INSERT INTO file_attachment (company_id, ref_module, ref_no, delete_yn, created_by, updated_by)
-           VALUES ($1,$2,$3,'N',$4,$4) RETURNING group_no`,
-          [companyId, effectiveModule, refNo ?? null, userId],
-        ) as any[];
-        gno = Number(inserted[0]?.group_no);
+        const groupRepository = qr.manager.getRepository(FileAttachment);
+        const group = await groupRepository.save(groupRepository.create({
+          companyId,
+          refModule: effectiveModule,
+          refNo: refNo ?? null,
+          deleteYn: 'N',
+          createdBy: userId,
+          updatedBy: userId,
+        }));
+        gno = Number(group.groupNo);
         if (!Number.isSafeInteger(gno) || gno <= 0) {
           throw new BadRequestException('첨부 그룹 번호를 생성하지 못했습니다.');
         }
       }
 
       // 2. 현재 최대 item_no 조회
-      const maxRows = await qr.query(
-        `SELECT COALESCE(MAX(item_no), 0) AS max FROM file_attachment_item
-         WHERE company_id=$1 AND group_no=$2`,
-        [companyId, gno],
-      ) as any[];
-      const maxRow = maxRows[0];
-      let nextItemNo = (maxRow?.max ?? 0) + 1;
+      const itemRepository = qr.manager.getRepository(FileAttachmentItem);
+      const maxItemNo = await itemRepository.maximum('itemNo', {
+        companyId,
+        groupNo: String(gno),
+      });
+      let nextItemNo = (maxItemNo ?? 0) + 1;
 
       const result: FileItemResponse[] = [];
       const moduleSeg = this.sanitizeSegment(effectiveModule);
@@ -134,17 +143,22 @@ export class FileStorageService {
         uploadedKeys.push(key);
 
         // 4. 메타 INSERT
-        await qr.query(
-          `INSERT INTO file_attachment_item
-             (company_id, group_no, item_no, original_file_name, stored_file_name,
-              file_extension, mime_type, file_size, checksum_sha256, storage_path)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-          [companyId, gno, nextItemNo++, original, stored,
-           ext || null, file.mimetype, file.size, sha, key],
-        );
+        const itemNo = nextItemNo++;
+        await itemRepository.save(itemRepository.create({
+          companyId,
+          groupNo: String(gno),
+          itemNo,
+          originalFileName: original,
+          storedFileName: stored,
+          fileExtension: ext || null,
+          mimeType: file.mimetype,
+          fileSize: String(file.size),
+          checksumSha256: sha,
+          storagePath: key,
+        }));
 
         result.push({
-          itemNo: nextItemNo - 1,
+          itemNo,
           originalFileName: original,
           fileExtension: ext || null,
           mimeType: file.mimetype,
@@ -175,19 +189,16 @@ export class FileStorageService {
     const module = await this.getGroupModule(companyId, groupNo);
     await this.assertModulePermission(module, ['R']);
 
-    const rows = await this.dataSource.query<any[]>(
-      `SELECT item_no, original_file_name, file_extension, mime_type, file_size
-       FROM file_attachment_item
-       WHERE company_id=$1 AND group_no=$2
-       ORDER BY item_no ASC`,
-      [companyId, groupNo],
-    );
-    return rows.map((r) => ({
-      itemNo: r.item_no,
-      originalFileName: r.original_file_name,
-      fileExtension: r.file_extension,
-      mimeType: r.mime_type,
-      fileSize: r.file_size,
+    const items = await this.dataSource.getRepository(FileAttachmentItem).find({
+      where: { companyId, groupNo: String(groupNo) },
+      order: { itemNo: 'ASC' },
+    });
+    return items.map((item) => ({
+      itemNo: item.itemNo,
+      originalFileName: item.originalFileName,
+      fileExtension: item.fileExtension,
+      mimeType: item.mimeType,
+      fileSize: this.toSafeFileSize(item.fileSize),
     }));
   }
 
@@ -203,14 +214,14 @@ export class FileStorageService {
 
     const response = await this.s3.send(new GetObjectCommand({
       Bucket: this.settings.bucket,
-      Key: item.storage_path,
+      Key: item.storagePath,
     }));
 
     return {
       stream: response.Body,
-      originalFileName: item.original_file_name,
-      mimeType: item.mime_type ?? 'application/octet-stream',
-      fileSize: item.file_size,
+      originalFileName: item.originalFileName,
+      mimeType: item.mimeType ?? 'application/octet-stream',
+      fileSize: this.toSafeFileSize(item.fileSize),
     };
   }
 
@@ -224,15 +235,11 @@ export class FileStorageService {
 
     const item = await this.getItemOwned(companyId, groupNo, itemNo);
 
-    await this.dataSource.query(
-      `DELETE FROM file_attachment_item
-       WHERE company_id=$1 AND group_no=$2 AND item_no=$3`,
-      [companyId, groupNo, itemNo],
-    );
+    await this.dataSource.getRepository(FileAttachmentItem).remove(item);
 
     // 커밋 후 S3 제거 (best-effort, 실패해도 메타는 이미 삭제됨)
     // Spring: @Transactional afterCommit() → Node.js: 동기 트랜잭션 후 비동기 처리
-    setImmediate(() => this.deleteObjectQuietly(item.storage_path));
+    setImmediate(() => this.deleteObjectQuietly(item.storagePath));
   }
 
   // =========================================================================
@@ -264,11 +271,16 @@ export class FileStorageService {
     // DB에 존재하는 storage_path 목록과 비교 → 고아 객체 삭제
     if (s3Keys.size === 0) return;
 
-    const dbRows = await this.dataSource.query<{ storage_path: string }[]>(
-      `SELECT storage_path FROM file_attachment_item WHERE storage_path = ANY($1)`,
-      [[...s3Keys]],
-    );
-    const dbPaths = new Set(dbRows.map((r) => r.storage_path));
+    const paths = [...s3Keys];
+    const dbPaths = new Set<string>();
+    const itemRepository = this.dataSource.getRepository(FileAttachmentItem);
+    for (let index = 0; index < paths.length; index += 1000) {
+      const items = await itemRepository.find({
+        select: { storagePath: true },
+        where: { storagePath: In(paths.slice(index, index + 1000)) },
+      });
+      items.forEach((item) => dbPaths.add(item.storagePath));
+    }
 
     for (const key of s3Keys) {
       if (!dbPaths.has(key)) {
@@ -289,45 +301,42 @@ export class FileStorageService {
   }
 
   private async getGroupModule(companyId: string, groupNo: number): Promise<AppModule> {
-    const rows = await this.dataSource.query<{ ref_module: string | null }[]>(
-      `SELECT ref_module FROM file_attachment
-       WHERE company_id=$1 AND group_no=$2 AND delete_yn='N'`,
-      [companyId, groupNo],
-    );
-    if (!rows.length) throw new NotFoundException('첨부 그룹을 찾을 수 없습니다.');
-    return this.parseAppModule(rows[0].ref_module);
+    const group = await this.dataSource.getRepository(FileAttachment).findOne({
+      where: { companyId, groupNo: String(groupNo), deleteYn: 'N' },
+    });
+    if (!group) throw new NotFoundException('첨부 그룹을 찾을 수 없습니다.');
+    return this.parseAppModule(group.refModule);
   }
 
   private async assertModulePermission(module: AppModule, actions: PermAction[]): Promise<void> {
     const { companyId, userId, roleId } = getTenantContext();
 
     if (companyId === 'SYSTEM' && roleId?.toUpperCase() === 'SYSTEM') {
-      const rows = await this.dataSource.query<{ role_id: string }[]>(
-        `SELECT role_id FROM users
-         WHERE company_id='SYSTEM' AND id=$1 AND use_yn='Y' AND delete_yn='N'`,
-        [userId],
-      );
-      if (rows.length > 0 && rows[0].role_id?.toUpperCase() === 'SYSTEM') return;
+      const systemUser = await this.dataSource.getRepository(User).findOne({
+        where: {
+          companyId: 'SYSTEM',
+          id: userId,
+          useYn: 'Y',
+          deleteYn: 'N',
+        },
+      });
+      if (systemUser?.roleId?.toUpperCase() === 'SYSTEM') return;
     }
 
     if (!roleId) throw new ForbiddenException('파일 접근 권한이 없습니다.');
 
-    const rows = await this.dataSource.query<any[]>(
-      `SELECT perm_c, perm_r, perm_u, perm_d, perm_a
-       FROM role_detail
-       WHERE company_id=$1 AND role_id=$2 AND module_detail=$3`,
-      [companyId, roleId, module],
-    );
-    const row = rows[0];
-    if (!row) throw new ForbiddenException('파일 접근 권한이 없습니다.');
+    const permission = await this.dataSource.getRepository(RoleDetail).findOne({
+      where: { companyId, roleId, moduleDetail: module },
+    });
+    if (!permission) throw new ForbiddenException('파일 접근 권한이 없습니다.');
 
     const allowed = actions.some((action) => {
       switch (action) {
-        case 'C': return row.perm_c === 'Y';
-        case 'R': return row.perm_r === 'Y';
-        case 'U': return row.perm_u === 'Y';
-        case 'D': return row.perm_d === 'Y';
-        case 'A': return row.perm_a === 'Y';
+        case 'C': return permission.permC === 'Y';
+        case 'R': return permission.permR === 'Y';
+        case 'U': return permission.permU === 'Y';
+        case 'D': return permission.permD === 'Y';
+        case 'A': return permission.permA === 'Y';
         default: return false;
       }
     });
@@ -335,14 +344,16 @@ export class FileStorageService {
     if (!allowed) throw new ForbiddenException('파일 접근 권한이 없습니다.');
   }
 
-  private async getItemOwned(companyId: string, groupNo: number, itemNo: number) {
-    const rows = await this.dataSource.query<any[]>(
-      `SELECT * FROM file_attachment_item
-       WHERE company_id=$1 AND group_no=$2 AND item_no=$3`,
-      [companyId, groupNo, itemNo],
-    );
-    if (!rows.length) throw new NotFoundException('파일을 찾을 수 없습니다.');
-    return rows[0];
+  private async getItemOwned(
+    companyId: string,
+    groupNo: number,
+    itemNo: number,
+  ): Promise<FileAttachmentItem> {
+    const item = await this.dataSource.getRepository(FileAttachmentItem).findOne({
+      where: { companyId, groupNo: String(groupNo), itemNo },
+    });
+    if (!item) throw new NotFoundException('파일을 찾을 수 없습니다.');
+    return item;
   }
 
   private baseName(name: string | undefined): string {
@@ -361,6 +372,14 @@ export class FileStorageService {
 
   private sanitizeSegment(seg: string): string {
     return seg.replace(/[^A-Za-z0-9_-]/g, '_') || 'common';
+  }
+
+  private toSafeFileSize(value: string): number {
+    const size = Number(value);
+    if (!Number.isSafeInteger(size) || size < 0) {
+      throw new BadRequestException('파일 크기 정보가 올바르지 않습니다.');
+    }
+    return size;
   }
 
   private deleteObjectQuietly(key: string): void {

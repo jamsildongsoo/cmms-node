@@ -79,6 +79,27 @@ html.light {
   outline: 2px solid #3b82f6;
 }
 
+/* Tiptap 표 열 너비 조절 — 편집 화면에만 리사이즈 핸들을 표시한다. */
+.tiptap-editor-root .rich-text-content .column-resize-handle {
+  background-color: #3b82f6;
+  bottom: -1px;
+  pointer-events: none;
+  position: absolute;
+  right: -2px;
+  top: 0;
+  width: 4px;
+  z-index: 2;
+}
+
+.tiptap-editor-root .rich-text-content.resize-cursor,
+.tiptap-editor-root .rich-text-content.resize-cursor * {
+  cursor: col-resize;
+}
+
+.tiptap-editor-root .tableWrapper {
+  overflow-x: auto;
+}
+
 .rich-text-content [data-placeholder] {
   display: none;
 }

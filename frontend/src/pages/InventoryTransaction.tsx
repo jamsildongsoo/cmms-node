@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
-import { requestConfirmation } from '../utils/userActionDialog';
 import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import PrintHeader from '../components/PrintHeader';
 import SlipPrint from '../components/SlipPrint';
 import { formatDateOnly, todayLocal, thisMonthLocal } from '../utils/datetime';
 import { getApiErrorMessage } from '../utils/apiError';
+import PrintWindowLayout from '../components/PrintWindowLayout';
+import { openPrintWindow } from '../utils/printWindow';
 import {
   Plus, Trash, Download, Printer, X, Layers, Settings
 } from 'lucide-react';
@@ -24,6 +26,7 @@ interface InventoryHistoryModel {
   inventoryId: string;
   historyNo: number;
   txTypeCode: string;
+  txReasonCode: string;
   qty: number;
   unitPrice: number;
   amount: number;
@@ -38,12 +41,21 @@ interface InventoryHistoryModel {
 interface TxGridItem {
   warehouseId: string;
   inventoryId: string;
-  txTypeCode: string;
   qty: number;
   unitPrice: number;
   targetWarehouseId: string;
-  txDate: string;
 }
+
+const DEFAULT_TX_REASONS = [
+  { id: 'GENERAL', name: '일반' },
+  { id: 'PURCHASE', name: '구매요청' },
+  { id: 'RETURN', name: '반품/회수' },
+  { id: 'WORK_ORDER', name: '작업지시' },
+  { id: 'DISPOSAL', name: '폐기' },
+  { id: 'TRANSFER', name: '창고이동' },
+  { id: 'PLANT_TRANSFER', name: '플랜트이동' },
+  { id: 'STOCKTAKING', name: '재고실사' },
+];
 
 export default function InventoryTransaction() {
   const user = useAuthStore((s) => s.user);
@@ -52,8 +64,15 @@ export default function InventoryTransaction() {
   // Master lists
   const [statusList, setStatusList] = useState<InventoryStatusModel[]>([]);
   const [historyList, setHistoryList] = useState<InventoryHistoryModel[]>([]);
-  const [warehouses, setWarehouses] = useState<{ id: string; name: string }[]>([]);
+  const [warehouses, setWarehouses] = useState<{ id: string; name: string; plantId?: string | null }[]>([]);
   const [inventories, setInventories] = useState<{ id: string; name: string; unit: string }[]>([]);
+  const [usersList, setUsersList] = useState<{
+    id: string;
+    name: string;
+    departmentId?: string | null;
+    departmentName?: string | null;
+  }[]>([]);
+  const [txReasons, setTxReasons] = useState<{ id: string; name: string }[]>([]);
 
   // Modals & UI states
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
@@ -66,16 +85,52 @@ export default function InventoryTransaction() {
 
   // Transaction Entry Grid
   const [txGrid, setTxGrid] = useState<TxGridItem[]>([]);
+  const [txDate, setTxDate] = useState(todayLocal());
+  const [txTypeCode, setTxTypeCode] = useState('IN');
+  const [txReasonCode, setTxReasonCode] = useState('GENERAL');
 
   const [isLoading, setIsLoading] = useState(false);
+  const [searchType, setSearchType] = useState<'id' | 'title' | 'owner'>('id');
+  const [searchValue, setSearchValue] = useState('');
+  const filteredStatusList = useMemo(() => {
+    const keyword = searchValue.trim().toLowerCase();
+    if (!keyword) return statusList;
+    return statusList.filter((status) => {
+      const warehouse = warehouses.find((candidate) => candidate.id === status.warehouseId);
+      const inventory = inventories.find((candidate) => candidate.id === status.inventoryId);
+      if (searchType === 'id') return `${status.inventoryId} ${warehouse?.name || status.warehouseId}`.toLowerCase().includes(keyword);
+      if (searchType === 'title') return `${inventory?.name || ''} ${status.inventoryId}`.toLowerCase().includes(keyword);
+      return `${warehouse?.name || ''} ${status.warehouseId}`.toLowerCase().includes(keyword);
+    });
+  }, [inventories, searchType, searchValue, statusList, warehouses]);
+  const filteredHistoryList = useMemo(() => {
+    const keyword = searchValue.trim().toLowerCase();
+    if (!keyword) return historyList;
+    return historyList.filter((history) => {
+      if (searchType === 'id') return `${history.docNo || ''} ${history.historyNo}`.toLowerCase().includes(keyword);
+      if (searchType === 'title') {
+        const inventory = inventories.find((candidate) => candidate.id === history.inventoryId);
+        return `${inventory?.name || ''} ${history.inventoryId}`.toLowerCase().includes(keyword);
+      }
+      const owner = usersList.find((candidate) => candidate.id === history.userId);
+      return `${history.userId} ${owner?.name || ''}`.toLowerCase().includes(keyword);
+    });
+  }, [historyList, inventories, searchType, searchValue, usersList]);
 
   const fetchData = async () => {
     try {
-      const [statusRes, historyRes, whRes, invRes] = await Promise.all([
+      const [statusRes, historyRes, whRes, invRes, userRes, reasonRes] = await Promise.all([
         axiosInstance.get('/inventory-tx/status'),
         axiosInstance.get('/inventory-tx/history'),
-        axiosInstance.get('/mdm/warehouses'),
-        axiosInstance.get('/master/inventories')
+        axiosInstance.get('/mdm/refs/warehouses'),
+        axiosInstance.get('/master/refs/inventories'),
+        axiosInstance.get('/mdm/refs/users'),
+        axiosInstance
+          .get('/mdm/codes/items/TX_REASON')
+          .catch((error) => {
+            console.warn('TX_REASON 코드그룹을 찾을 수 없어 기본 거래 사유를 사용합니다.', error);
+            return { data: DEFAULT_TX_REASONS };
+          }),
       ]);
       setStatusList(statusRes.data);
       setHistoryList((historyRes.data || []).map((history: InventoryHistoryModel) => ({
@@ -84,6 +139,14 @@ export default function InventoryTransaction() {
       })));
       setWarehouses(whRes.data);
       setInventories(invRes.data);
+      setUsersList(userRes.data || []);
+      const loadedReasons = reasonRes.data?.length ? reasonRes.data : [];
+      setTxReasons([
+        ...loadedReasons,
+        ...DEFAULT_TX_REASONS.filter(
+          (fallback) => !loadedReasons.some((reason: { id: string }) => reason.id === fallback.id),
+        ),
+      ]);
     } catch (err) {
       console.error(err);
       toast.error(getApiErrorMessage(err, '재고 데이터를 불러오지 못했습니다.'));
@@ -97,13 +160,14 @@ export default function InventoryTransaction() {
       {
         warehouseId: warehouses.length > 0 ? warehouses[0].id : '',
         inventoryId: inventories.length > 0 ? inventories[0].id : '',
-        txTypeCode: 'IN',
         qty: 1,
         unitPrice: 0,
         targetWarehouseId: warehouses.length > 1 ? warehouses[1].id : '',
-        txDate: todayLocal()
       }
     ]);
+    setTxDate(todayLocal());
+    setTxTypeCode('IN');
+    setTxReasonCode('GENERAL');
     setIsTxModalOpen(true);
   };
 
@@ -113,11 +177,9 @@ export default function InventoryTransaction() {
       {
         warehouseId: warehouses.length > 0 ? warehouses[0].id : '',
         inventoryId: inventories.length > 0 ? inventories[0].id : '',
-        txTypeCode: 'IN',
         qty: 1,
         unitPrice: 0,
         targetWarehouseId: warehouses.length > 1 ? warehouses[1].id : '',
-        txDate: todayLocal()
       }
     ]);
   };
@@ -137,9 +199,15 @@ export default function InventoryTransaction() {
 
   const handleSaveTransactions = async () => {
     if (txGrid.length === 0) return;
+    if (!txDate) {
+      toast.error('처리일을 입력하세요.');
+      return;
+    }
     setIsLoading(true);
     try {
-      await axiosInstance.post('/inventory-tx', { items: txGrid });
+      await axiosInstance.post('/inventory-tx', {
+        items: txGrid.map((item) => ({ ...item, txTypeCode, txReasonCode, txDate })),
+      });
       toast.success('재고 처리가 완료되었습니다.');
       setIsTxModalOpen(false);
       fetchData();
@@ -170,8 +238,62 @@ export default function InventoryTransaction() {
 
   const handleOpenSlip = (hist: InventoryHistoryModel) => {
     setSelectedSlip(hist);
-    setIsSlipOpen(true);
+    openSlipPrint(hist);
   };
+
+  const openSlipPrint = (slip: InventoryHistoryModel) => {
+    const printTarget = openPrintWindow({
+      title: `${getSlipTitle(slip.txTypeCode)} 출력`,
+      rootId: 'inventory-slip-print-root',
+    });
+    if (!printTarget) {
+      toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
+      return;
+    }
+    const { printWindow, container } = printTarget;
+    const manager = usersList.find((candidate) => candidate.id === slip.userId);
+    const slipCategory = getSlipCategory(slip.txTypeCode);
+    const slipItems = historyList.filter((history) => {
+      const sameDocument = slip.docNo
+        ? history.docNo === slip.docNo
+        : history.historyNo === slip.historyNo;
+      return sameDocument && getSlipCategory(history.txTypeCode) === slipCategory;
+    });
+    createRoot(container).render(
+      <PrintWindowLayout printWindow={printWindow} contentClassName="max-w-[180mm]">
+        <SlipPrint
+          txTypeCode={slip.txTypeCode}
+          docNo={slip.docNo}
+          txDate={slip.txDate}
+          departmentName={`${manager?.departmentId || '-'} / ${manager?.departmentName || '-'}`}
+          managerName={manager ? `${manager.id} / ${manager.name}` : slip.userId}
+          items={slipItems.map((item) => {
+            const inventory = inventories.find((candidate) => candidate.id === item.inventoryId);
+            return {
+              warehouseName: warehouses.find((candidate) => candidate.id === item.warehouseId)?.name || item.warehouseId,
+              inventoryId: item.inventoryId,
+              inventoryName: inventory?.name || '-',
+              unit: inventory?.unit,
+              qty: item.qty,
+            };
+          })}
+        />
+      </PrintWindowLayout>,
+    );
+    printWindow.focus();
+  };
+
+  const getSlipTitle = (txTypeCode: string) =>
+    txTypeCode === 'IN' ? '입고증'
+      : txTypeCode === 'OUT' ? '출고증'
+        : txTypeCode === 'ADJ' ? '재고전표 (조정)'
+          : '재고전표 (이동)';
+
+  const getSlipCategory = (txTypeCode: string) =>
+    txTypeCode === 'IN' ? 'IN'
+      : txTypeCode === 'OUT' ? 'OUT'
+        : txTypeCode === 'ADJ' ? 'ADJ'
+          : 'MOVE';
 
   const getTxTypeLabel = (code: string) => {
     return {
@@ -181,6 +303,29 @@ export default function InventoryTransaction() {
       MOVE_OUT: '이동출고',
       ADJ: '조정'
     }[code] || code;
+  };
+
+  const getTxReasonLabel = (code?: string) =>
+    txReasons.find((reason) => reason.id === code)?.name || ({
+      GENERAL: '일반',
+      PURCHASE: '구매요청',
+      RETURN: '반품/회수',
+      WORK_ORDER: '작업지시',
+      DISPOSAL: '폐기',
+      TRANSFER: '창고이동',
+      PLANT_TRANSFER: '플랜트이동',
+      STOCKTAKING: '재고실사',
+    }[code || 'GENERAL'] || code || '일반');
+
+  const getTxDisplayLabel = (type: string, reason?: string) =>
+    `${getTxTypeLabel(type)}-${getTxReasonLabel(reason)}`;
+
+  const allowedReasons = (type: string) => {
+    const ids = type === 'IN' ? ['GENERAL', 'RETURN', 'PLANT_TRANSFER']
+      : type === 'OUT' ? ['GENERAL', 'WORK_ORDER', 'DISPOSAL', 'PLANT_TRANSFER']
+      : type === 'MOVE' ? ['TRANSFER'] : ['STOCKTAKING'];
+    const reasons = txReasons.length ? txReasons : DEFAULT_TX_REASONS;
+    return reasons.filter((reason) => ids.includes(reason.id));
   };
 
   const getTxTypeClass = (code: string) => {
@@ -194,9 +339,9 @@ export default function InventoryTransaction() {
   };
 
   const exportStatusCsv = () => {
-    if (statusList.length === 0) return;
+    if (filteredStatusList.length === 0) return;
     const headers = ['창고', '자재코드', '자재명', '단위', '수량', '금액', '평균단가'];
-    const rows = statusList.map(s => {
+    const rows = filteredStatusList.map(s => {
       const inv = inventories.find(i => i.id === s.inventoryId);
       const wh = warehouses.find(w => w.id === s.warehouseId);
       const avg = s.qty > 0 ? (s.amount / s.qty) : 0;
@@ -224,9 +369,9 @@ export default function InventoryTransaction() {
   };
 
   const exportHistoryCsv = () => {
-    if (historyList.length === 0) return;
-    const headers = ['이력번호', '창고', '자재코드', '자재명', '구분', '수량', '단가', '금액', '처리일자', '담당자', '참조번호', '라인'];
-    const rows = historyList.map(h => {
+    if (filteredHistoryList.length === 0) return;
+    const headers = ['이력번호', '창고', '자재코드', '자재명', '유형', '수량', '단가', '금액', '처리일자', '담당자', '참조번호', '라인'];
+    const rows = filteredHistoryList.map(h => {
       const inv = inventories.find(i => i.id === h.inventoryId);
       const wh = warehouses.find(w => w.id === h.warehouseId);
       return [
@@ -234,12 +379,12 @@ export default function InventoryTransaction() {
         wh?.name || h.warehouseId,
         h.inventoryId,
         inv?.name || '-',
-        getTxTypeLabel(h.txTypeCode),
+        getTxDisplayLabel(h.txTypeCode, h.txReasonCode),
         h.qty,
         h.unitPrice,
         h.amount,
         h.txDate,
-        h.userId,
+        usersList.find((candidate) => candidate.id === h.userId)?.name || h.userId,
         h.refNo || '-',
         h.refLineNo || '-',
       ];
@@ -255,6 +400,84 @@ export default function InventoryTransaction() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleListPrint = () => {
+    const isStatus = activeSubTab === 'status';
+    const list = isStatus ? filteredStatusList : filteredHistoryList;
+    if (list.length === 0) {
+      toast.error('인쇄할 목록이 없습니다.');
+      return;
+    }
+    const now = new Date();
+    const pad = (value: number) => String(value).padStart(2, '0');
+    const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    const title = isStatus ? '재고현황' : '재고수불대장';
+    const headers = isStatus
+      ? '<th>보관 창고</th><th>자재코드</th><th>자재명</th><th>단위</th><th>수량</th><th>평균단가</th><th>평가금액</th>'
+      : '<th>전표번호</th><th>창고</th><th>자재코드</th><th>자재명</th><th>유형/사유</th><th>수량</th><th>단가</th><th>금액</th><th>처리일자</th><th>담당자</th><th>참조번호</th>';
+    const rows = isStatus
+      ? filteredStatusList.map((status) => {
+        const inventory = inventories.find((candidate) => candidate.id === status.inventoryId);
+        const warehouse = warehouses.find((candidate) => candidate.id === status.warehouseId);
+        const average = status.qty > 0 ? status.amount / status.qty : 0;
+        return `<tr>
+          <td>${warehouse?.name || status.warehouseId}</td>
+          <td class="mono">${status.inventoryId}</td>
+          <td>${inventory?.name || '-'}</td>
+          <td>${inventory?.unit || '-'}</td>
+          <td class="number">${Number(status.qty).toLocaleString()}</td>
+          <td class="number">${Math.round(average).toLocaleString()}</td>
+          <td class="number">${Math.round(Number(status.amount)).toLocaleString()}</td>
+        </tr>`;
+      }).join('')
+      : filteredHistoryList.map((history) => {
+        const inventory = inventories.find((candidate) => candidate.id === history.inventoryId);
+        const warehouse = warehouses.find((candidate) => candidate.id === history.warehouseId);
+        const owner = usersList.find((candidate) => candidate.id === history.userId);
+        return `<tr>
+          <td class="mono">${history.docNo || history.historyNo}</td>
+          <td>${warehouse?.name || history.warehouseId}</td>
+          <td class="mono">${history.inventoryId}</td>
+          <td>${inventory?.name || '-'}</td>
+          <td>${getTxDisplayLabel(history.txTypeCode, history.txReasonCode)}</td>
+          <td class="number">${Number(history.qty).toLocaleString()}</td>
+          <td class="number">${Math.round(Number(history.unitPrice)).toLocaleString()}</td>
+          <td class="number">${Math.round(Number(history.amount)).toLocaleString()}</td>
+          <td>${history.txDate || '-'}</td>
+          <td>${owner?.name || history.userId}</td>
+          <td class="mono">${history.refNo || '-'}</td>
+        </tr>`;
+      }).join('');
+    const printWindow = window.open('', '_blank', 'width=1200,height=800');
+    if (!printWindow) {
+      toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
+      return;
+    }
+    printWindow.document.write(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>${title} 목록 - 인쇄</title>
+<style>
+@page { size: A4 landscape; margin: 10mm 10mm 14mm 10mm; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #000; padding: 10mm; }
+.no-print { text-align: right; margin-bottom: 12px; }
+.no-print button { padding: 8px 20px; background: #2563eb; color: #fff; border: 0; border-radius: 6px; cursor: pointer; font-size: 10pt; }
+.print-info { display: flex; justify-content: space-between; font-size: 8pt; color: #666; border-bottom: 1px solid #ccc; padding-bottom: 2mm; margin-bottom: 4mm; }
+h1 { text-align: center; font-size: 14pt; margin-bottom: 4mm; border-bottom: 2px solid #000; padding-bottom: 3mm; }
+table { width: 100%; border-collapse: collapse; font-size: 8pt; }
+th, td { border: 1px solid #333; padding: 4px 6px; text-align: center; }
+th { background: #eee; font-weight: 600; }
+.mono { font-family: monospace; }
+.number { text-align: right; font-family: monospace; }
+@media print { .no-print { display: none; } }
+</style></head><body>
+<div class="no-print"><button onclick="window.print()">인쇄</button></div>
+<div class="print-info"><span>회사: ${user?.companyName || user?.companyId || 'CMMS'}</span><span>출력자: ${user?.name || '-'} | 출력일시: ${stamp}</span></div>
+<h1>${title}</h1>
+<table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table>
+</body></html>`);
+    printWindow.document.close();
+    printWindow.focus();
   };
 
   return (
@@ -278,7 +501,7 @@ export default function InventoryTransaction() {
           </button>
 
           <button
-            onClick={() => window.print()}
+            onClick={handleListPrint}
             className="bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Printer size={14} />
@@ -325,11 +548,19 @@ export default function InventoryTransaction() {
 
       {/* Main Grid View */}
       <div className={`bg-slate-900 border border-slate-800 rounded-xl p-6 print:border-0 print:bg-transparent print:p-0 print-landscape ${isSlipOpen ? 'print:hidden' : ''}`}>
+        <div className="mb-4 flex gap-2 print:hidden">
+          <select value={searchType} onChange={(event) => setSearchType(event.target.value as typeof searchType)} className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300 outline-none">
+            <option value="id">{activeSubTab === 'history' ? '문서번호' : '자재/창고코드'}</option>
+            <option value="title">자재명</option>
+            <option value="owner">{activeSubTab === 'history' ? '담당자' : '창고명'}</option>
+          </select>
+          <input value={searchValue} onChange={(event) => setSearchValue(event.target.value)} placeholder="검색어를 입력하세요" className="flex-1 min-w-[200px] bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300 outline-none" />
+        </div>
         
         {/* Print Only Header */}
         <PrintHeader />
         <h1 className="hidden print:block text-center text-xl font-bold tracking-widest text-black border-b-2 border-black pb-2 mb-4">
-          {activeSubTab === 'status' ? '창 고 별 재 고 현 황' : '재 고 수 불 이 력'}
+          {activeSubTab === 'status' ? '재 고 현 황' : '재 고 수 불 대 장'}
         </h1>
 
         <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/40 print:border-slate-300 print:bg-white print:rounded-none">
@@ -349,10 +580,10 @@ export default function InventoryTransaction() {
                 </tr>
               </thead>
               <tbody>
-                {statusList.length === 0 ? (
+                {filteredStatusList.length === 0 ? (
                   <tr><td colSpan={7} className="p-8 text-center text-slate-600 print:text-slate-400">등록된 재고 현황이 없습니다.</td></tr>
                 ) : (
-                  statusList.map((s, idx) => {
+                  filteredStatusList.map((s, idx) => {
                     const inv = inventories.find(i => i.id === s.inventoryId);
                     const wh = warehouses.find(w => w.id === s.warehouseId);
                     const avg = s.qty > 0 ? (s.amount / s.qty) : 0;
@@ -382,7 +613,7 @@ export default function InventoryTransaction() {
                   <th className="p-3 font-semibold">창고명</th>
                   <th className="p-3 font-semibold">자재코드</th>
                   <th className="p-3 font-semibold">자재명</th>
-                  <th className="p-3 font-semibold">구분</th>
+                  <th className="p-3 font-semibold">유형</th>
                   <th className="p-3 font-semibold text-right">처리 수량</th>
                   <th className="p-3 font-semibold text-right">단가</th>
                   <th className="p-3 font-semibold text-right">처리 금액</th>
@@ -390,39 +621,40 @@ export default function InventoryTransaction() {
                   <th className="p-3 font-semibold">담당자</th>
                   <th className="p-3 font-semibold">연계참조번호</th>
                   <th className="p-3 font-semibold w-16 text-center">라인</th>
-                  <th className="p-3 font-semibold text-right print:hidden">전표</th>
                 </tr>
               </thead>
               <tbody>
-                {historyList.length === 0 ? (
-                  <tr><td colSpan={13} className="p-8 text-center text-slate-600 print:text-slate-400">재고 거래 이력이 없습니다.</td></tr>
+                {filteredHistoryList.length === 0 ? (
+                  <tr><td colSpan={12} className="p-8 text-center text-slate-600 print:text-slate-400">재고 거래 이력이 없습니다.</td></tr>
                 ) : (
-                  historyList.map((h) => {
+                  filteredHistoryList.map((h) => {
                     const inv = inventories.find(i => i.id === h.inventoryId);
                     const wh = warehouses.find(w => w.id === h.warehouseId);
                     return (
                       <tr key={h.historyNo} className="border-b border-slate-900 hover:bg-slate-900/30 text-slate-300 print:border-slate-200 print:text-slate-800 print:hover:bg-transparent">
-                        <td className="p-3 font-mono text-slate-300 print:text-slate-800" title={`이력번호 ${h.historyNo}`}>{h.docNo || `(NO.${h.historyNo})`}</td>
+                        <td className="p-3 font-mono" title={`이력번호 ${h.historyNo}`}>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenSlip(h)}
+                            className="bg-transparent border-0 p-0 text-blue-400 hover:text-blue-300 hover:underline font-mono cursor-pointer"
+                            title={`${h.docNo || `NO.${h.historyNo}`} 전표 출력`}
+                          >
+                            {h.docNo || `(NO.${h.historyNo})`}
+                          </button>
+                        </td>
                         <td className="p-3">{wh?.name || h.warehouseId}</td>
                         <td className="p-3 font-mono text-slate-400">{h.inventoryId}</td>
                         <td className="p-3">{inv?.name || '-'}</td>
-                        <td className={`p-3 ${getTxTypeClass(h.txTypeCode)}`}>{getTxTypeLabel(h.txTypeCode)}</td>
+                        <td className={`p-3 ${getTxTypeClass(h.txTypeCode)}`}>
+                          {getTxDisplayLabel(h.txTypeCode, h.txReasonCode)}
+                        </td>
                         <td className="p-3 text-right font-mono">{h.qty.toLocaleString()}</td>
                         <td className="p-3 text-right font-mono">{Math.round(h.unitPrice).toLocaleString()} 원</td>
                         <td className="p-3 text-right font-mono">{Math.round(h.amount).toLocaleString()} 원</td>
                         <td className="p-3 font-mono text-slate-400">{h.txDate}</td>
-                        <td className="p-3">{h.userId}</td>
+                        <td className="p-3">{usersList.find((candidate) => candidate.id === h.userId)?.name || h.userId}</td>
                         <td className="p-3 font-mono text-slate-500">{h.refNo || '-'}</td>
                         <td className="p-3 text-center font-mono text-xs text-slate-500">{h.refLineNo || '-'}</td>
-                        <td className="p-3 text-right print:hidden">
-                          <button
-                            onClick={() => handleOpenSlip(h)}
-                            className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-blue-400 transition-colors border-0 cursor-pointer bg-transparent"
-                            title="전표 보기 및 인쇄"
-                          >
-                            <Printer size={13} />
-                          </button>
-                        </td>
                       </tr>
                     );
                   })
@@ -439,8 +671,13 @@ export default function InventoryTransaction() {
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-5xl max-h-[85vh] flex flex-col shadow-2xl">
             {/* Modal Header */}
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0">
-              <h2 className="text-lg font-bold text-slate-200">재고 입출고 및 이동 일괄 등록</h2>
+            <div className="p-6 border-b border-slate-800 flex justify-between items-start shrink-0">
+              <div>
+                <h2 className="text-lg font-bold text-slate-200">재고 입출고 및 이동 일괄 등록</h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  다른 플랜트 간 이동은 보내는 담당자가 출고 / 플랜트이동, 받는 담당자가 입고 / 플랜트이동으로 각각 처리하세요.
+                </p>
+              </div>
               <button
                 onClick={() => setIsTxModalOpen(false)}
                 className="text-slate-500 hover:text-slate-300 p-1 hover:bg-slate-800 rounded transition-colors border-0 cursor-pointer bg-transparent"
@@ -450,13 +687,48 @@ export default function InventoryTransaction() {
             </div>
 
             {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-slate-400">그리드 상에서 여러 품목의 재고 트랜잭션을 일괄 작성 후 반영합니다.</span>
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                <div><span className="text-slate-500 block mb-0.5">전표번호</span><span className="font-mono font-semibold text-slate-300">(처리 시 자동발행)</span></div>
+                <div><span className="text-slate-500 block mb-0.5">작성일</span><span className="font-mono text-slate-300">{todayLocal()}</span></div>
+                <div><span className="text-slate-500 block mb-0.5">부서</span><span className="text-slate-300">{user?.departmentId || '-'} / {usersList.find((candidate) => candidate.id === user?.id)?.departmentName || '-'}</span></div>
+                <div><span className="text-slate-500 block mb-0.5">작성자</span><span className="text-slate-300">{user?.id || '-'} / {user?.name || '-'}</span></div>
+                <label>
+                  <span className="text-slate-500 block mb-1">처리일</span>
+                  <input type="date" value={txDate} onChange={(event) => setTxDate(event.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-slate-200 outline-none focus:border-blue-500" />
+                </label>
+                <label>
+                  <span className="text-slate-500 block mb-1">구분</span>
+                  <select
+                    value={txTypeCode}
+                    onChange={(event) => {
+                      const type = event.target.value;
+                      setTxTypeCode(type);
+                      setTxReasonCode(type === 'MOVE' ? 'TRANSFER' : type === 'ADJ' ? 'STOCKTAKING' : 'GENERAL');
+                    }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-slate-200 outline-none focus:border-blue-500"
+                  >
+                    <option value="IN">입고 (IN)</option>
+                    <option value="OUT">출고 (OUT)</option>
+                    <option value="MOVE">이동 (MOVE)</option>
+                    <option value="ADJ">조정 (ADJ)</option>
+                  </select>
+                </label>
+                <label className="lg:col-span-2">
+                  <span className="text-slate-500 block mb-1">거래 사유</span>
+                  <select value={txReasonCode} onChange={(event) => setTxReasonCode(event.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-xs text-slate-200 outline-none focus:border-blue-500">
+                    {allowedReasons(txTypeCode).map((reason) => (
+                      <option key={reason.id} value={reason.id}>{reason.name}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="flex justify-end items-center">
                 <button
                   type="button"
                   onClick={handleAddGridRow}
-                  className="bg-slate-850 hover:bg-slate-800 border border-slate-800 text-blue-400 rounded-lg px-2.5 py-1.5 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                  className="text-blue-400 text-xs font-semibold bg-transparent border-0 cursor-pointer flex items-center gap-1"
                 >
                   <Plus size={12} />
                   <span>행 추가</span>
@@ -467,34 +739,20 @@ export default function InventoryTransaction() {
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="bg-slate-900 text-slate-400 border-b border-slate-800 select-none">
-                      <th className="p-3 font-semibold w-24">구분</th>
-                      <th className="p-3 font-semibold w-40">출발 창고</th>
+                      <th className="p-3 font-semibold w-40">창고</th>
                       <th className="p-3 font-semibold w-48">자재 (재고품목)</th>
                       <th className="p-3 font-semibold w-24 text-right">수량</th>
                       <th className="p-3 font-semibold w-32 text-right">단가 (입고 시)</th>
-                      <th className="p-3 font-semibold w-40">도착 창고 (이동 시)</th>
-                      <th className="p-3 font-semibold w-32">처리일자</th>
+                      <th className="p-3 font-semibold w-40">받는 창고 (이동 시)</th>
                       <th className="p-3 font-semibold w-12 text-center">삭제</th>
                     </tr>
                   </thead>
                   <tbody>
                     {txGrid.length === 0 ? (
-                      <tr><td colSpan={8} className="p-8 text-center text-slate-600">추가된 트랜잭션 행이 없습니다.</td></tr>
+                      <tr><td colSpan={6} className="p-8 text-center text-slate-600">추가된 트랜잭션 행이 없습니다.</td></tr>
                     ) : (
                       txGrid.map((row, idx) => (
                         <tr key={idx} className="border-b border-slate-900 hover:bg-slate-900/30 text-slate-300">
-                          <td className="p-2">
-                            <select
-                              value={row.txTypeCode}
-                              onChange={(e) => handleGridChange(idx, 'txTypeCode', e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-850 focus:border-blue-500 rounded py-1.5 px-2 text-xs text-slate-200 outline-none"
-                            >
-                              <option value="IN">입고 (IN)</option>
-                              <option value="OUT">출고 (OUT)</option>
-                              <option value="MOVE">이동 (MOVE)</option>
-                              <option value="ADJ">조정 (ADJ)</option>
-                            </select>
-                          </td>
                           <td className="p-2">
                             <select
                               value={row.warehouseId}
@@ -531,7 +789,7 @@ export default function InventoryTransaction() {
                             <input
                               type="number"
                               min="0"
-                              disabled={row.txTypeCode === 'OUT' || row.txTypeCode === 'MOVE'}
+                              disabled={txTypeCode === 'OUT' || txTypeCode === 'MOVE'}
                               value={row.unitPrice}
                               onChange={(e) => handleGridChange(idx, 'unitPrice', parseInt(e.target.value) || 0)}
                               className="w-full bg-slate-950 border border-slate-850 focus:border-blue-500 rounded py-1.5 px-2 text-right text-xs text-slate-200 outline-none disabled:opacity-30"
@@ -539,23 +797,21 @@ export default function InventoryTransaction() {
                           </td>
                           <td className="p-2">
                             <select
-                              disabled={row.txTypeCode !== 'MOVE'}
+                              disabled={txTypeCode !== 'MOVE'}
                               value={row.targetWarehouseId}
                               onChange={(e) => handleGridChange(idx, 'targetWarehouseId', e.target.value)}
                               className="w-full bg-slate-950 border border-slate-850 focus:border-blue-500 rounded py-1.5 px-2 text-xs text-slate-300 outline-none disabled:opacity-30"
                             >
-                              {warehouses.map(w => (
+                              {warehouses
+                                .filter((warehouse) => {
+                                  const source = warehouses.find((candidate) => candidate.id === row.warehouseId);
+                                  return warehouse.id !== row.warehouseId
+                                    && warehouse.plantId === source?.plantId;
+                                })
+                                .map(w => (
                                 <option key={w.id} value={w.id}>{w.name}</option>
-                              ))}
+                                ))}
                             </select>
-                          </td>
-                          <td className="p-2">
-                            <input
-                              type="date"
-                              value={row.txDate}
-                              onChange={(e) => handleGridChange(idx, 'txDate', e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-850 focus:border-blue-500 rounded py-1.5 px-2 text-xs text-slate-200 outline-none"
-                            />
                           </td>
                           <td className="p-2 text-center">
                             <button
@@ -586,9 +842,9 @@ export default function InventoryTransaction() {
               <button
                 onClick={handleSaveTransactions}
                 disabled={isLoading || txGrid.length === 0}
-                className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-5 text-xs font-semibold transition-all cursor-pointer border-0 disabled:opacity-50"
+                className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer border-0 disabled:opacity-50"
               >
-                저장 및 재고 반영 (평균단가 계산)
+                저장
               </button>
             </div>
           </div>
@@ -638,7 +894,12 @@ export default function InventoryTransaction() {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl print:border-0 print:shadow-none print:w-full print:h-full">
             {/* Header */}
             <div className="p-6 border-b border-slate-800 flex justify-between items-center print:hidden">
-              <h2 className="text-lg font-bold text-slate-200">재고 거래 전표 (Slip)</h2>
+              <h2 className="text-lg font-bold text-slate-200">
+                {selectedSlip.txTypeCode === 'IN' ? '입고증'
+                  : selectedSlip.txTypeCode === 'OUT' ? '출고증'
+                  : selectedSlip.txTypeCode === 'ADJ' ? '재고전표 (조정)'
+                  : '재고전표 (이동)'}
+              </h2>
               <button onClick={() => setIsSlipOpen(false)} className="text-slate-500 hover:text-slate-300 border-0 cursor-pointer bg-transparent"><X size={20} /></button>
             </div>
 
@@ -646,11 +907,11 @@ export default function InventoryTransaction() {
             <div className="p-8 space-y-6 text-xs text-slate-300 print:hidden">
               {/* 전표 양식 디자인 */}
               <div className="text-center mb-8 border-b-2 border-slate-800 pb-4">
-                <h1 className="text-2xl font-extrabold tracking-widest text-slate-900 uppercase">
+                <h1 className="text-2xl font-extrabold tracking-widest text-slate-200 uppercase">
                   {selectedSlip.txTypeCode === 'IN' ? '입 고 증'
                     : selectedSlip.txTypeCode === 'OUT' ? '출 고 증'
-                    : selectedSlip.txTypeCode === 'ADJ' ? '재 고 조 정 전 표'
-                    : '재 고 이 동 전 표'}
+                    : selectedSlip.txTypeCode === 'ADJ' ? '재 고 전 표 (조 정)'
+                    : '재 고 전 표 (이 동)'}
                 </h1>
                 <span className="text-[11px] text-slate-700 font-mono block mt-1 font-bold">전표번호: {selectedSlip.docNo || '-'}</span>
                 <span className="text-[9px] text-slate-500 font-mono block">이력 NO.{selectedSlip.historyNo}</span>
@@ -707,9 +968,9 @@ export default function InventoryTransaction() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <span className="text-slate-500 block">거래 구분</span>
+                    <span className="text-slate-500 block">거래 유형</span>
                     <span className="bg-slate-850 px-2 py-0.5 rounded text-[10px] font-semibold text-slate-300 print:border print:border-slate-300">
-                      {getTxTypeLabel(selectedSlip.txTypeCode)} ({selectedSlip.txTypeCode})
+                      {getTxDisplayLabel(selectedSlip.txTypeCode, selectedSlip.txReasonCode)}
                     </span>
                   </div>
                   <div>
@@ -730,11 +991,13 @@ export default function InventoryTransaction() {
               {/* Signature layout placeholder for formal slips */}
               <div className="grid grid-cols-2 border border-slate-700 text-center text-[10px] rounded-xl print:border-slate-400 print:rounded-none">
                 <div className="p-3 border-r border-slate-700 print:border-slate-400">
-                  <span className="text-slate-500 block mb-3">인도인 (지출자)</span>
+                  <span className="text-slate-500 block mb-3">
+                    {selectedSlip.txTypeCode === 'IN' ? '공급자' : '인도자'}
+                  </span>
                   <div className="h-6 border-b border-dashed border-slate-800 mx-8 print:border-slate-300"></div>
                 </div>
                 <div className="p-3">
-                  <span className="text-slate-500 block mb-3">인수인 (수령자)</span>
+                  <span className="text-slate-500 block mb-3">인수자</span>
                   <div className="h-6 border-b border-dashed border-slate-800 mx-8 print:border-slate-300"></div>
                 </div>
               </div>
@@ -746,25 +1009,6 @@ export default function InventoryTransaction() {
               </div>
             </div>
 
-            {/* 전용 인쇄뷰 (흑백) */}
-            <SlipPrint
-              txTypeCode={selectedSlip.txTypeCode}
-              txTypeLabel={getTxTypeLabel(selectedSlip.txTypeCode)}
-              docNo={selectedSlip.docNo}
-              historyNo={selectedSlip.historyNo}
-              txDate={selectedSlip.txDate}
-              companyId={selectedSlip.companyId}
-              warehouseName={warehouses.find((w) => w.id === selectedSlip.warehouseId)?.name || selectedSlip.warehouseId}
-              inventoryId={selectedSlip.inventoryId}
-              inventoryName={inventories.find((i) => i.id === selectedSlip.inventoryId)?.name || '-'}
-              qty={selectedSlip.qty}
-              unitPrice={selectedSlip.unitPrice}
-              amount={selectedSlip.amount}
-              userId={selectedSlip.userId}
-              refNo={selectedSlip.refNo}
-              refModule={selectedSlip.refModule}
-            />
-
             {/* Footer buttons */}
             <div className="p-6 border-t border-slate-800 flex justify-end gap-2 shrink-0 print:hidden">
               <button
@@ -774,31 +1018,9 @@ export default function InventoryTransaction() {
               >
                 닫기
               </button>
-              {/* IN/OUT 전표는 역분개 취소 가능 — 후속 거래 없을 때만(서버 검증) */}
-              {(selectedSlip.txTypeCode === 'IN' || selectedSlip.txTypeCode === 'OUT') && selectedSlip.docNo && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const label = selectedSlip.txTypeCode === 'IN' ? '입고' : '출고';
-                    if (!(await requestConfirmation(`전표 ${selectedSlip.docNo}을(를) 역분개로 취소합니다.\n이 ${label} 이후 동일 품목·창고에 거래가 없을 때만 가능합니다. 진행할까요?`))) return;
-                    try {
-                      await axiosInstance.post(`/procurement/slips/cancel/${encodeURIComponent(selectedSlip.docNo!)}`);
-                      toast.success(`${label} 전표가 역분개로 취소되었습니다.`);
-                      setIsSlipOpen(false);
-                      const res = await axiosInstance.get('/inventory-tx/history');
-                      setHistoryList(res.data || []);
-                    } catch (e: any) {
-                      toast.error(e.response?.data?.message || '취소 실패');
-                    }
-                  }}
-                  className="bg-rose-700 hover:bg-rose-600 text-white rounded-lg py-2 px-4 text-xs font-semibold cursor-pointer border-0"
-                >
-                  {selectedSlip.txTypeCode === 'IN' ? '입고' : '출고'} 취소(역분개)
-                </button>
-              )}
               <button
                 type="button"
-                onClick={() => window.print()}
+                onClick={() => openSlipPrint(selectedSlip)}
                 className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-5 text-xs font-semibold flex items-center gap-1.5 cursor-pointer border-0 shadow-lg shadow-blue-900/20"
               >
                 <Printer size={14} />

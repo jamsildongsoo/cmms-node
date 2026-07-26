@@ -9,7 +9,12 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { WorkOrderService, WorkOrderSaveRequest } from './work-order.service';
+import { WorkOrderService } from './work-order.service';
+import {
+  SaveWorkOrderDto,
+  WorkOrderDetailsDto,
+  WorkOrderResponseDto,
+} from './dto/work-order.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionGuard, Permission, PermissionSave } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
@@ -25,7 +30,7 @@ export class WorkOrderController {
   async getWorkOrders(
     @Query('searchType') searchType?: string,
     @Query('searchValue') searchValue?: string,
-  ): Promise<any[]> {
+  ): Promise<WorkOrderResponseDto[]> {
     const { companyId, userId } = getTenantContext();
     return this.workOrderService.getWorkOrdersByCompany(companyId, userId, searchType, searchValue);
   }
@@ -35,14 +40,16 @@ export class WorkOrderController {
   async getWorkOrderDetails(
     @Query('plantId') plantId: string,
     @Query('id') id: string,
-  ): Promise<WorkOrderSaveRequest> {
+  ): Promise<WorkOrderDetailsDto> {
     const { companyId, userId } = getTenantContext();
     return this.workOrderService.getWorkOrderDetails(companyId, plantId, id, userId);
   }
 
   @Post()
   @PermissionSave(AppModule.WO, 'workOrder.status')
-  async saveWorkOrder(@Body() request: WorkOrderSaveRequest): Promise<any> {
+  async saveWorkOrder(
+    @Body() request: SaveWorkOrderDto,
+  ): Promise<WorkOrderResponseDto> {
     const { companyId, userId } = getTenantContext();
     return this.workOrderService.saveWorkOrder(companyId, request, userId);
   }

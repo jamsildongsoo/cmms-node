@@ -2,6 +2,13 @@ import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { Department } from './department.entity';
 import { Equipment } from './equipment.entity';
 import { BaseEntity } from './base.entity';
+import { User } from './users.entity';
+
+export interface WorkPermitCheckItem {
+  question: string;
+  checked: boolean;
+  remarks: string;
+}
 
 @Entity('work_permit')
 export class WorkPermit extends BaseEntity {
@@ -30,10 +37,10 @@ export class WorkPermit extends BaseEntity {
   permitTypeCodes!: string;
 
   @Column({ name: 'start_at', type: 'timestamptz', nullable: true })
-  startAt!: Date | string | null;
+  startAt!: Date | null;
 
   @Column({ name: 'end_at', type: 'timestamptz', nullable: true })
-  endAt!: Date | string | null;
+  endAt!: Date | null;
 
   @Column({ name: 'department_id', length: 50 })
   departmentId!: string;
@@ -51,25 +58,25 @@ export class WorkPermit extends BaseEntity {
   safetyMeasures!: string | null;
 
   @Column({ name: 'json_general', type: 'jsonb', nullable: true })
-  jsonGeneral!: any;
+  jsonGeneral!: WorkPermitCheckItem[] | null;
 
   @Column({ name: 'json_fire', type: 'jsonb', nullable: true })
-  jsonFire!: any;
+  jsonFire!: WorkPermitCheckItem[] | null;
 
   @Column({ name: 'json_confined', type: 'jsonb', nullable: true })
-  jsonConfined!: any;
+  jsonConfined!: WorkPermitCheckItem[] | null;
 
   @Column({ name: 'json_electric', type: 'jsonb', nullable: true })
-  jsonElectric!: any;
+  jsonElectric!: WorkPermitCheckItem[] | null;
 
   @Column({ name: 'json_high_place', type: 'jsonb', nullable: true })
-  jsonHighPlace!: any;
+  jsonHighPlace!: WorkPermitCheckItem[] | null;
 
   @Column({ name: 'json_excavation', type: 'jsonb', nullable: true })
-  jsonExcavation!: any;
+  jsonExcavation!: WorkPermitCheckItem[] | null;
 
   @Column({ name: 'json_heavy_load', type: 'jsonb', nullable: true })
-  jsonHeavyLoad!: any;
+  jsonHeavyLoad!: WorkPermitCheckItem[] | null;
 
   @Column({ name: 'remarks', type: 'text', nullable: true })
   remarks!: string | null;
@@ -88,4 +95,26 @@ export class WorkPermit extends BaseEntity {
 
   @Column({ name: 'status', length: 1, default: 'T' })
   status!: string;
+
+  @ManyToOne(() => Equipment, { createForeignKeyConstraints: false })
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'plant_id', referencedColumnName: 'plantId' },
+    { name: 'equipment_id', referencedColumnName: 'id' },
+  ])
+  equipment?: Equipment;
+
+  @ManyToOne(() => Department, { createForeignKeyConstraints: false })
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'department_id', referencedColumnName: 'id' },
+  ])
+  department?: Department;
+
+  @ManyToOne(() => User, { createForeignKeyConstraints: false })
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'supervisor_id', referencedColumnName: 'id' },
+  ])
+  supervisor?: User;
 }

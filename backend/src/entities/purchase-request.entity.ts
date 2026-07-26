@@ -1,5 +1,6 @@
-import { Entity, PrimaryColumn, Column } from 'typeorm';
+import { Entity, PrimaryColumn, Column, OneToMany } from 'typeorm';
 import { BaseEntity } from './base.entity';
+import { PurchaseRequestItem } from './purchase-request-item.entity';
 
 @Entity('purchase_request')
 export class PurchaseRequest extends BaseEntity {
@@ -19,7 +20,10 @@ export class PurchaseRequest extends BaseEntity {
   requesterId!: string;
 
   @Column({ name: 'request_date', type: 'date' })
-  requestDate!: Date | string;
+  requestDate!: string;
+
+  @Column({ length: 200, default: '' })
+  title!: string;
 
   @Column({ type: 'varchar',  name: 'request_type', length: 50, nullable: true })
   requestType!: string | null;
@@ -27,21 +31,33 @@ export class PurchaseRequest extends BaseEntity {
   @Column({ type: 'varchar',  name: 'vendor_id', length: 50, nullable: true })
   vendorId!: string | null;
 
+  @Column({ type: 'varchar', name: 'purchase_manager', length: 100, nullable: true })
+  purchaseManager!: string | null;
+
+  @Column({ type: 'varchar', name: 'purchase_manager_contact', length: 100, nullable: true })
+  purchaseManagerContact!: string | null;
+
   @Column({ name: 'order_date', type: 'date', nullable: true })
-  orderDate!: Date | string | null;
+  orderDate!: string | null;
 
   @Column({ name: 'eta_date', type: 'date', nullable: true })
-  etaDate!: Date | string | null;
+  etaDate!: string | null;
 
   @Column({ name: 'ship_start_date', type: 'date', nullable: true })
-  shipStartDate!: Date | string | null;
+  shipStartDate!: string | null;
 
   @Column({ name: 'status', length: 1, default: 'T' })
   status!: string;
+
+  @Column({ type: 'varchar', name: 'approval_id', length: 50, nullable: true })
+  approvalId!: string | null;
 
   @Column({ type: 'varchar',  name: 'proc_status', length: 1, nullable: true })
   procStatus!: string | null;
 
   @Column({ name: 'remarks', type: 'text', nullable: true })
   remarks!: string | null;
+
+  @OneToMany(() => PurchaseRequestItem, (item) => item.request)
+  items?: PurchaseRequestItem[];
 }

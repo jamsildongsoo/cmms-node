@@ -1,6 +1,6 @@
 import {
   Wrench, Package, ClipboardList, FileSignature,
-  Layers, Bell, User, LayoutDashboard, ShieldCheck, ShoppingCart
+  Layers, Bell, User, LayoutDashboard, ShieldCheck, ShoppingCart, PackageCheck
 } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 
@@ -11,9 +11,11 @@ interface SidebarProps {
 
 export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const user = useAuthStore((s) => s.user);
+  const canRequestPurchase = user?.permissions?.PUR?.R === 'Y' || user?.permissions?.PUR?.C === 'Y';
+  const canManagePurchase = user?.permissions?.PUR?.A === 'Y';
+  const canReceivePurchase = user?.permissions?.STK?.C === 'Y';
 
   const menuItems: any[] = [
-    { id: 'dashboard', label: '대시보드', icon: LayoutDashboard },
     { 
       category: '기준 정보', 
       items: [
@@ -28,7 +30,9 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
         { id: 'pm', label: '예방점검', icon: ClipboardList },
         { id: 'wo', label: '작업지시서', icon: ClipboardList },
         { id: 'wp', label: '작업허가서', icon: FileSignature },
-        { id: 'procurement', label: '구매', icon: ShoppingCart },
+        ...(canRequestPurchase ? [{ id: 'procurement-request', label: '구매요청', icon: ShoppingCart }] : []),
+        ...(canManagePurchase ? [{ id: 'procurement-management', label: '구매관리', icon: ShoppingCart }] : []),
+        ...(canReceivePurchase ? [{ id: 'purchase-receipt', label: '구매입고', icon: PackageCheck }] : []),
         { id: 'stock', label: '재고 입출고/이동', icon: Layers }
       ]
     },

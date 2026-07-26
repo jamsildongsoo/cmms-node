@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
 import axiosInstance from '../api/axios';
-import { useAuthStore } from '../store/useAuthStore';
 import FileUpload from '../components/FileUpload';
 import RichTextEditor from '../components/RichTextEditor';
 import RichTextViewer from '../components/RichTextViewer';
@@ -13,8 +12,9 @@ import {
 } from '../types/richText';
 import { formatDateTime } from '../utils/datetime';
 import { getApiErrorMessage } from '../utils/apiError';
+import ListBadge from '../components/ListBadge';
 import {
-  Plus, Trash, X, Megaphone, MessageSquare, ChevronRight
+  Plus, Trash, X, Megaphone, MessageSquare
 } from 'lucide-react';
 
 interface BoardModel {
@@ -41,7 +41,6 @@ interface BoardCommentModel {
 }
 
 export default function Board() {
-  const user = useAuthStore((s) => s.user);
 
   const [posts, setPosts] = useState<BoardModel[]>([]);
   
@@ -183,7 +182,6 @@ export default function Board() {
     try {
       const payload = {
         boardId: selectedPost.id,
-        authorId: user?.id || 'GUEST',
         content: newCommentContent
       };
       await axiosInstance.post('/board/comment', payload);
@@ -244,12 +242,11 @@ export default function Board() {
                 <th className="p-3 font-semibold">게시글 제목</th>
                 <th className="p-3 font-semibold w-32">기안자</th>
                 <th className="p-3 font-semibold w-36">작성일자</th>
-                <th className="p-3 font-semibold w-16 text-right">상세</th>
               </tr>
             </thead>
             <tbody>
               {posts.length === 0 ? (
-                <tr><td colSpan={6} className="p-8 text-center text-slate-600">등록된 게시물이 없습니다.</td></tr>
+                <tr><td colSpan={5} className="p-8 text-center text-slate-600">등록된 게시물이 없습니다.</td></tr>
               ) : (
                 posts.map((post) => {
                   const isNotice = post.noticeYn === 'Y';
@@ -264,13 +261,9 @@ export default function Board() {
                         {isNotice ? <Megaphone size={13} className="text-amber-500 mx-auto" /> : post.id}
                       </td>
                       <td className="p-3 text-center">
-                        <span className={`px-2 py-0.5 rounded text-[10px] ${
-                          isNotice 
-                            ? 'bg-amber-950 text-amber-400 border border-amber-900' 
-                            : 'bg-slate-950 text-slate-400 border border-slate-800'
-                        }`}>
+                        <ListBadge>
                           {isNotice ? '공지' : '일반'}
-                        </span>
+                        </ListBadge>
                       </td>
                       <td className="p-3">
                         <div className="flex items-center gap-1.5">
@@ -281,14 +274,6 @@ export default function Board() {
                       </td>
                       <td className="p-3 text-slate-400">{formatAuthor(post)}</td>
                       <td className="p-3 font-mono text-slate-500">{formatDateTime(post.createdAt)}</td>
-                      <td className="p-3 text-right">
-                        <button
-                          onClick={() => handleOpenDetail(post)}
-                          className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-blue-400 transition-colors border-0 cursor-pointer bg-transparent"
-                        >
-                          <ChevronRight size={16} />
-                        </button>
-                      </td>
                     </tr>
                   );
                 })
@@ -326,13 +311,13 @@ export default function Board() {
                 <div className="flex gap-1.5">
                   <button 
                     onClick={() => handleOpenEdit(selectedPost)}
-                    className="bg-slate-850 hover:bg-slate-800 text-slate-300 border border-slate-800 px-2.5 py-1.5 rounded text-[10px] font-bold cursor-pointer"
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg text-[10px] font-semibold cursor-pointer"
                   >
                     수정
                   </button>
                   <button 
                     onClick={() => handleDeletePost(selectedPost)}
-                    className="bg-rose-950 hover:bg-rose-900 text-rose-400 border border-rose-900 px-2.5 py-1.5 rounded text-[10px] font-bold cursor-pointer"
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg text-[10px] font-semibold cursor-pointer"
                   >
                     삭제
                   </button>
@@ -479,7 +464,7 @@ export default function Board() {
 
             <div className="p-6 border-t border-slate-800 flex justify-end gap-2 shrink-0">
               <button onClick={() => setIsFormOpen(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg py-2 px-4 border-0 cursor-pointer">취소</button>
-              <button onClick={handleSavePost} disabled={isLoading || fileUploading} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-4 border-0 cursor-pointer disabled:opacity-50">{fileUploading ? '업로드 중…' : '저장 완료'}</button>
+              <button onClick={handleSavePost} disabled={isLoading || fileUploading} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-4 border-0 cursor-pointer disabled:opacity-50">{fileUploading ? '업로드 중…' : '저장'}</button>
             </div>
           </div>
         </div>

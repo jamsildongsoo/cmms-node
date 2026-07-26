@@ -3,15 +3,19 @@ import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
 import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
-import { getCommonStatusLabel as getStatusLabel, getCommonStatusClass as getStatusClass } from '../constants/status';
+import { getCommonStatusLabel as getStatusLabel } from '../constants/status';
 import { formatDateOnly, todayLocal } from '../utils/datetime';
 import { getApiErrorMessage } from '../utils/apiError';
 import PrintHeader from '../components/PrintHeader';
 import PmReportPrint from '../components/PmReportPrint';
 import PrintWindowLayout from '../components/PrintWindowLayout';
-import ApprovalSubmitModal from '../components/ApprovalSubmitModal';
+import ApprovalDraftModal from '../components/ApprovalDraftModal';
+import ListBadge from '../components/ListBadge';
+import ListIconButton from '../components/ListIconButton';
+import { loadApprovalSignatureSteps } from '../utils/approvalSignature';
 import { openPrintWindow } from '../utils/printWindow';
-import { requestConfirmation } from '../utils/userActionDialog';
+import type { RichTextDocument } from '../types/richText';
+import { createPmApprovalContent } from '../utils/pmApprovalContent';
 import {
   ClipboardList, ClipboardCheck, Edit2, Trash2, Printer, X, Plus, MinusCircle, PlayCircle
 } from 'lucide-react';
@@ -85,7 +89,7 @@ export default function PmRecord() {
   const [results, setResults] = useState<PmRecord[]>([]);
   const [depts, setDepts] = useState<{ id: string; name: string }[]>([]);
   const [equipments, setEquipments] = useState<EquipmentOption[]>([]);
-  const [usersList, setUsersList] = useState<{ id: string; name: string }[]>([]);
+  const [usersList, setUsersList] = useState<{ id: string; name: string; title?: string | null; position?: string | null }[]>([]);
 
   // 검색/필터 상태
   const [showAll, setShowAll] = useState(false);
@@ -113,21 +117,25 @@ export default function PmRecord() {
   const [certAgency, setCertAgency] = useState('');
   const [approvalId, setApprovalId] = useState('');
   const [refNo, setRefNo] = useState('');
-  const [status, setStatus] = useState('T');
-  const [closeYn, setCloseYn] = useState('N');
   const [createdAt, setCreatedAt] = useState('');
   const [createdBy, setCreatedBy] = useState('');
   const [checkItems, setCheckItems] = useState<PmRecordItem[]>([]);
   const [pendingAction, setPendingAction] = useState<{ type: 'close' | 'delete'; record: PmRecord } | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
-  const [approvalRef, setApprovalRef] = useState<{ refNo: string; title: string } | null>(null);
+  const [approvalRef, setApprovalRef] = useState<{
+    refNo: string;
+    title: string;
+    content: RichTextDocument;
+  } | null>(null);
 
   const canDirectConfirm = user?.permissions?.PM?.A === 'Y';
 
   const normalizeRecord = (record: PmRecord): PmRecord => ({
     ...record,
     stepStage: (record.stepStage || 'R') as PmStage,
+    cycleFrom: formatDateOnly(record.cycleFrom) || null,
+    cycleEnd: formatDateOnly(record.cycleEnd) || null,
     workDate: formatDateOnly(record.workDate) || null,
     certExpireDate: formatDateOnly(record.certExpireDate) || null,
     closeYn: record.closeYn || 'N',
@@ -188,15 +196,13 @@ export default function PmRecord() {
     setCertAgency('');
     setApprovalId('');
     setRefNo('');
-    setStatus('T');
-    setCloseYn('N');
     setCreatedAt('');
     setCreatedBy('');
     setCheckItems([]);
   };
 
-  const openNewPlan = () => {
-    resetForm('P');
+  const openNewRecord = () => {
+    resetForm(activeTab === 'plans' ? 'P' : 'R');
     setIsFormOpen(true);
   };
 
@@ -225,10 +231,8 @@ export default function PmRecord() {
       setCertNumber(r.certNumber || '');
       setCertExpireDate(formatDateOnly(r.certExpireDate));
       setCertAgency(r.certAgency || '');
-      setApprovalId(r.approvalId || '');
+      setApprovalId(r.status === 'R' ? '' : (r.approvalId || ''));
       setRefNo(r.refNo || '');
-      setStatus(r.status || 'T');
-      setCloseYn(r.closeYn || 'N');
       setCreatedAt(r.createdAt || '');
       setCreatedBy(r.createdBy || '');
       setCheckItems(res.data.checkItems || []);
@@ -259,6 +263,7 @@ export default function PmRecord() {
         ...res.data.pmRecord,
         equipmentName: record.equipmentName,
       });
+      const approvalSteps = await loadApprovalSignatureSteps(detail.approvalId, usersList);
       const root = createRoot(container);
       root.render(
         <PrintWindowLayout printWindow={printWindow} contentClassName="max-w-[180mm]">
@@ -282,6 +287,7 @@ export default function PmRecord() {
             certExpireDate={detail.certExpireDate || undefined}
             remarks={detail.remarks || undefined}
             checkItems={res.data.checkItems || []}
+            approvalSteps={approvalSteps}
           />
         </PrintWindowLayout>,
       );
@@ -436,10 +442,10 @@ th { background: #eee; font-weight: 600; }
 @media print { .no-print { display: none; } }
 </style></head><body>
 <div class="no-print"><button onclick="window.print()">인쇄</button></div>
-<h1>${tabLabel} 현황</h1>
 <div class="print-info"><span>회사: ${user?.companyName || user?.companyId || 'CMMS'}</span><span>출력자: ${user?.name || '-'} | 출력일시: ${stamp}</span></div>
+<h1>${tabLabel} 현황</h1>
 <table><thead><tr>
-<th>문서번호</th><th>제목</th><th>설비</th><th>부서</th><th>계획기간</th><th>점검일</th><th>작업자</th><th>상태</th>
+<th>문서번호</th><th>점검명</th><th>설비명</th><th>부서</th><th>계획기간</th><th>점검일</th><th>담당자</th><th>결재상태</th>
 </tr></thead><tbody>${rows}</tbody></table>
 </body></html>`);
     printWindow.document.close();
@@ -489,10 +495,6 @@ th { background: #eee; font-weight: 600; }
       toast.error('계획 점검항목명은 비워둘 수 없습니다.');
       return false;
     }
-    if (stepStage === 'R' && !refNo) {
-      toast.error('실적은 확정된 계획번호를 참조해야 합니다.');
-      return false;
-    }
     return true;
   };
 
@@ -521,7 +523,7 @@ th { background: #eee; font-weight: 600; }
           certAgency: certAgency || null,
           approvalId: approvalId || null,
           refNo: stepStage === 'R' ? refNo : null,
-          refModule: stepStage === 'R' ? 'PM' : null,
+          refModule: stepStage === 'R' && refNo ? 'PM' : null,
           status: saveStatus,
         },
         checkItems: checkItems.map((item, idx) => ({
@@ -538,6 +540,29 @@ th { background: #eee; font-weight: 600; }
         setApprovalRef({
           refNo: savedId,
           title: `[예방점검 ${stepStage === 'P' ? '계획' : '실적'}] ${title || equipmentName || equipmentId}`,
+          content: createPmApprovalContent({
+            stepStage,
+            pmNo: savedId,
+            statusLabel: getStatusLabel('P'),
+            createdAt: response.data.createdAt,
+            departmentName: depts.find((dept) => dept.id === departmentId)?.name || departmentId,
+            authorName:
+              usersList.find((candidate) => candidate.id === response.data.createdBy)?.name
+              || response.data.createdBy
+              || user?.name
+              || '-',
+            equipmentName: `${equipmentId} / ${equipmentName || equipmentId}`,
+            checkTypeName: PM_TYPE_LABELS[checkTypeCode] || checkTypeCode,
+            workDate: stepStage === 'P' && isRecurring ? null : workDate,
+            cycleFrom: stepStage === 'P' ? cycleFrom : null,
+            cycleEnd: stepStage === 'P' ? cycleEnd : null,
+            judgeName: JUDGE_LABELS[judgeCode] || judgeCode,
+            certNumber,
+            certAgency,
+            certExpireDate,
+            remarks,
+            checkItems,
+          }),
         });
         return;
       }
@@ -563,28 +588,6 @@ th { background: #eee; font-weight: 600; }
     fetchData();
   };
 
-  const handleCloseCurrentPlan = async () => {
-    if (!pmNo || stepStage !== 'P' || !['C', 'S'].includes(status) || closeYn === 'Y') return;
-    const confirmed = await requestConfirmation(
-      `[${pmNo}] 예방점검 계획을 종료하시겠습니까?\n종료 후 수정할 수 없습니다.`,
-      '계획 종료',
-    );
-    if (!confirmed) return;
-
-    setIsLoading(true);
-    try {
-      await axiosInstance.patch(`/pm/plans/${pmNo}/close?plantId=${plantId}`);
-      setCloseYn('Y');
-      setIsFormOpen(false);
-      toast.success('계획이 종료되었습니다.');
-      fetchData();
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, '종료 실패.'));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 print:hidden">
@@ -604,15 +607,13 @@ th { background: #eee; font-weight: 600; }
             <Printer size={14} />
             목록 인쇄
           </button>
-          {activeTab === 'plans' && (
-            <button
-              onClick={openNewPlan}
-              className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border-0"
-            >
-              <Plus size={14} />
-              입력
-            </button>
-          )}
+          <button
+            onClick={openNewRecord}
+            className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border-0"
+          >
+            <Plus size={14} />
+            입력
+          </button>
           <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg">
             <button
               onClick={() => setActiveTab('plans')}
@@ -671,7 +672,7 @@ th { background: #eee; font-weight: 600; }
             className="bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-3 text-xs text-slate-300 outline-none"
           >
             <option value="id">문서번호</option>
-            <option value="title">타이틀</option>
+            <option value="title">제목</option>
             <option value="author">작성자</option>
           </select>
           <input
@@ -727,15 +728,14 @@ th { background: #eee; font-weight: 600; }
               <thead>
                 <tr className="bg-slate-900 text-slate-400 border-b border-slate-800 select-none print:bg-slate-100 print:text-slate-800 print:border-slate-300">
                   <th className="p-3 font-semibold">{activeTab === 'plans' ? '계획번호' : '실적번호'}</th>
-                  {activeTab === 'plans' && <th className="p-3 font-semibold">제목</th>}
-                  {activeTab === 'results' && <th className="p-3 font-semibold">참조계획</th>}
-                  <th className="p-3 font-semibold">설비</th>
+                  <th className="p-3 font-semibold">점검명</th>
+                  <th className="p-3 font-semibold">설비명</th>
                   {activeTab === 'plans' && <th className="p-3 font-semibold">계획기간</th>}
                   <th className="p-3 font-semibold">{activeTab === 'plans' ? '계획일' : '점검일'}</th>
                   <th className="p-3 font-semibold">담당자</th>
                   <th className="p-3 font-semibold">점검유형</th>
                   {activeTab === 'results' && <th className="p-3 font-semibold">판정</th>}
-                  <th className="p-3 font-semibold">상태</th>
+                  <th className="p-3 font-semibold">결재상태</th>
                   <th className="p-3 font-semibold text-right print:hidden">작업</th>
                 </tr>
               </thead>
@@ -760,10 +760,7 @@ th { background: #eee; font-weight: 600; }
                         </button>
                         <span className="hidden print:inline text-slate-600">{rec.id}</span>
                       </td>
-                      {activeTab === 'plans' && (
-                        <td className="p-3 text-slate-300 print:text-slate-800">{rec.title || '-'}</td>
-                      )}
-                      {activeTab === 'results' && <td className="p-3 font-mono text-slate-500">{rec.refNo || '-'}</td>}
+                      <td className="p-3 text-slate-300 print:text-slate-800">{rec.title || '-'}</td>
                       <td className="p-3 font-semibold text-slate-200 print:text-slate-900">{rec.equipmentName || rec.equipmentId}</td>
                       {activeTab === 'plans' && (
                         <td className="p-3 text-xs text-slate-400 print:text-slate-600">
@@ -777,7 +774,7 @@ th { background: #eee; font-weight: 600; }
                         </td>
                       )}
                       <td className="p-3">{rec.workDate}</td>
-                      <td className="p-3">{rec.workerId}</td>
+                      <td className="p-3">{usersList.find((candidate) => candidate.id === rec.workerId)?.name || rec.workerId || '-'}</td>
                       <td className="p-3">{PM_TYPE_LABELS[rec.checkTypeCode] || rec.checkTypeCode}</td>
                       {activeTab === 'results' && (
                         <td className="p-3">
@@ -788,49 +785,47 @@ th { background: #eee; font-weight: 600; }
                       )}
                       <td className="p-3">
                         {rec.closeYn === 'Y' ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-gray-700 text-gray-300 print:bg-gray-200 print:text-gray-700">종료</span>
+                          <ListBadge>종료</ListBadge>
                         ) : rec.status === 'E' ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-900/50 text-amber-400 print:bg-amber-100 print:text-amber-700">만료</span>
+                          <ListBadge>만료</ListBadge>
                         ) : (
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getStatusClass(rec.status)}`}>
-                            {getStatusLabel(rec.status)}
-                          </span>
+                          <ListBadge>{getStatusLabel(rec.status)}</ListBadge>
                         )}
                       </td>
                       <td className="p-3 text-right print:hidden">
                         <div className="flex justify-end gap-2">
                           {activeTab === 'plans' && isConfirmed(rec.status) && rec.closeYn !== 'Y' && (
-                            <button
+                            <ListIconButton
                               onClick={() => openResultFromPlan(rec)}
-                              title="실적 입력"
-                              className="p-1.5 text-emerald-400 hover:bg-emerald-950/40 rounded transition-colors border-0 cursor-pointer bg-transparent"
-                            >
-                              <PlayCircle size={14} />
-                            </button>
+                              label="실적 입력"
+                              icon={PlayCircle}
+                              tone="success"
+                            />
                           )}
-                          {activeTab === 'plans' && rec.closeYn !== 'Y' && (
-                            <button
+                          {activeTab === 'plans' && isConfirmed(rec.status) && rec.closeYn !== 'Y' && (
+                            <ListIconButton
                               onClick={() => setPendingAction({ type: 'close', record: rec })}
-                              title="계획 종료"
-                              className="p-1.5 text-amber-400 hover:bg-amber-950/40 rounded transition-colors border-0 cursor-pointer bg-transparent"
-                            >
-                              <ClipboardCheck size={14} />
-                            </button>
+                              label="계획 종료"
+                              icon={ClipboardCheck}
+                              tone="warning"
+                            />
                           )}
-                          <button
-                            onClick={() => loadRecordIntoForm(rec)}
-                            title="상세/수정"
-                            className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded transition-colors border-0 cursor-pointer bg-transparent"
-                          >
-                            <Edit2 size={13} />
-                          </button>
-                          <button
-                            onClick={() => setPendingAction({ type: 'delete', record: rec })}
-                            title="삭제"
-                            className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded transition-colors border-0 cursor-pointer bg-transparent"
-                          >
-                            <Trash2 size={13} />
-                          </button>
+                          {['T', 'R'].includes(rec.status) && (
+                            <ListIconButton
+                              onClick={() => loadRecordIntoForm(rec)}
+                              label="상세/수정"
+                              icon={Edit2}
+                              tone="accent"
+                            />
+                          )}
+                          {rec.status === 'T' && (
+                              <ListIconButton
+                                onClick={() => setPendingAction({ type: 'delete', record: rec })}
+                                label="삭제"
+                                icon={Trash2}
+                                tone="danger"
+                              />
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -887,18 +882,18 @@ th { background: #eee; font-weight: 600; }
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                 <div className="md:col-span-2">
-                  <label className="block text-slate-400 mb-1.5">제목</label>
+                  <label className="block text-slate-400 mb-1.5">점검명</label>
                   <input
                     type="text"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    placeholder="예방점검 계획 제목"
+                    placeholder="예방점검명을 입력하세요"
                     className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none"
                   />
                 </div>
                 <div>
                   <label className="block text-slate-400 mb-1.5">대상 설비 <span className="text-rose-500">*</span></label>
-                  {stepStage === 'P' && !pmNo ? (
+                  {!pmNo ? (
                     <select
                       value={plantId && equipmentId ? `${plantId}:${equipmentId}` : ''}
                       onChange={(e) => handleEquipmentChange(e.target.value)}
@@ -924,7 +919,7 @@ th { background: #eee; font-weight: 600; }
                   <label className="block text-slate-400 mb-1.5">점검 유형 <span className="text-rose-500">*</span></label>
                   <div className="flex gap-2">
                     <select
-                      disabled={stepStage === 'R'}
+                      disabled={stepStage === 'R' && !!refNo}
                       value={checkTypeCode}
                       onChange={(e) => handleCheckTypeChange(e.target.value)}
                       className="flex-1 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none disabled:opacity-80"
@@ -934,7 +929,7 @@ th { background: #eee; font-weight: 600; }
                       <option value="REPLACE">소모품교체</option>
                       <option value="LEGAL">정기법정검사</option>
                     </select>
-                    {stepStage === 'P' && (
+                    {(stepStage === 'P' || !refNo) && (
                       <button
                         type="button"
                         onClick={() => loadTemplates(checkTypeCode)}
@@ -1150,16 +1145,6 @@ th { background: #eee; font-weight: 600; }
                 >
                   임시 저장
                 </button>
-                {stepStage === 'P' && ['C', 'S'].includes(status) && closeYn !== 'Y' && (
-                  <button
-                    type="button"
-                    onClick={handleCloseCurrentPlan}
-                    disabled={isLoading}
-                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-750 rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    계획 종료
-                  </button>
-                )}
                 <button
                   onClick={() => handleSave('P')}
                   disabled={isLoading}
@@ -1182,16 +1167,17 @@ th { background: #eee; font-weight: 600; }
         </div>
       )}
 
-      <ApprovalSubmitModal
+      <ApprovalDraftModal
         open={!!approvalRef}
+        mode="linked"
         refModule="PM"
         refNo={approvalRef?.refNo || ''}
         defaultTitle={approvalRef?.title || ''}
+        defaultContent={approvalRef?.content}
         users={usersList}
         currentUserId={user?.id}
         onClose={() => setApprovalRef(null)}
-        onSubmitted={(newApprovalId) => {
-          setApprovalId(newApprovalId);
+        onSubmitted={() => {
           setApprovalRef(null);
           setIsFormOpen(false);
           toast.success('예방점검 결재 문서가 상신되었습니다.');

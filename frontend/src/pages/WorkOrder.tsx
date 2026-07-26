@@ -4,16 +4,21 @@ import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
 import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
-import { getCommonStatusLabel as getStatusLabel, getCommonStatusClass as getStatusClass } from '../constants/status';
+import { getCommonStatusLabel as getStatusLabel } from '../constants/status';
 import { formatDateOnly, todayLocal } from '../utils/datetime';
 import { getApiErrorMessage } from '../utils/apiError';
 import PrintHeader from '../components/PrintHeader';
 import WorkOrderPrint from '../components/WorkOrderPrint';
 import PrintWindowLayout from '../components/PrintWindowLayout';
 import { openPrintWindow } from '../utils/printWindow';
-import ApprovalSubmitModal from '../components/ApprovalSubmitModal';
-import { 
-  ClipboardList, Edit2, Trash2, Printer, X, Plus, Trash 
+import ApprovalDraftModal from '../components/ApprovalDraftModal';
+import ListBadge from '../components/ListBadge';
+import ListIconButton from '../components/ListIconButton';
+import type { RichTextDocument } from '../types/richText';
+import { createWorkOrderApprovalContent } from '../utils/workOrderApprovalContent';
+import { loadApprovalSignatureSteps } from '../utils/approvalSignature';
+import {
+  ClipboardList, Edit2, Trash2, Printer, X, Plus, Trash, PlayCircle
 } from 'lucide-react';
 
 interface WorkOrderModel {
@@ -55,7 +60,7 @@ export default function WorkOrder() {
   const [workOrders, setWorkOrders] = useState<WorkOrderModel[]>([]);
   const [equipments, setEquipments] = useState<{ id: string; name: string; plantId: string }[]>([]);
   const [depts, setDepts] = useState<{ id: string; name: string }[]>([]);
-  const [usersList, setUsersList] = useState<{ id: string; name: string }[]>([]);
+  const [usersList, setUsersList] = useState<{ id: string; name: string; title?: string | null; position?: string | null }[]>([]);
 
   // Form states
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -83,7 +88,11 @@ export default function WorkOrder() {
 
   const [workItems, setWorkItems] = useState<WorkOrderItemModel[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [approvalRef, setApprovalRef] = useState<{ refNo: string; title: string } | null>(null);
+  const [approvalRef, setApprovalRef] = useState<{
+    refNo: string;
+    title: string;
+    content: RichTextDocument;
+  } | null>(null);
 
   const canDirectConfirm = user?.permissions?.WO?.A === 'Y';
 
@@ -100,8 +109,9 @@ export default function WorkOrder() {
         axiosInstance.get('/mdm/departments'),
         axiosInstance.get('/mdm/users')
       ]);
-      setWorkOrders((woRes.data || []).map((workOrder: WorkOrderModel) => ({
+      setWorkOrders((woRes.data || []).map((workOrder: WorkOrderModel & { step_stage?: string }) => ({
         ...workOrder,
+        stepStage: workOrder.stepStage || workOrder.step_stage || 'P',
         workDate: formatDateOnly(workOrder.workDate) || null,
       })));
       setEquipments(eqRes.data);
@@ -120,7 +130,7 @@ export default function WorkOrder() {
     setEquipmentId(equipments.length > 0 ? equipments[0].id : '');
     setEquipmentName(equipments.length > 0 ? equipments[0].name : '');
     setTitle('');
-    setStepStage('P');
+    setStepStage(activeSubTab === 'plan' ? 'P' : 'R');
     setWoTypeCode('BM');
     setDepartmentId(user?.departmentId || (depts.length > 0 ? depts[0].id : ''));
     setWorkerId(user?.id || '');
@@ -163,7 +173,7 @@ export default function WorkOrder() {
       setRemarks(w.remarks || '');
       setRefNo(w.refNo || '');
       setRefModule(w.refModule || '');
-      setApprovalId(w.approvalId || '');
+      setApprovalId(w.status === 'R' ? '' : (w.approvalId || ''));
       setCreatedAt(w.createdAt || '');
       setCreatedBy(w.createdBy || '');
       setWorkItems(data.workItems || []);
@@ -211,7 +221,7 @@ export default function WorkOrder() {
 
   const handleSave = async (submitStatus: 'T' | 'S' | 'P') => {
     if (!title.trim()) {
-      toast.error('지시명(제목)을 입력해주세요.');
+      toast.error('지시명을 입력해주세요.');
       return;
     }
     setIsLoading(true);
@@ -244,7 +254,29 @@ export default function WorkOrder() {
       if (submitStatus === 'P') {
         const savedId = response.data.id;
         setWoNo(savedId);
-        setApprovalRef({ refNo: savedId, title: `[작업지시] ${title}` });
+        setApprovalRef({
+          refNo: savedId,
+          title: `[작업지시] ${title}`,
+          content: createWorkOrderApprovalContent({
+            woNo: savedId,
+            statusLabel: getStatusLabel('P'),
+            createdAt: formatDateOnly(response.data.createdAt),
+            departmentName: depts.find((dept) => dept.id === departmentId)?.name || departmentId,
+            authorName:
+              usersList.find((candidate) => candidate.id === response.data.createdBy)?.name
+              || response.data.createdBy
+              || user?.name
+              || '-',
+            equipmentName: `${equipmentId} / ${equipmentName || equipmentId}`,
+            workTypeName: getWoTypeLabel(woTypeCode),
+            workDate,
+            cost,
+            manHours,
+            manHoursUnit,
+            remarks,
+            workItems,
+          }),
+        });
         return;
       }
       toast.success(submitStatus === 'T' ? '임시저장 되었습니다.' : '작업지시가 직접 확정 완료되었습니다.');
@@ -276,6 +308,49 @@ export default function WorkOrder() {
     }[code] || code;
   };
 
+  const openResultFromPlan = async (plan: WorkOrderModel) => {
+    if (plan.status !== 'S' && plan.status !== 'C') {
+      toast.error('확정된 작업지시 계획에 대해서만 실적을 입력할 수 있습니다.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await axiosInstance.get(`/work-order/details?plantId=${plan.plantId}&id=${plan.id}`);
+      const detail = { ...plan, ...response.data.workOrder } as WorkOrderModel;
+      const matchedEquipment = equipments.find((equipment) => equipment.id === detail.equipmentId);
+
+      setWoNo('');
+      setPlantId(detail.plantId);
+      setEquipmentId(detail.equipmentId);
+      setEquipmentName(matchedEquipment?.name || detail.equipmentId);
+      setTitle(detail.title);
+      setStepStage('R');
+      setWoTypeCode(detail.woTypeCode);
+      setDepartmentId(detail.departmentId);
+      setWorkerId(user?.id || '');
+      setWorkDate(todayLocal());
+      setCost(0);
+      setManHours(0);
+      setManHoursUnit(detail.manHoursUnit || 'H');
+      setRemarks('');
+      setRefNo(detail.id);
+      setRefModule('WO');
+      setApprovalId('');
+      setCreatedAt('');
+      setCreatedBy('');
+      setWorkItems((response.data.workItems || []).map((item: WorkOrderItemModel) => ({
+        ...item,
+        workResult: '',
+      })));
+      setIsFormOpen(true);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, '작업지시 계획 항목을 불러오지 못했습니다.'));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const openPrintDocument = async (wo: WorkOrderModel) => {
     const printTarget = openPrintWindow({ title: '작업지시서 출력', rootId: 'wo-print-root' });
     if (!printTarget) {
@@ -286,6 +361,7 @@ export default function WorkOrder() {
     try {
       const response = await axiosInstance.get(`/work-order/details?plantId=${wo.plantId}&id=${wo.id}`);
       const detail = { ...wo, ...response.data.workOrder } as WorkOrderModel;
+      const approvalSteps = await loadApprovalSignatureSteps(detail.approvalId, usersList);
       createRoot(container).render(
         <PrintWindowLayout printWindow={printWindow} contentClassName="max-w-[180mm]">
           <WorkOrderPrint
@@ -305,6 +381,7 @@ export default function WorkOrder() {
             manHoursUnit={detail.manHoursUnit}
             remarks={detail.remarks || undefined}
             workItems={response.data.workItems || []}
+            approvalSteps={approvalSteps}
           />
         </PrintWindowLayout>,
       );
@@ -316,7 +393,8 @@ export default function WorkOrder() {
   };
 
   const handlePrint = () => {
-    if (workOrders.length === 0) { toast.error('인쇄할 목록이 없습니다.'); return; }
+    const printRows = activeSubTab === 'plan' ? plans : history;
+    if (printRows.length === 0) { toast.error('인쇄할 목록이 없습니다.'); return; }
     const user = useAuthStore.getState().user;
     const now = new Date();
     const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
@@ -324,14 +402,12 @@ export default function WorkOrder() {
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
     if (!printWindow) { toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.'); return; }
 
-    const rows = workOrders.map(wo => `
+    const rows = printRows.map(wo => `
       <tr>
         <td class="mono">${wo.id}</td>
         <td>${wo.title}</td>
-        <td>${wo.equipmentId}</td>
-        <td>${wo.stepStage === 'P' ? '계획' : '실적'}</td>
+        <td>${equipments.find(e => e.id === wo.equipmentId)?.name || wo.equipmentId}</td>
         <td>${getWoTypeLabel(wo.woTypeCode)}</td>
-        <td>${depts.find(d => d.id === wo.departmentId)?.name || wo.departmentId}</td>
         <td>${usersList.find(u => u.id === wo.workerId)?.name || wo.workerId || '-'}</td>
         <td>${wo.workDate || '-'}</td>
         <td>${getStatusLabel(wo.status)}</td>
@@ -356,10 +432,10 @@ th { background: #eee; font-weight: 600; }
 @media print { .no-print { display: none; } }
 </style></head><body>
 <div class="no-print"><button onclick="window.print()">인쇄</button></div>
-<h1>작업지시 현황</h1>
 <div class="print-info"><span>회사: ${user?.companyName || user?.companyId || 'CMMS'}</span><span>출력자: ${user?.name || '-'} | 출력일시: ${stamp}</span></div>
+<h1>작업지시 현황</h1>
 <table><thead><tr>
-<th>지시번호</th><th>지시명</th><th>설비</th><th>단계</th><th>구분</th><th>부서</th><th>작업자</th><th>작업일</th><th>상태</th>
+<th>지시번호</th><th>지시명</th><th>설비명</th><th>작업유형</th><th>담당자</th><th>계획/수행일자</th><th>결재상태</th>
 </tr></thead><tbody>${rows}</tbody></table>
 </body></html>`);
     printWindow.document.close();
@@ -429,7 +505,7 @@ th { background: #eee; font-weight: 600; }
             className="bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-3 text-xs text-slate-300 outline-none"
           >
             <option value="id">문서번호</option>
-            <option value="title">타이틀</option>
+            <option value="title">제목</option>
             <option value="worker">담당자</option>
           </select>
           <input
@@ -463,20 +539,17 @@ th { background: #eee; font-weight: 600; }
               <tr className="bg-slate-900 text-slate-400 border-b border-slate-800 select-none print:bg-slate-100 print:text-slate-800 print:border-slate-300">
                 <th className="p-3 font-semibold">지시번호</th>
                 <th className="p-3 font-semibold">지시명</th>
-                <th className="p-3 font-semibold">설비코드</th>
-                <th className="p-3 font-semibold">구분</th>
-                <th className="p-3 font-semibold">부서</th>
-                <th className="p-3 font-semibold">작업자</th>
+                <th className="p-3 font-semibold">설비명</th>
+                <th className="p-3 font-semibold">작업유형</th>
+                <th className="p-3 font-semibold">담당자</th>
                 <th className="p-3 font-semibold">계획/수행일자</th>
-                <th className="p-3 font-semibold">공수(M/H)</th>
-                <th className="p-3 font-semibold">연계결재번호</th>
-                <th className="p-3 font-semibold">문서상태</th>
+                <th className="p-3 font-semibold">결재상태</th>
                 <th className="p-3 font-semibold text-right print:hidden">작업</th>
               </tr>
             </thead>
             <tbody>
               {(activeSubTab === 'plan' ? plans : history).length === 0 ? (
-                <tr><td colSpan={11} className="p-8 text-center text-slate-600 print:text-slate-400">조회된 작업지시 내역이 없습니다.</td></tr>
+                <tr><td colSpan={8} className="p-8 text-center text-slate-600 print:text-slate-400">조회된 작업지시 내역이 없습니다.</td></tr>
               ) : (
                 (activeSubTab === 'plan' ? plans : history).map((wo) => (
                   <tr key={wo.id} className="border-b border-slate-900 hover:bg-slate-900/30 text-slate-300 print:border-slate-200 print:text-slate-800 print:hover:bg-transparent">
@@ -491,31 +564,38 @@ th { background: #eee; font-weight: 600; }
                       <span className="hidden print:inline text-slate-600">{wo.id}</span>
                     </td>
                     <td className="p-3 font-semibold text-slate-200 print:text-slate-900">{wo.title}</td>
-                    <td className="p-3 font-mono text-slate-400">{wo.equipmentId}</td>
+                    <td className="p-3 text-slate-400">{equipments.find(e => e.id === wo.equipmentId)?.name || wo.equipmentId}</td>
                     <td className="p-3">{getWoTypeLabel(wo.woTypeCode)}</td>
-                    <td className="p-3">{depts.find(d => d.id === wo.departmentId)?.name || wo.departmentId}</td>
                     <td className="p-3">{usersList.find(u => u.id === wo.workerId)?.name || wo.workerId || '-'}</td>
                     <td className="p-3">{wo.workDate || '-'}</td>
-                    <td className="p-3 font-mono">{wo.manHours} {wo.manHoursUnit}</td>
-                    <td className="p-3 font-mono text-slate-500">{wo.approvalId || '-'}</td>
                     <td className="p-3">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getStatusClass(wo.status)}`}>
-                        {getStatusLabel(wo.status)}
-                      </span>
+                      <ListBadge>{getStatusLabel(wo.status)}</ListBadge>
                     </td>
                     <td className="p-3 text-right space-x-2 print:hidden">
-                      <button
-                        onClick={() => handleOpenEdit(wo)}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-blue-400 transition-colors border-0 cursor-pointer bg-transparent"
-                      >
-                        <Edit2 size={13} />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(wo)}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-rose-400 transition-colors border-0 cursor-pointer bg-transparent"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      {activeSubTab === 'plan' && (wo.status === 'S' || wo.status === 'C') && (
+                        <ListIconButton
+                          onClick={() => openResultFromPlan(wo)}
+                          label="실적 입력"
+                          icon={PlayCircle}
+                          tone="success"
+                        />
+                      )}
+                      {['T', 'R'].includes(wo.status) && (
+                        <ListIconButton
+                          onClick={() => handleOpenEdit(wo)}
+                          label="상세/수정"
+                          icon={Edit2}
+                          tone="accent"
+                        />
+                      )}
+                      {wo.status === 'T' && (
+                          <ListIconButton
+                            onClick={() => handleDelete(wo)}
+                            label="삭제"
+                            icon={Trash2}
+                            tone="danger"
+                          />
+                      )}
                     </td>
                   </tr>
                 ))
@@ -532,7 +612,9 @@ th { background: #eee; font-weight: 600; }
             {/* Modal Header */}
             <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0 print:hidden">
               <h2 className="text-lg font-bold text-slate-200">
-                {woNo ? `작업지시 상세/수정 [${woNo}] ${equipmentName}` : `신규 작업지시 등록`}
+                {woNo
+                  ? `작업지시 ${stepStage === 'P' ? '계획' : '실적'} 상세/수정 [${woNo}] ${equipmentName}`
+                  : `신규 작업지시 ${stepStage === 'P' ? '계획' : '실적'} 등록`}
               </h2>
               <button
                 onClick={() => setIsFormOpen(false)}
@@ -579,7 +661,7 @@ th { background: #eee; font-weight: 600; }
                   <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-5 print:bg-white print:border-slate-300">
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
                       <div className="sm:col-span-2 md:col-span-3">
-                        <label className="block text-slate-400 mb-1.5 print:text-slate-600 font-semibold">지시명 (제목) <span className="text-rose-500 print:hidden">*</span></label>
+                        <label className="block text-slate-400 mb-1.5 print:text-slate-600 font-semibold">지시명 <span className="text-rose-500 print:hidden">*</span></label>
                         <input
                           type="text"
                           required
@@ -614,17 +696,6 @@ th { background: #eee; font-weight: 600; }
                           <option value="ETC">기타 작업</option>
                         </select>
                       </div>
-                      <div>
-                        <label className="block text-slate-400 mb-1.5 print:text-slate-600">작업 단계</label>
-                        <select
-                          value={stepStage}
-                          onChange={(e) => setStepStage(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none print:bg-white print:border-slate-300 print:text-slate-800"
-                        >
-                          <option value="P">작업 계획/지시 (P)</option>
-                          <option value="R">작업 실적/완료 (R)</option>
-                        </select>
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -646,7 +717,7 @@ th { background: #eee; font-weight: 600; }
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1.5 print:text-slate-600 font-semibold">소요 공수시간(M/H)</label>
+                        <label className="block text-slate-400 mb-1.5 print:text-slate-600">소요 공수시간(M/H)</label>
                         <div className="flex gap-1.5">
                           <input
                             type="number"
@@ -836,16 +907,17 @@ th { background: #eee; font-weight: 600; }
           </div>
         </div>
       )}
-      <ApprovalSubmitModal
+      <ApprovalDraftModal
         open={!!approvalRef}
+        mode="linked"
         refModule="WO"
         refNo={approvalRef?.refNo || ''}
         defaultTitle={approvalRef?.title || ''}
+        defaultContent={approvalRef?.content}
         users={usersList}
         currentUserId={user?.id}
         onClose={() => setApprovalRef(null)}
-        onSubmitted={(newApprovalId) => {
-          setApprovalId(newApprovalId);
+        onSubmitted={() => {
           setApprovalRef(null);
           setIsFormOpen(false);
           toast.success('작업지시 결재 문서가 상신되었습니다.');

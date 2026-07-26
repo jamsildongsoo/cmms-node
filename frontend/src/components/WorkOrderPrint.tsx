@@ -1,6 +1,7 @@
 import PrintHeader from './PrintHeader';
 import { PrintSection, PrintField, PrintTable } from './PrintDoc';
 import { getCommonStatusLabel } from '../constants/status';
+import ApprovalSignatureBox, { type ApprovalSignatureStep } from './ApprovalSignatureBox';
 
 interface WoItem {
   itemNo: number;
@@ -26,6 +27,7 @@ interface WorkOrderPrintProps {
   manHoursUnit: string;
   remarks?: string;
   workItems: WoItem[];
+  approvalSteps?: ApprovalSignatureStep[];
 }
 
 /** 작업지시서 — 전용 문서뷰(흑백). */
@@ -35,19 +37,22 @@ export default function WorkOrderPrint(p: WorkOrderPrintProps) {
       <PrintHeader approvalNo={p.approvalId} />
       <h1 className="text-center text-lg font-bold tracking-widest mb-4">작 업 지 시 서</h1>
 
-      <section className="border-y-2 border-black mb-5 text-[10px]">
-        <dl className="p-3 space-y-2">
+      <section className="grid grid-cols-2 border-y-2 border-black mb-5 text-[10px]">
+        <dl className="border-r border-gray-500 p-3 space-y-2">
           <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">문서번호</dt><dd className="font-mono">{p.woNo}</dd></div>
           <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">작성일자</dt><dd className="font-mono">{p.createdAt || '-'}</dd></div>
           <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">부서명</dt><dd>{p.deptName || '-'}</dd></div>
           <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">작성자</dt><dd>{p.authorName || '-'}</dd></div>
         </dl>
+        <div className="p-3">
+          <ApprovalSignatureBox steps={p.approvalSteps || []} drafterDate={p.createdAt} />
+        </div>
       </section>
 
       <PrintSection title="문서 정보">
         <div className="divide-y divide-gray-300 border-y border-gray-400">
           <div className="grid grid-cols-2 gap-4 py-2">
-            <PrintField label="제목" value={p.title} />
+            <PrintField label="지시명" value={p.title} />
             <PrintField label="상태" value={getCommonStatusLabel(p.status)} />
           </div>
           <div className="grid grid-cols-2 gap-4 py-2">

@@ -1,6 +1,8 @@
-import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, OneToMany, JoinColumn } from 'typeorm';
 import { Department } from './department.entity';
 import { Equipment } from './equipment.entity';
+import { User } from './users.entity';
+import { PmRecordItem } from './pm-record-item.entity';
 import { BaseEntity } from './base.entity';
 
 @Entity('pm_record')
@@ -30,16 +32,16 @@ export class PmRecord extends BaseEntity {
   stepStage!: string; // P: 계획, R: 실적
 
   @Column({ name: 'cycle_from', type: 'date', nullable: true })
-  cycleFrom!: Date | string | null;
+  cycleFrom!: string | null;
 
   @Column({ name: 'cycle_end', type: 'date', nullable: true })
-  cycleEnd!: Date | string | null;
+  cycleEnd!: string | null;
 
-  @Column({ name: 'close_yn', type: 'char', length: 1, default: 'N' })
-  closeYn!: string;
+  @Column({ name: 'close_yn', type: 'char', length: 1, default: 'N', nullable: true })
+  closeYn!: string | null;
 
   @Column({ name: 'work_date', type: 'date', nullable: true })
-  workDate!: Date | string | null;
+  workDate!: string | null;
 
   @Column({ name: 'worker_id', length: 50 })
   workerId!: string;
@@ -54,7 +56,7 @@ export class PmRecord extends BaseEntity {
   certNumber!: string | null;
 
   @Column({ name: 'cert_expire_date', type: 'date', nullable: true })
-  certExpireDate!: Date | string | null;
+  certExpireDate!: string | null;
 
   @Column({ type: 'varchar',  name: 'cert_agency', length: 100, nullable: true })
   certAgency!: string | null;
@@ -70,4 +72,29 @@ export class PmRecord extends BaseEntity {
 
   @Column({ name: 'status', length: 1, default: 'T' })
   status!: string;
+
+  @ManyToOne(() => Equipment, { createForeignKeyConstraints: false })
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'plant_id', referencedColumnName: 'plantId' },
+    { name: 'equipment_id', referencedColumnName: 'id' },
+  ])
+  equipment?: Equipment;
+
+  @ManyToOne(() => Department, { createForeignKeyConstraints: false })
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'department_id', referencedColumnName: 'id' },
+  ])
+  department?: Department;
+
+  @ManyToOne(() => User, { createForeignKeyConstraints: false })
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'worker_id', referencedColumnName: 'id' },
+  ])
+  worker?: User;
+
+  @OneToMany(() => PmRecordItem, (item) => item.pmRecord)
+  checkItems?: PmRecordItem[];
 }

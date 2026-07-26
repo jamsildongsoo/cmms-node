@@ -5,7 +5,7 @@
 /**
  * 문서 상태 (`status` 컬럼) — approval / work-order / pm / work-permit / purchase-request 공통
  * - APR(결재)은 S 미사용
- * - PUR(구매요청)은 결재 비연계라 T·S만 사용
+ * - PUR(구매요청)도 결재연계하며 T·P·C·S·R을 사용
  * - 업무문서(WO·PM·WP)는 전 값 사용
  */
 export enum DocStatus {
@@ -35,14 +35,16 @@ export const DocStatusLabel: Record<DocStatus, string> = {
 export enum ProcStatus {
   ORDERED = 'O', // 발주
   SHIPPING = 'D', // 배송중 (Delivery)
-  RECEIVED = 'I', // 입고 (Incoming, 1회 이상)
+  PARTIAL_RECEIVED = 'P', // 부분입고
+  RECEIVED = 'I', // 입고완료
   CLOSED = 'E', // 종료 (End)
 }
 
 export const ProcStatusLabel: Record<ProcStatus, string> = {
   [ProcStatus.ORDERED]: '발주',
   [ProcStatus.SHIPPING]: '배송중',
-  [ProcStatus.RECEIVED]: '입고',
+  [ProcStatus.PARTIAL_RECEIVED]: '부분입고',
+  [ProcStatus.RECEIVED]: '입고완료',
   [ProcStatus.CLOSED]: '종료',
 };
 
@@ -60,6 +62,18 @@ export const TxTypeLabel: Record<TxType, string> = {
   [TxType.MOVE]: '이동',
   [TxType.ADJ]: '실사조정',
 };
+
+/** 재고 거래사유 (`tx_reason_code`) — 증감 방향과 업무 발생 원인을 분리한다. */
+export enum TxReason {
+  GENERAL = 'GENERAL',
+  PURCHASE = 'PURCHASE',
+  RETURN = 'RETURN',
+  WORK_ORDER = 'WORK_ORDER',
+  DISPOSAL = 'DISPOSAL',
+  TRANSFER = 'TRANSFER',
+  PLANT_TRANSFER = 'PLANT_TRANSFER',
+  STOCKTAKING = 'STOCKTAKING',
+}
 
 /** 이동 거래는 이력(tx_type_code)에 출고·입고 두 다리로 분리 기록된다 */
 export enum MoveTxType {

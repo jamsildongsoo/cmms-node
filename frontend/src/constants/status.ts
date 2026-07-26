@@ -42,13 +42,15 @@ export const getStepTypeLabel = (t: string): string => {
 export const PROC_STATUS_LABELS: Record<string, string> = {
   O: '발주',
   D: '배송중',
-  I: '입고',
+  P: '부분입고',
+  I: '입고완료',
   E: '종료',
 };
 
 export const PROC_STATUS_CLASSES: Record<string, string> = {
   O: 'bg-amber-950/40 text-amber-400 border-amber-900/60',
   D: 'bg-amber-950/40 text-amber-400 border-amber-900/60',
+  P: 'bg-blue-950/40 text-blue-400 border-blue-900/60',
   I: 'bg-blue-950/40 text-blue-400 border-blue-900/60',
   E: 'bg-rose-950/40 text-rose-400 border-rose-900/60',
 };

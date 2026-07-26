@@ -30,10 +30,11 @@ export const AppModuleLabel: Record<AppModule, string> = {
   [AppModule.PUR]: '구매',
 };
 
-/** 결재 연계 가능한 모듈 (approval.ref_module 후보) — PUR은 결재 비연계 */
+/** 결재 연계 가능한 모듈 (approval.ref_module 후보) */
 export const LINKABLE_MODULES = [
   AppModule.WO,
   AppModule.WP,
   AppModule.PM,
+  AppModule.PUR,
 ] as const;
 export type LinkableModule = (typeof LINKABLE_MODULES)[number];

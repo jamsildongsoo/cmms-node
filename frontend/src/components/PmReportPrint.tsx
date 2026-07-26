@@ -1,6 +1,7 @@
 import PrintHeader from './PrintHeader';
 import { PrintSection, PrintField, PrintFieldGrid, PrintTable } from './PrintDoc';
 import { getCommonStatusLabel, getJudgeLabel } from '../constants/status';
+import ApprovalSignatureBox, { type ApprovalSignatureStep } from './ApprovalSignatureBox';
 
 interface PmCheckItem {
   checkName: string;
@@ -32,6 +33,7 @@ interface PmReportPrintProps {
   certExpireDate?: string;
   remarks?: string;
   checkItems: PmCheckItem[];
+  approvalSteps?: ApprovalSignatureStep[];
 }
 
 /** 예방점검 계획서/결과보고서 — 전용 문서뷰(흑백). */
@@ -49,20 +51,22 @@ export default function PmReportPrint(props: PmReportPrintProps) {
         {isPlan ? '예 방 점 검 계 획 서' : '예 방 점 검 결 과 보 고 서'}
       </h1>
 
-      {/* ApprovalDocPrint의 좌측 문서정보와 같은 라벨/값 구성. 결재박스는 표시하지 않는다. */}
-      <section className="border-y-2 border-black mb-5 text-[10px]">
-        <dl className="p-3 space-y-2">
+      <section className="grid grid-cols-2 border-y-2 border-black mb-5 text-[10px]">
+        <dl className="border-r border-gray-500 p-3 space-y-2">
           <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">문서번호</dt><dd className="font-mono">{props.pmNo}</dd></div>
           <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">작성일자</dt><dd className="font-mono">{props.createdAt || '-'}</dd></div>
           <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">부서명</dt><dd>{props.deptName || '-'}</dd></div>
           <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">작성자</dt><dd>{props.authorName || '-'}</dd></div>
         </dl>
+        <div className="p-3">
+          <ApprovalSignatureBox steps={props.approvalSteps || []} drafterDate={props.createdAt} />
+        </div>
       </section>
 
       <PrintSection title="문서 정보">
         <div className="divide-y divide-gray-300 border-y border-gray-400">
           <div className="grid grid-cols-2 gap-4 py-2">
-            <PrintField label="제목" value={props.title || '-'} />
+            <PrintField label="점검명" value={props.title || '-'} />
             <PrintField label="상태" value={getCommonStatusLabel(props.status)} />
           </div>
           <div className="grid grid-cols-2 gap-4 py-2">
@@ -74,7 +78,6 @@ export default function PmReportPrint(props: PmReportPrintProps) {
             <PrintField label={isPlan ? '계획일' : '점검일'} value={props.workDate || '-'} />
             {isPlan && <PrintField label="시작일" value={props.cycleFrom || '-'} />}
             {isPlan && <PrintField label="종료일" value={props.cycleEnd || '-'} />}
-            {isPlan && (props.cycleFrom || props.cycleEnd) && <div className="col-span-3 text-[10px] font-semibold">(반복작업)</div>}
           </div>
         </div>
       </PrintSection>
@@ -89,6 +92,12 @@ export default function PmReportPrint(props: PmReportPrintProps) {
         </PrintSection>
       )}
 
+      {props.remarks && (
+        <PrintSection title="비고">
+          <div className="text-[10px] whitespace-pre-wrap">{props.remarks}</div>
+        </PrintSection>
+      )}
+
       <PrintSection title="점검 세부 항목">
         <PrintTable
           columns={isPlan
@@ -99,12 +108,6 @@ export default function PmReportPrint(props: PmReportPrintProps) {
             : [i + 1, it.checkName, it.checkMethod || '-', range(it), it.checkValue ?? '-', it.unit || '-'])}
         />
       </PrintSection>
-
-      {props.remarks && (
-        <PrintSection title="비고">
-          <div className="text-[10px] whitespace-pre-wrap">{props.remarks}</div>
-        </PrintSection>
-      )}
     </article>
   );
 }

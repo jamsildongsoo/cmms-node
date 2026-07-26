@@ -5,6 +5,8 @@ import { useAuthStore } from '../store/useAuthStore';
 import axiosInstance from '../api/axios';
 import { getApiErrorMessage } from '../utils/apiError';
 import { formatDateOnly } from '../utils/datetime';
+import ListBadge from '../components/ListBadge';
+import ListIconButton from '../components/ListIconButton';
 import { 
   Wrench, Plus, Edit2, Trash2, Printer, Save, X, MinusCircle, FileSpreadsheet, RefreshCw 
 } from 'lucide-react';
@@ -395,27 +397,23 @@ export default function Equipment() {
                     <td className="p-3 text-slate-400 print:text-slate-600">{formatDateOnly(eq.lastCheckDate) || '-'}</td>
                     <td className="p-3 font-semibold text-amber-500 print:text-black">{formatDateOnly(eq.nextCheckDate) || '-'}</td>
                     <td className="p-3">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                        eq.workPermitYn === 'Y' 
-                          ? 'bg-amber-950 text-amber-400 border border-amber-900 print:bg-amber-100 print:text-amber-800' 
-                          : 'bg-slate-950 text-slate-500 border border-slate-900 print:bg-slate-100 print:text-slate-400'
-                      }`}>
+                      <ListBadge>
                         {eq.workPermitYn === 'Y' ? '대상' : '미대상'}
-                      </span>
+                      </ListBadge>
                     </td>
                     <td className="p-3 text-right space-x-2 print:hidden">
-                      <button
+                      <ListIconButton
                         onClick={() => handleOpenEdit(eq)}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-blue-400 transition-colors border-0 cursor-pointer bg-transparent"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                      <button
+                        label={`${eq.name} 상세/수정`}
+                        icon={Edit2}
+                        tone="accent"
+                      />
+                      <ListIconButton
                         onClick={() => handleDelete(eq)}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-rose-400 transition-colors border-0 cursor-pointer bg-transparent"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                        label={`${eq.name} 삭제`}
+                        icon={Trash2}
+                        tone="danger"
+                      />
                     </td>
                   </tr>
                 ))

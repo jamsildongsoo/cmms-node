@@ -1,64 +1,55 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { User } from '../../entities/users.entity';
+import { LoginHistory } from '../../entities/login-history.entity';
 
 @Injectable()
 export class SystemService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    @InjectRepository(LoginHistory)
+    private readonly loginHistoryRepository: Repository<LoginHistory>,
+  ) {}
 
   async getUsers(companyId?: string): Promise<any[]> {
-    let query = `
-      SELECT 
-        company_id as "companyId", 
-        id, 
-        name, 
-        use_yn as "useYn", 
-        role_id as "roleId", 
-        email, 
-        phone, 
-        position, 
-        title 
-      FROM users
-    `;
-    const params: any[] = [];
-
-    if (companyId && companyId.trim() !== '') {
-      query += ` WHERE company_id = $1`;
-      params.push(companyId.trim().toUpperCase());
-    }
-
-    query += ` ORDER BY company_id ASC, id ASC`;
-    return this.dataSource.query(query, params);
+    const cleanCompanyId = companyId?.trim().toUpperCase();
+    return this.userRepository.find({
+      select: {
+        companyId: true,
+        id: true,
+        name: true,
+        useYn: true,
+        roleId: true,
+        email: true,
+        phone: true,
+        position: true,
+        title: true,
+      },
+      where: cleanCompanyId ? { companyId: cleanCompanyId } : {},
+      order: { companyId: 'ASC', id: 'ASC' },
+    });
   }
 
   async getLoginHistory(companyId?: string, userId?: string): Promise<any[]> {
-    let query = `
-      SELECT 
-        company_id as "companyId", 
-        user_id as "userId", 
-        login_ip as "loginIp", 
-        login_result as "loginResult", 
-        login_at as "loginAt" 
-      FROM login_history
-    `;
-    const conditions: string[] = [];
-    const params: any[] = [];
-
-    if (companyId && companyId.trim() !== '') {
-      params.push(companyId.trim().toUpperCase());
-      conditions.push(`company_id = $${params.length}`);
-    }
-
-    if (userId && userId.trim() !== '') {
-      params.push(userId.trim());
-      conditions.push(`user_id = $${params.length}`);
-    }
-
-    if (conditions.length > 0) {
-      query += ` WHERE ` + conditions.join(' AND ');
-    }
-
-    query += ` ORDER BY login_at DESC LIMIT 500`; // Limit to avoid large payloads
-    return this.dataSource.query(query, params);
+    const cleanCompanyId = companyId?.trim().toUpperCase();
+    const cleanUserId = userId?.trim();
+    return this.loginHistoryRepository.find({
+      select: {
+        companyId: true,
+        userId: true,
+        loginIp: true,
+        loginResult: true,
+        loginAt: true,
+      },
+      where: {
+        ...(cleanCompanyId ? { companyId: cleanCompanyId } : {}),
+        ...(cleanUserId ? { userId: cleanUserId } : {}),
+      },
+      order: { loginAt: 'DESC' },
+      take: 500,
+    });
   }
 
   async updateUserUseYn(companyId: string, id: string, useYn: string, operator: string): Promise<void> {
@@ -75,20 +66,22 @@ export class SystemService {
       throw new BadRequestException('SYSTEM 계정은 비활성화할 수 없습니다.');
     }
 
-    const rows = await this.dataSource.query(
-      `UPDATE users 
-       SET use_yn = $3, updated_by = $4
-       WHERE company_id = $1 AND id = $2`,
-      [cleanCoId, cleanId, cleanUseYn, operator]
+    await this.userRepository.update(
+      { companyId: cleanCoId, id: cleanId },
+      { useYn: cleanUseYn, updatedBy: operator },
     );
   }
 
   async validateSystemAdminUser(userId: string): Promise<boolean> {
-    const rows = await this.dataSource.query(
-      `SELECT role_id FROM users 
-       WHERE company_id = 'SYSTEM' AND id = $1 AND use_yn = 'Y' AND delete_yn = 'N'`,
-      [userId]
-    );
-    return rows.length > 0 && rows[0].role_id?.toUpperCase() === 'SYSTEM';
+    const user = await this.userRepository.findOne({
+      select: { roleId: true },
+      where: {
+        companyId: 'SYSTEM',
+        id: userId,
+        useYn: 'Y',
+        deleteYn: 'N',
+      },
+    });
+    return user?.roleId?.toUpperCase() === 'SYSTEM';
   }
 }

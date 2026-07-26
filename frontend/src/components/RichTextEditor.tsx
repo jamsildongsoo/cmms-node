@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import { AlignCenter, AlignLeft, AlignRight } from 'lucide-react';
 import { createTiptapExtensions } from './tiptapExtensions';
@@ -31,6 +32,14 @@ export default function RichTextEditor({ content, onChange, placeholder, minHeig
       },
     },
   });
+
+  useEffect(() => {
+    if (!editor) return;
+    const editorContent = editor.getJSON();
+    if (JSON.stringify(editorContent) !== JSON.stringify(content)) {
+      editor.commands.setContent(content, { emitUpdate: false });
+    }
+  }, [editor, content]);
 
   if (!editor) return null;
 

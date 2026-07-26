@@ -4,14 +4,18 @@ import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
 import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
-import { getCommonStatusLabel as getStatusLabel, getCommonStatusClass as getStatusClass } from '../constants/status';
+import { getCommonStatusLabel as getStatusLabel } from '../constants/status';
 import { formatDateTime, nowLocalInput, utcToInput, inputToUtc } from '../utils/datetime';
 import { getApiErrorMessage } from '../utils/apiError';
 import PrintHeader from '../components/PrintHeader';
 import WorkPermitPrint from '../components/WorkPermitPrint';
 import PrintWindowLayout from '../components/PrintWindowLayout';
 import { openPrintWindow } from '../utils/printWindow';
-import ApprovalSubmitModal from '../components/ApprovalSubmitModal';
+import ApprovalDraftModal from '../components/ApprovalDraftModal';
+import ListIconButton from '../components/ListIconButton';
+import type { RichTextDocument } from '../types/richText';
+import { createWorkPermitApprovalContent } from '../utils/workPermitApprovalContent';
+import { loadApprovalSignatureSteps } from '../utils/approvalSignature';
 import { 
   ClipboardList, Edit2, Trash2, Printer, X, Plus, CheckSquare, Square, ChevronDown, ChevronUp 
 } from 'lucide-react';
@@ -31,13 +35,13 @@ interface WorkPermitModel {
   workSummary: string | null;
   riskFactors: string | null;
   safetyMeasures: string | null;
-  jsonGeneral: string | null;
-  jsonFire: string | null;
-  jsonConfined: string | null;
-  jsonElectric: string | null;
-  jsonHighPlace: string | null;
-  jsonExcavation: string | null;
-  jsonHeavyLoad: string | null;
+  jsonGeneral: string | CheckItem[] | null;
+  jsonFire: string | CheckItem[] | null;
+  jsonConfined: string | CheckItem[] | null;
+  jsonElectric: string | CheckItem[] | null;
+  jsonHighPlace: string | CheckItem[] | null;
+  jsonExcavation: string | CheckItem[] | null;
+  jsonHeavyLoad: string | CheckItem[] | null;
   remarks: string | null;
   fileGroupId: number | null;
   refNo: string | null;
@@ -96,8 +100,23 @@ const INITIAL_HEAVY_LOAD: CheckItem[] = [
   { question: '양중 작업 반경 내 일반인의 진입을 철저히 차단하고 신호수를 배치했는가?', checked: false, remarks: '' }
 ];
 
+const parseCheckItems = (
+  value: string | CheckItem[] | null | undefined,
+  fallback: CheckItem[],
+): CheckItem[] => {
+  if (Array.isArray(value)) return value;
+  if (!value) return fallback;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed as CheckItem[] : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 export default function WorkPermit() {
   const user = useAuthStore((s) => s.user);
+  const [activeTab, setActiveTab] = useState<'plans' | 'results'>('plans');
   const [searchType, setSearchType] = useState<'id' | 'title' | 'supervisor'>('id');
   const [searchValue, setSearchValue] = useState('');
 
@@ -105,7 +124,7 @@ export default function WorkPermit() {
   const [permits, setPermits] = useState<WorkPermitModel[]>([]);
   const [equipments, setEquipments] = useState<{ id: string; name: string; plantId: string }[]>([]);
   const [depts, setDepts] = useState<{ id: string; name: string }[]>([]);
-  const [usersList, setUsersList] = useState<{ id: string; name: string }[]>([]);
+  const [usersList, setUsersList] = useState<{ id: string; name: string; title?: string | null; position?: string | null }[]>([]);
   const [workOrders, setWorkOrders] = useState<{ id: string; title: string }[]>([]);
 
   // Form states
@@ -155,9 +174,16 @@ export default function WorkPermit() {
   });
 
   const [isLoading, setIsLoading] = useState(false);
-  const [approvalRef, setApprovalRef] = useState<{ refNo: string; title: string } | null>(null);
+  const [approvalRef, setApprovalRef] = useState<{
+    refNo: string;
+    title: string;
+    content: RichTextDocument;
+  } | null>(null);
 
   const canDirectConfirm = user?.permissions?.WP?.A === 'Y';
+  const currentPermits = permits.filter((permit) =>
+    activeTab === 'plans' ? permit.stepStage === 'P' : permit.stepStage === 'R',
+  );
 
   const fetchData = async () => {
     try {
@@ -173,7 +199,10 @@ export default function WorkPermit() {
         axiosInstance.get('/mdm/users'),
         axiosInstance.get('/work-order')
       ]);
-      setPermits(wpRes.data);
+      setPermits((wpRes.data || []).map((permit: WorkPermitModel & { step_stage?: string }) => ({
+        ...permit,
+        stepStage: permit.stepStage || permit.step_stage || 'P',
+      })));
       setEquipments(eqRes.data);
       setDepts(deptRes.data);
       setUsersList(userRes.data);
@@ -223,7 +252,7 @@ export default function WorkPermit() {
     setEquipmentName(equipments.length > 0 ? equipments[0].name : '');
     setWorkOrderId('');
     setTitle('');
-    setStepStage('P');
+    setStepStage(activeTab === 'plans' ? 'P' : 'R');
     setSelectedTypes(['GENERAL']);
     setStartAt(nowLocalInput());
     setEndAt(utcToInput(new Date(Date.now() + 8 * 3600 * 1000).toISOString()));
@@ -281,18 +310,18 @@ export default function WorkPermit() {
       setRemarks(w.remarks || '');
       setRefNo(w.refNo || '');
       setRefModule(w.refModule || '');
-      setApprovalId(w.approvalId || '');
+      setApprovalId(w.status === 'R' ? '' : (w.approvalId || ''));
       setCreatedAt(w.createdAt || '');
       setCreatedBy(w.createdBy || '');
 
       // Parse JSON checksheets
-      setGenChecks(w.jsonGeneral ? JSON.parse(w.jsonGeneral) : INITIAL_GENERAL);
-      setFireChecks(w.jsonFire ? JSON.parse(w.jsonFire) : INITIAL_FIRE);
-      setConfChecks(w.jsonConfined ? JSON.parse(w.jsonConfined) : INITIAL_CONFINED);
-      setElecChecks(w.jsonElectric ? JSON.parse(w.jsonElectric) : INITIAL_ELECTRIC);
-      setHighChecks(w.jsonHighPlace ? JSON.parse(w.jsonHighPlace) : INITIAL_HIGH_PLACE);
-      setExcaChecks(w.jsonExcavation ? JSON.parse(w.jsonExcavation) : INITIAL_EXCAVATION);
-      setHeavyChecks(w.jsonHeavyLoad ? JSON.parse(w.jsonHeavyLoad) : INITIAL_HEAVY_LOAD);
+      setGenChecks(parseCheckItems(w.jsonGeneral, INITIAL_GENERAL));
+      setFireChecks(parseCheckItems(w.jsonFire, INITIAL_FIRE));
+      setConfChecks(parseCheckItems(w.jsonConfined, INITIAL_CONFINED));
+      setElecChecks(parseCheckItems(w.jsonElectric, INITIAL_ELECTRIC));
+      setHighChecks(parseCheckItems(w.jsonHighPlace, INITIAL_HIGH_PLACE));
+      setExcaChecks(parseCheckItems(w.jsonExcavation, INITIAL_EXCAVATION));
+      setHeavyChecks(parseCheckItems(w.jsonHeavyLoad, INITIAL_HEAVY_LOAD));
 
       // Accordion setup based on selected types
       const types = w.permitTypeCodes.split(',');
@@ -327,7 +356,7 @@ export default function WorkPermit() {
 
   const handleSave = async (submitStatus: 'T' | 'S' | 'P') => {
     if (!title.trim()) {
-      toast.error('허가서 제목을 입력해주세요.');
+      toast.error('허가명을 입력해주세요.');
       return;
     }
     setIsLoading(true);
@@ -366,7 +395,46 @@ export default function WorkPermit() {
       if (submitStatus === 'P') {
         const savedId = response.data.id;
         setWpNo(savedId);
-        setApprovalRef({ refNo: savedId, title: `[작업허가서] ${title}` });
+        const checksheetMap = [
+          { id: 'GENERAL', name: '일반위험작업 체크시트', items: genChecks },
+          { id: 'FIRE', name: '화기작업 체크시트', items: fireChecks },
+          { id: 'CONFINED', name: '밀폐공간출입 체크시트', items: confChecks },
+          { id: 'ELECTRIC', name: '정전작업 체크시트', items: elecChecks },
+          { id: 'HIGH_PLACE', name: '고소작업 체크시트', items: highChecks },
+          { id: 'EXCAVATION', name: '굴착작업 체크시트', items: excaChecks },
+          { id: 'HEAVY_LOAD', name: '중량물취급 체크시트', items: heavyChecks },
+        ];
+        setApprovalRef({
+          refNo: savedId,
+          title: `[작업허가서] ${title}`,
+          content: createWorkPermitApprovalContent({
+            wpNo: savedId,
+            statusLabel: getStatusLabel('P'),
+            createdAt: response.data.createdAt
+              ? formatDateTime(response.data.createdAt).slice(0, 10)
+              : '-',
+            departmentName: depts.find((dept) => dept.id === departmentId)?.name || departmentId,
+            authorName:
+              usersList.find((candidate) => candidate.id === response.data.createdBy)?.name
+              || response.data.createdBy
+              || user?.name
+              || '-',
+            equipmentName: `${equipmentId} / ${equipmentName || equipmentId}`,
+            permitTypeName: selectedTypes.map(getWpTypeLabel).join(', '),
+            startAt: formatDateTime(inputToUtc(startAt)),
+            endAt: formatDateTime(inputToUtc(endAt)),
+            supervisorName:
+              usersList.find((candidate) => candidate.id === supervisorId)?.name || supervisorId,
+            workOrderId,
+            workSummary,
+            riskFactors,
+            safetyMeasures,
+            remarks,
+            checksheets: checksheetMap
+              .filter((sheet) => selectedTypes.includes(sheet.id))
+              .map(({ name, items }) => ({ name, items })),
+          }),
+        });
         return;
       }
       toast.success(submitStatus === 'T' ? '임시저장 되었습니다.' : '안전작업허가서가 직접 확정 발급 완료되었습니다.');
@@ -412,15 +480,15 @@ export default function WorkPermit() {
       const { data } = await axiosInstance.get(`/work-permit/details?plantId=${wp.plantId}&id=${wp.id}`);
       const detail = { ...wp, ...data } as WorkPermitModel;
       const types = detail.permitTypeCodes.split(',');
-      const parseChecks = (value: string | null, fallback: CheckItem[]) => value ? JSON.parse(value) : fallback;
+      const approvalSteps = await loadApprovalSignatureSteps(detail.approvalId, usersList);
       const printChecksheets = [
-        { id: 'GENERAL', name: '일반위험작업 체크시트', state: parseChecks(detail.jsonGeneral, INITIAL_GENERAL) },
-        { id: 'FIRE', name: '화기작업 체크시트', state: parseChecks(detail.jsonFire, INITIAL_FIRE) },
-        { id: 'CONFINED', name: '밀폐공간출입 체크시트', state: parseChecks(detail.jsonConfined, INITIAL_CONFINED) },
-        { id: 'ELECTRIC', name: '정전작업 체크시트', state: parseChecks(detail.jsonElectric, INITIAL_ELECTRIC) },
-        { id: 'HIGH_PLACE', name: '고소작업 체크시트', state: parseChecks(detail.jsonHighPlace, INITIAL_HIGH_PLACE) },
-        { id: 'EXCAVATION', name: '굴착작업 체크시트', state: parseChecks(detail.jsonExcavation, INITIAL_EXCAVATION) },
-        { id: 'HEAVY_LOAD', name: '중량물취급 체크시트', state: parseChecks(detail.jsonHeavyLoad, INITIAL_HEAVY_LOAD) },
+        { id: 'GENERAL', name: '일반위험작업 체크시트', state: parseCheckItems(detail.jsonGeneral, INITIAL_GENERAL) },
+        { id: 'FIRE', name: '화기작업 체크시트', state: parseCheckItems(detail.jsonFire, INITIAL_FIRE) },
+        { id: 'CONFINED', name: '밀폐공간출입 체크시트', state: parseCheckItems(detail.jsonConfined, INITIAL_CONFINED) },
+        { id: 'ELECTRIC', name: '정전작업 체크시트', state: parseCheckItems(detail.jsonElectric, INITIAL_ELECTRIC) },
+        { id: 'HIGH_PLACE', name: '고소작업 체크시트', state: parseCheckItems(detail.jsonHighPlace, INITIAL_HIGH_PLACE) },
+        { id: 'EXCAVATION', name: '굴착작업 체크시트', state: parseCheckItems(detail.jsonExcavation, INITIAL_EXCAVATION) },
+        { id: 'HEAVY_LOAD', name: '중량물취급 체크시트', state: parseCheckItems(detail.jsonHeavyLoad, INITIAL_HEAVY_LOAD) },
       ];
       createRoot(container).render(
         <PrintWindowLayout printWindow={printWindow} contentClassName="max-w-[180mm]">
@@ -445,6 +513,7 @@ export default function WorkPermit() {
             remarks={detail.remarks || undefined}
             checksheets={printChecksheets}
             selectedTypes={types}
+            approvalSteps={approvalSteps}
           />
         </PrintWindowLayout>,
       );
@@ -456,7 +525,7 @@ export default function WorkPermit() {
   };
 
   const handlePrint = () => {
-    if (permits.length === 0) { toast.error('인쇄할 목록이 없습니다.'); return; }
+    if (currentPermits.length === 0) { toast.error('인쇄할 목록이 없습니다.'); return; }
     const user = useAuthStore.getState().user;
     const now = new Date();
     const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
@@ -464,17 +533,15 @@ export default function WorkPermit() {
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
     if (!printWindow) { toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.'); return; }
 
-    const rows = permits.map(wp => `
+    const rows = currentPermits.map(wp => `
       <tr>
         <td class="mono">${wp.id}</td>
         <td>${wp.title}</td>
-        <td>${wp.equipmentId}</td>
-        <td>${wp.permitTypeCodes.split(',').map(getWpTypeLabel).join(', ')}</td>
-        <td>${depts.find(d => d.id === wp.departmentId)?.name || wp.departmentId}</td>
+        <td>${equipments.find(e => e.id === wp.equipmentId)?.name || wp.equipmentId}</td>
+        <td>${usersList.find(u => u.id === wp.createdBy)?.name || wp.createdBy || '-'}</td>
         <td>${usersList.find(u => u.id === wp.supervisorId)?.name || wp.supervisorId}</td>
         <td>${formatDateTime(wp.startAt)}</td>
         <td>${formatDateTime(wp.endAt)}</td>
-        <td>${getStatusLabel(wp.status)}</td>
       </tr>
     `).join('');
 
@@ -496,10 +563,10 @@ th { background: #eee; font-weight: 600; }
 @media print { .no-print { display: none; } }
 </style></head><body>
 <div class="no-print"><button onclick="window.print()">인쇄</button></div>
-<h1>안전작업허가서 현황</h1>
 <div class="print-info"><span>회사: ${user?.companyName || user?.companyId || 'CMMS'}</span><span>출력자: ${user?.name || '-'} | 출력일시: ${stamp}</span></div>
+<h1>안전작업허가서 현황</h1>
 <table><thead><tr>
-<th>허가서번호</th><th>제목</th><th>설비</th><th>유형</th><th>부서</th><th>감독자</th><th>시작</th><th>종료</th><th>상태</th>
+<th>허가번호</th><th>허가명</th><th>설비명</th><th>담당자</th><th>감독자</th><th>시작 시간</th><th>종료 시간</th>
 </tr></thead><tbody>${rows}</tbody></table>
 </body></html>`);
     printWindow.document.close();
@@ -544,6 +611,24 @@ th { background: #eee; font-weight: 600; }
             <Plus size={14} />
             입력
           </button>
+          <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg">
+            <button
+              onClick={() => setActiveTab('plans')}
+              className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer border-0 outline-none ${
+                activeTab === 'plans' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              계획
+            </button>
+            <button
+              onClick={() => setActiveTab('results')}
+              className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer border-0 outline-none ${
+                activeTab === 'results' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              실적
+            </button>
+          </div>
         </div>
       </div>
 
@@ -555,7 +640,7 @@ th { background: #eee; font-weight: 600; }
             className="bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-3 text-xs text-slate-300 outline-none"
           >
             <option value="id">문서번호</option>
-            <option value="title">타이틀</option>
+            <option value="title">제목</option>
             <option value="supervisor">담당자</option>
           </select>
           <input
@@ -583,24 +668,21 @@ th { background: #eee; font-weight: 600; }
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-900 text-slate-400 border-b border-slate-800 select-none print:bg-slate-100 print:text-slate-800 print:border-slate-300">
-                <th className="p-3 font-semibold">허가서번호</th>
-                <th className="p-3 font-semibold">허가서 제목</th>
-                <th className="p-3 font-semibold">설비코드</th>
-                <th className="p-3 font-semibold">허가 유형</th>
-                <th className="p-3 font-semibold">담당 부서</th>
-                <th className="p-3 font-semibold">안전 감독자</th>
-                <th className="p-3 font-semibold">작업 예정 시작</th>
-                <th className="p-3 font-semibold">작업 예정 종료</th>
-                <th className="p-3 font-semibold">연계결재번호</th>
-                <th className="p-3 font-semibold">상태</th>
+                <th className="p-3 font-semibold">허가번호</th>
+                <th className="p-3 font-semibold">허가명</th>
+                <th className="p-3 font-semibold">설비명</th>
+                <th className="p-3 font-semibold">담당자</th>
+                <th className="p-3 font-semibold">감독자</th>
+                <th className="p-3 font-semibold">시작 시간</th>
+                <th className="p-3 font-semibold">종료 시간</th>
                 <th className="p-3 font-semibold text-right print:hidden">작업</th>
               </tr>
             </thead>
             <tbody>
-              {permits.length === 0 ? (
-                <tr><td colSpan={11} className="p-8 text-center text-slate-600 print:text-slate-400">조회된 작업허가서 내역이 없습니다.</td></tr>
+              {currentPermits.length === 0 ? (
+                <tr><td colSpan={8} className="p-8 text-center text-slate-600 print:text-slate-400">조회된 작업허가서 내역이 없습니다.</td></tr>
               ) : (
-                permits.map((wp) => (
+                currentPermits.map((wp) => (
                   <tr key={wp.id} className="border-b border-slate-900 hover:bg-slate-900/30 text-slate-300 print:border-slate-200 print:text-slate-800 print:hover:bg-transparent">
                     <td className="p-3 font-mono">
                       <button type="button" onClick={() => openPrintDocument(wp)} className="no-print bg-transparent border-0 p-0 text-blue-400 hover:text-blue-300 hover:underline font-mono cursor-pointer">
@@ -609,39 +691,28 @@ th { background: #eee; font-weight: 600; }
                       <span className="hidden print:inline text-slate-600">{wp.id}</span>
                     </td>
                     <td className="p-3 font-semibold text-slate-200 print:text-slate-900">{wp.title}</td>
-                    <td className="p-3 font-mono text-slate-400">{wp.equipmentId}</td>
-                    <td className="p-3">
-                      <div className="flex flex-wrap gap-1">
-                        {wp.permitTypeCodes.split(',').map((t, i) => (
-                          <span key={i} className="bg-slate-850 px-1.5 py-0.5 rounded text-[10px] text-slate-400 print:bg-slate-100 print:text-slate-700">
-                            {getWpTypeLabel(t)}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="p-3">{depts.find(d => d.id === wp.departmentId)?.name || wp.departmentId}</td>
+                    <td className="p-3 text-slate-400">{equipments.find(e => e.id === wp.equipmentId)?.name || wp.equipmentId}</td>
+                    <td className="p-3">{usersList.find(u => u.id === wp.createdBy)?.name || wp.createdBy || '-'}</td>
                     <td className="p-3">{usersList.find(u => u.id === wp.supervisorId)?.name || wp.supervisorId}</td>
                     <td className="p-3 font-mono text-slate-400">{formatDateTime(wp.startAt)}</td>
                     <td className="p-3 font-mono text-slate-400">{formatDateTime(wp.endAt)}</td>
-                    <td className="p-3 font-mono text-slate-500">{wp.approvalId || '-'}</td>
-                    <td className="p-3">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${getStatusClass(wp.status)}`}>
-                        {getStatusLabel(wp.status)}
-                      </span>
-                    </td>
                     <td className="p-3 text-right space-x-2 print:hidden">
-                      <button
-                        onClick={() => handleOpenEdit(wp)}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-blue-400 transition-colors border-0 cursor-pointer bg-transparent"
-                      >
-                        <Edit2 size={13} />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(wp)}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-rose-400 transition-colors border-0 cursor-pointer bg-transparent"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      {['T', 'R'].includes(wp.status) && (
+                        <ListIconButton
+                          onClick={() => handleOpenEdit(wp)}
+                          label="상세/수정"
+                          icon={Edit2}
+                          tone="accent"
+                        />
+                      )}
+                      {wp.status === 'T' && (
+                          <ListIconButton
+                            onClick={() => handleDelete(wp)}
+                            label="삭제"
+                            icon={Trash2}
+                            tone="danger"
+                          />
+                      )}
                     </td>
                   </tr>
                 ))
@@ -658,7 +729,9 @@ th { background: #eee; font-weight: 600; }
             {/* Modal Header */}
             <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0 print:hidden">
               <h2 className="text-lg font-bold text-slate-200">
-                {wpNo ? `작업허가서 수정/상세 [${wpNo}] ${equipmentName}` : `신규 안전작업허가서 작성`}
+                {wpNo
+                  ? `작업허가 ${stepStage === 'P' ? '계획' : '실적'} 수정/상세 [${wpNo}] ${equipmentName}`
+                  : `신규 작업허가 ${stepStage === 'P' ? '계획' : '실적'} 작성`}
               </h2>
               <button
                 onClick={() => setIsFormOpen(false)}
@@ -708,7 +781,7 @@ th { background: #eee; font-weight: 600; }
                     <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-5 print:bg-white print:border-slate-300">
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
                         <div className="sm:col-span-2 md:col-span-3">
-                          <label className="block text-slate-400 mb-1.5 print:text-slate-600 font-semibold">허가서 제목 <span className="text-rose-500 print:hidden">*</span></label>
+                          <label className="block text-slate-400 mb-1.5 print:text-slate-600 font-semibold">허가명 <span className="text-rose-500 print:hidden">*</span></label>
                           <input
                             type="text"
                             required
@@ -727,6 +800,28 @@ th { background: #eee; font-weight: 600; }
                           >
                             {equipments.map(eq => (
                               <option key={eq.id} value={eq.id}>{eq.name} [{eq.id}]</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">담당자</label>
+                          <input
+                            type="text"
+                            readOnly
+                            value={usersList.find((item) => item.id === (createdBy || user?.id))?.name || user?.name || createdBy || '-'}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg py-2 px-3 text-slate-400 outline-none cursor-not-allowed print:bg-white print:border-slate-300 print:text-slate-800"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">감독자</label>
+                          <select
+                            value={supervisorId}
+                            onChange={(e) => setSupervisorId(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none print:bg-white print:border-slate-300 print:text-slate-800"
+                          >
+                            <option value="">-- 감독자 선택 --</option>
+                            {usersList.map((candidate) => (
+                              <option key={candidate.id} value={candidate.id}>{candidate.name} [{candidate.id}]</option>
                             ))}
                           </select>
                         </div>
@@ -755,7 +850,7 @@ th { background: #eee; font-weight: 600; }
                     <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-5 print:bg-white print:border-slate-300">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                         <div>
-                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">허가유효 시작 시간</label>
+                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">시작 시간</label>
                           <input
                             type="datetime-local"
                             value={startAt}
@@ -764,7 +859,7 @@ th { background: #eee; font-weight: 600; }
                           />
                         </div>
                         <div>
-                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">허가유효 종료 시간</label>
+                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">종료 시간</label>
                           <input
                             type="datetime-local"
                             value={endAt}
@@ -968,16 +1063,17 @@ th { background: #eee; font-weight: 600; }
           </div>
         </div>
       )}
-      <ApprovalSubmitModal
+      <ApprovalDraftModal
         open={!!approvalRef}
+        mode="linked"
         refModule="WP"
         refNo={approvalRef?.refNo || ''}
         defaultTitle={approvalRef?.title || ''}
+        defaultContent={approvalRef?.content}
         users={usersList}
         currentUserId={user?.id}
         onClose={() => setApprovalRef(null)}
-        onSubmitted={(newApprovalId) => {
-          setApprovalId(newApprovalId);
+        onSubmitted={() => {
           setApprovalRef(null);
           setIsFormOpen(false);
           toast.success('작업허가서 결재 문서가 상신되었습니다.');

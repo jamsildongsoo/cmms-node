@@ -54,7 +54,7 @@ export default function Login() {
     const success = await login(loginCompanyId, loginUserId, loginPassword);
     setIsLoading(false);
     if (success) {
-      // 비밀번호 변경 안내는 Dashboard의 PasswordChangeNotice 모달이 처리(플래그 기반)
+      // 비밀번호 변경 안내는 로그인 후 공통 레이아웃의 PasswordChangeNotice 모달이 처리(플래그 기반)
       if (rememberMe) {
         localStorage.setItem('saved_company_id', loginCompanyId);
         localStorage.setItem('saved_user_id', loginUserId);

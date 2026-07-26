@@ -2,16 +2,9 @@ import RichTextViewer from './RichTextViewer';
 import PrintHeader from './PrintHeader';
 import { formatDateTime } from '../utils/datetime';
 import { isRichTextEmpty, type RichTextDocument } from '../types/richText';
+import ApprovalSignatureBox, { type ApprovalSignatureStep } from './ApprovalSignatureBox';
 
-export interface ApprovalDocumentStep {
-  stepNo: number;
-  approverName: string;
-  approverTitle: string | null;
-  approvalType: string;
-  approvalResult: string | null;
-  comments?: string | null;
-  actionAt?: string | null;
-}
+export type ApprovalDocumentStep = ApprovalSignatureStep;
 
 export interface ApprovalDocumentAttachment {
   itemNo: number;
@@ -48,48 +41,9 @@ const formatSize = (bytes: number) =>
       ? `${(bytes / 1024).toFixed(1)} KB`
       : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
-function SignatureGrid({
-  label,
-  steps,
-  drafterDate,
-}: {
-  label: string;
-  steps: ApprovalDocumentStep[];
-  drafterDate?: string;
-}) {
-  const slots = Array.from({ length: 4 }, (_, index) => steps[index] ?? null);
-
-  return (
-    <div className="grid w-full grid-cols-[42px_1fr] border border-gray-500 border-b-0 last:border-b">
-      <div className="flex items-center justify-center border-r border-gray-500 bg-white text-[10px] font-bold text-black">
-        {label}
-      </div>
-      <div className="grid grid-cols-4">
-        {slots.map((step, index) => (
-          <div key={step?.stepNo ?? `${label}-${index}`} className="min-w-0 border-r border-gray-400 last:border-r-0 text-center text-black">
-            <div className="min-h-6 border-b border-gray-300 bg-white px-1 py-1 text-[9px] font-semibold">
-              {step?.approverTitle || (step?.approvalType === 'D' ? '기안자' : '')}
-            </div>
-            <div className="min-h-8 border-b border-gray-300 px-1 py-2 text-[10px] font-bold">
-              {step?.approverName || ''}
-            </div>
-            <div className="min-h-6 px-1 py-1 text-[9px] font-mono">
-              {step ? formatDateOnly(step.approvalType === 'D' ? (step.actionAt || drafterDate) : step.actionAt) : ''}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export default function ApprovalDocPrint(props: ApprovalDocPrintProps) {
-  const approvals = props.steps.filter((step) => step.approvalType === 'D' || step.approvalType === 'A').slice(0, 4);
-  const agreements = props.steps.filter((step) => step.approvalType === 'G').slice(0, 4);
-  const references = props.steps.filter((step) => step.approvalType === 'R');
-
   return (
-    <article className="approval-document bg-white text-black border border-gray-500 p-5">
+    <article className="approval-document print-area print-portrait bg-white text-black border border-gray-500 p-5 print:border-0 print:p-0">
       <style>{`
         .approval-document {
           -webkit-print-color-adjust: exact;
@@ -111,16 +65,7 @@ export default function ApprovalDocPrint(props: ApprovalDocPrintProps) {
         </dl>
 
         <div className="p-3">
-          <SignatureGrid label="결재" steps={approvals} drafterDate={props.createdAt} />
-          <SignatureGrid label="합의" steps={agreements} />
-          <div className="grid grid-cols-[42px_1fr] border border-gray-500 text-[10px]">
-            <div className="flex items-center justify-center border-r border-gray-500 bg-white font-bold">참조</div>
-            <div className="min-h-8 px-2 py-1.5 leading-relaxed">
-              {references.length > 0
-                ? references.map((step) => `${step.approverTitle ? `${step.approverTitle} / ` : ''}${step.approverName}`).join(', ')
-                : '-'}
-            </div>
-          </div>
+          <ApprovalSignatureBox steps={props.steps} drafterDate={props.createdAt} />
         </div>
       </section>
 

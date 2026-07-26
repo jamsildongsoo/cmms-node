@@ -10,6 +10,10 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { WorkPermitService } from './work-permit.service';
+import {
+  SaveWorkPermitDto,
+  WorkPermitResponseDto,
+} from './dto/work-permit.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionGuard, Permission, PermissionSave } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
@@ -25,7 +29,7 @@ export class WorkPermitController {
   async getWorkPermits(
     @Query('searchType') searchType?: string,
     @Query('searchValue') searchValue?: string,
-  ): Promise<any[]> {
+  ): Promise<WorkPermitResponseDto[]> {
     const { companyId, userId } = getTenantContext();
     return this.workPermitService.getWorkPermitsByCompany(companyId, userId, searchType, searchValue);
   }
@@ -35,14 +39,16 @@ export class WorkPermitController {
   async getWorkPermitDetails(
     @Query('plantId') plantId: string,
     @Query('id') id: string,
-  ): Promise<any> {
+  ): Promise<WorkPermitResponseDto> {
     const { companyId, userId } = getTenantContext();
     return this.workPermitService.getWorkPermitDetails(companyId, plantId, id, userId);
   }
 
   @Post()
   @PermissionSave(AppModule.WP, 'status')
-  async saveWorkPermit(@Body() permit: any): Promise<any> {
+  async saveWorkPermit(
+    @Body() permit: SaveWorkPermitDto,
+  ): Promise<WorkPermitResponseDto> {
     const { companyId, userId } = getTenantContext();
     return this.workPermitService.saveWorkPermit(companyId, permit, userId);
   }

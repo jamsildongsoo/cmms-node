@@ -4,6 +4,7 @@ import { requestConfirmation } from '../utils/userActionDialog';
 import { useAuthStore } from '../store/useAuthStore';
 import axiosInstance from '../api/axios';
 import { getApiErrorMessage } from '../utils/apiError';
+import ListIconButton from '../components/ListIconButton';
 import {
   Package, Plus, Edit2, Trash2, Printer, Save, X, FileSpreadsheet
 } from 'lucide-react';
@@ -312,18 +313,18 @@ export default function Inventory() {
                     <td className="p-3 text-slate-400 print:text-slate-600">{inv.reorderQty}</td>
                     <td className="p-3 text-slate-400 print:text-slate-600">{inv.leadTimeDays}일</td>
                     <td className="p-3 text-right space-x-2 print:hidden">
-                      <button
+                      <ListIconButton
                         onClick={() => handleOpenEdit(inv)}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-blue-400 transition-colors border-0 cursor-pointer bg-transparent"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                      <button
+                        label={`${inv.name} 상세/수정`}
+                        icon={Edit2}
+                        tone="accent"
+                      />
+                      <ListIconButton
                         onClick={() => handleDelete(inv.id)}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-rose-400 transition-colors border-0 cursor-pointer bg-transparent"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                        label={`${inv.name} 삭제`}
+                        icon={Trash2}
+                        tone="danger"
+                      />
                     </td>
                   </tr>
                 ))

@@ -18,6 +18,9 @@ export class InventoryHistory extends BaseEntity {
   @Column({ name: 'tx_type_code', length: 50 })
   txTypeCode!: string;
 
+  @Column({ name: 'tx_reason_code', length: 50, default: 'GENERAL' })
+  txReasonCode!: string;
+
   @Column({ name: 'qty', type: 'numeric', precision: 15, scale: 4, default: '0' })
   qty!: string;
 

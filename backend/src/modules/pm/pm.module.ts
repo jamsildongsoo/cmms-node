@@ -5,13 +5,20 @@ import { PmService } from './pm.service';
 import { PmRecord } from '../../entities/pm-record.entity';
 import { PmRecordItem } from '../../entities/pm-record-item.entity';
 import { PmCheckTemplate } from '../../entities/pm-check-template.entity';
+import { EquipmentCheckCycle } from '../../entities/equipment-check-cycle.entity';
+import { PmRepository } from './pm.repository';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([PmRecord, PmRecordItem, PmCheckTemplate]),
+    TypeOrmModule.forFeature([
+      PmRecord,
+      PmRecordItem,
+      PmCheckTemplate,
+      EquipmentCheckCycle,
+    ]),
   ],
   controllers: [PmController],
-  providers: [PmService],
+  providers: [PmService, PmRepository],
   exports: [PmService, TypeOrmModule],
 })
 export class PmModule {}

@@ -1,44 +1,44 @@
-/* =========================================================================
-   재고 처리 핵심 서비스 — 비관적 락 + 이동평균법
-   난제 해결:
-     - 비관적 락: SELECT ... FOR UPDATE NOWAIT + statement_timeout
-     - 금액 정밀도: Decimal.js (BigDecimal 대응)
-     - 데드락 방지: (warehouse_id, inventory_id) 기준 정렬 잠금
-   ========================================================================= */
-import { Injectable, ConflictException, BadRequestException } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+} from '@nestjs/common';
+import { Between, DataSource, QueryRunner } from 'typeorm';
 import Decimal from 'decimal.js';
 import { SequenceService, AppModule } from '../../common/sequence/sequence.service';
 import { getTenantContext } from '../../common/context/tenant.context';
-import { TxType, MoveTxType } from '../../common/constants/status.constants';
+import {
+  TxType,
+  MoveTxType,
+  TxReason,
+} from '../../common/constants/status.constants';
+import { InventoryStatus } from '../../entities/inventory-status.entity';
+import { InventoryHistory } from '../../entities/inventory-history.entity';
+import { InventoryMonthlyClosing } from '../../entities/inventory-monthly-closing.entity';
+import { User } from '../../entities/users.entity';
+import { Warehouse } from '../../entities/warehouse.entity';
 
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_UP });
 
 export interface TxItem {
   txTypeCode: TxType;
+  txReasonCode?: TxReason;
   warehouseId: string;
   inventoryId: string;
-  targetWarehouseId?: string; // MOVE 전용
-  qty: string;                // Decimal-safe string
-  unitPrice?: string;         // IN 전용, null이면 '0'
-  txDate?: Date;
+  targetWarehouseId?: string;
+  qty: string;
+  unitPrice?: string;
+  txDate?: Date | string;
   docNo?: string;
   refNo?: string;
   refModule?: string;
-  refLineNo?: string;         // 연계 문서 라인 번호 (PUR 등)
+  refLineNo?: string;
 }
-
-export interface InventoryTxRequest {
-  items: TxItem[];
-}
-
-interface StatusRow {
-  company_id: string;
-  warehouse_id: string;
-  inventory_id: string;
-  qty: string;
-  amount: string;
-  delete_yn: string;
+export interface InventoryTxRequest { items: TxItem[] }
+export interface InventoryTxContext {
+  runner: QueryRunner;
+  companyId: string;
+  userId: string;
 }
 
 @Injectable()
@@ -48,404 +48,393 @@ export class InventoryTxService {
     private readonly sequenceService: SequenceService,
   ) {}
 
-  async processTransactions(request: InventoryTxRequest): Promise<void> {
-    const { companyId, userId } = getTenantContext();
-
+  async processTransactions(
+    request: InventoryTxRequest,
+    context?: InventoryTxContext,
+  ): Promise<void> {
+    const tenant = context ?? getTenantContext();
+    const { companyId, userId } = tenant;
     if (!request.items?.length) return;
-
-    // 1. 전표번호 일괄 채번 (items 중 docNo가 없으면 STK 채번)
-    const userDept = await this.getUserDept(companyId, userId);
-    let docNo = request.items.find((i) => i.docNo)?.docNo;
-    if (!docNo) {
-      docNo = await this.sequenceService.generateNextNo(companyId, AppModule.STK, userDept);
-    }
-    for (const item of request.items) {
-      if (!item.docNo) item.docNo = docNo;
-    }
-
-    // 2. 데드락 방지: (warehouseId, inventoryId) 기준 정렬
-    const keysToLock = this.extractSortedKeys(request.items);
-
-    // 3. QueryRunner 트랜잭션 시작
-    const qr = this.dataSource.createQueryRunner();
-    await qr.connect();
-    await qr.startTransaction('READ COMMITTED');
-
-    try {
-      // 락 대기 한도(lock_timeout)는 data-source.config extra(전역 3초)로 일괄 관리.
-      // FOR UPDATE NOWAIT는 충돌 시 lock_timeout과 무관하게 즉시 55P03 에러(고경합 빠른 실패용).
-      const statusMap = new Map<string, StatusRow | null>();
-      for (const key of keysToLock) {
-        const rows = await qr.query(
-          `SELECT * FROM inventory_status
-           WHERE company_id = $1 AND warehouse_id = $2 AND inventory_id = $3
-             AND delete_yn = 'N'
-           FOR UPDATE NOWAIT`,
-          [companyId, key.warehouseId, key.inventoryId],
-        ) as any[];
-        statusMap.set(`${key.warehouseId}:${key.inventoryId}`, rows[0] ?? null);
+    const closingRepository = this.dataSource.getRepository(InventoryMonthlyClosing);
+    const transactionMonths = new Set(
+      request.items.map((item) => this.toDateOnly(item.txDate ?? new Date()).slice(0, 7).replace('-', '')),
+    );
+    for (const closingYm of transactionMonths) {
+      const closed = await closingRepository.count({
+        where: { companyId, closingYm, deleteYn: 'N' },
+      });
+      if (closed > 0) {
+        throw new BadRequestException(`${closingYm.slice(0, 4)}-${closingYm.slice(4)}월은 이미 마감되어 재고 처리할 수 없습니다.`);
       }
-
-      // 6. 비즈니스 로직 순차 수행
+    }
+    const userDept = await this.getUserDept(companyId, userId);
+    const generated = request.items.find((item) => item.docNo)?.docNo
+      ?? await this.sequenceService.generateNextNo(companyId, AppModule.STK, userDept);
+    request.items.forEach((item) => { item.docNo ||= generated; });
+    const keys = this.extractSortedKeys(request.items);
+    const ownsTransaction = !context;
+    const runner = context?.runner ?? this.dataSource.createQueryRunner();
+    if (ownsTransaction) {
+      await runner.connect();
+      await runner.startTransaction('READ COMMITTED');
+    }
+    try {
+      const statuses = new Map<string, InventoryStatus | null>();
+      for (const key of keys) {
+        const status = await runner.manager.getRepository(InventoryStatus)
+          .createQueryBuilder('status')
+          .setLock('pessimistic_write')
+          .setOnLocked('nowait')
+          .where('status.companyId = :companyId', { companyId })
+          .andWhere('status.warehouseId = :warehouseId', key)
+          .andWhere('status.inventoryId = :inventoryId', key)
+          .andWhere('status.deleteYn = :notDeleted', { notDeleted: 'N' })
+          .getOne();
+        statuses.set(`${key.warehouseId}:${key.inventoryId}`, status);
+      }
       for (const item of request.items) {
         this.validateTxItem(item);
         const txDate = item.txDate ?? new Date();
-        switch (item.txTypeCode.toUpperCase()) {
-          case TxType.IN:
-            await this.executeIn(qr, companyId, item, statusMap, txDate, userId);
-            break;
-          case TxType.OUT:
-            await this.executeOut(qr, companyId, item, statusMap, txDate, userId);
-            break;
-          case TxType.MOVE:
-            await this.executeMove(qr, companyId, item, statusMap, txDate, userId);
-            break;
-          case TxType.ADJ:
-            await this.executeAdj(qr, companyId, item, statusMap, txDate, userId);
-            break;
+        const txType = item.txTypeCode.toUpperCase();
+        if (txType === TxType.IN) {
+          await this.executeIn(runner, companyId, item, statuses, txDate, userId);
+        } else if (txType === TxType.OUT) {
+          await this.executeOut(runner, companyId, item, statuses, txDate, userId);
+        } else if (txType === TxType.MOVE) {
+          await this.executeMove(runner, companyId, item, statuses, txDate, userId);
+        } else {
+          await this.executeAdj(runner, companyId, item, statuses, txDate, userId);
         }
       }
-
-      await qr.commitTransaction();
-    } catch (err: any) {
-      await qr.rollbackTransaction();
-      // PostgreSQL lock_not_available 에러 코드: 55P03
-      if (err?.code === '55P03' || err?.message?.includes('could not obtain lock')) {
+      if (ownsTransaction) await runner.commitTransaction();
+    } catch (error: unknown) {
+      if (ownsTransaction) await runner.rollbackTransaction();
+      const lockError = error as { code?: string; message?: string };
+      if (lockError.code === '55P03' || lockError.message?.includes('could not obtain lock')) {
         throw new ConflictException('다른 사용자가 처리 중입니다. 잠시 후 다시 시도하세요.');
       }
-      throw err;
+      throw error;
     } finally {
-      await qr.release();
+      if (ownsTransaction) await runner.release();
     }
   }
 
-  // -----------------------------------------------------------------------
-  // 입고 (이동평균법 적용)
-  // -----------------------------------------------------------------------
   private async executeIn(
-    qr: any,
+    runner: QueryRunner,
     companyId: string,
     item: TxItem,
-    statusMap: Map<string, StatusRow | null>,
-    txDate: Date,
+    statuses: Map<string, InventoryStatus | null>,
+    txDate: Date | string,
     operator: string,
-  ) {
+    historyType: string = TxType.IN,
+  ): Promise<void> {
     const key = `${item.warehouseId}:${item.inventoryId}`;
-    let status = statusMap.get(key);
-
+    const repository = runner.manager.getRepository(InventoryStatus);
+    let status = statuses.get(key);
     const qty = new Decimal(item.qty);
     const price = new Decimal(item.unitPrice ?? '0');
     const amount = qty.mul(price);
-
     if (!status) {
-      // 신규 재고 상태 행 INSERT
-      await qr.query(
-        `INSERT INTO inventory_status
-           (company_id, warehouse_id, inventory_id, qty, amount, delete_yn, created_by, updated_by)
-         VALUES ($1,$2,$3,$4,$5,'N',$6,$6)`,
-        [companyId, item.warehouseId, item.inventoryId,
-         qty.toFixed(4), amount.toFixed(4), operator],
-      );
+      status = repository.create({
+        companyId,
+        warehouseId: item.warehouseId,
+        inventoryId: item.inventoryId,
+        qty: qty.toFixed(4),
+        amount: amount.toFixed(4),
+        createdBy: operator,
+        updatedBy: operator,
+        deleteYn: 'N',
+      });
     } else {
-      const newQty = new Decimal(status.qty).add(qty);
-      const newAmount = new Decimal(status.amount).add(amount);
-      await qr.query(
-        `UPDATE inventory_status SET qty=$1, amount=$2, updated_by=$3
-         WHERE company_id=$4 AND warehouse_id=$5 AND inventory_id=$6`,
-        [newQty.toFixed(4), newAmount.toFixed(4), operator,
-         companyId, item.warehouseId, item.inventoryId],
-      );
+      status.qty = new Decimal(status.qty).add(qty).toFixed(4);
+      status.amount = new Decimal(status.amount).add(amount).toFixed(4);
+      status.updatedBy = operator;
     }
-
-    // 이력 INSERT
-    await qr.query(
-      `INSERT INTO inventory_history
-         (company_id, warehouse_id, inventory_id, tx_type_code,
-          qty, unit_price, amount, tx_date, user_id, doc_no,
-          ref_no, ref_module, ref_line_no, delete_yn, created_by, updated_by)
-       VALUES ($1,$2,$3,'${TxType.IN}',$4,$5,$6,$7,$8,$9,$10,$11,$12,'N',$8,$8)`,
-      [companyId, item.warehouseId, item.inventoryId,
-       qty.toFixed(4), price.toFixed(4), amount.toFixed(4),
-       txDate, operator, item.docNo, item.refNo ?? null, item.refModule ?? null, item.refLineNo ?? null],
-    );
+    status = await repository.save(status);
+    statuses.set(key, status);
+    await this.saveHistory(runner, companyId, item, historyType, qty, price, amount, txDate, operator);
   }
 
-  // -----------------------------------------------------------------------
-  // 출고 (현재 평균단가 계산)
-  // -----------------------------------------------------------------------
   private async executeOut(
-    qr: any,
+    runner: QueryRunner,
     companyId: string,
     item: TxItem,
-    statusMap: Map<string, StatusRow | null>,
-    txDate: Date,
+    statuses: Map<string, InventoryStatus | null>,
+    txDate: Date | string,
     operator: string,
-  ) {
+    historyType: string = TxType.OUT,
+  ): Promise<void> {
     const key = `${item.warehouseId}:${item.inventoryId}`;
-    const status = statusMap.get(key);
-
+    const status = statuses.get(key);
     const currentQty = new Decimal(status?.qty ?? '0');
     const currentAmount = new Decimal(status?.amount ?? '0');
     const qty = new Decimal(item.qty);
-
     if (!status || currentQty.lt(qty)) {
       throw new BadRequestException(
         `재고가 부족합니다. 창고=${item.warehouseId}, 자재=${item.inventoryId}, 현재고=${currentQty.toFixed(4)}, 요청수량=${qty.toFixed(4)}`,
       );
     }
-
-    // 현재 평균단가
-    const avgPrice = currentQty.gt(0)
-      ? currentAmount.div(currentQty).toDecimalPlaces(4)
-      : new Decimal(0);
-
-    const amount = qty.mul(avgPrice);
-    const newQty = currentQty.sub(qty);
-    const newAmount = currentAmount.sub(amount);
-
-    await qr.query(
-      `UPDATE inventory_status SET qty=$1, amount=$2, updated_by=$3
-       WHERE company_id=$4 AND warehouse_id=$5 AND inventory_id=$6`,
-      [newQty.toFixed(4), newAmount.toFixed(4), operator,
-       companyId, item.warehouseId, item.inventoryId],
-    );
-
-    await qr.query(
-      `INSERT INTO inventory_history
-         (company_id, warehouse_id, inventory_id, tx_type_code,
-          qty, unit_price, amount, tx_date, user_id, doc_no,
-          ref_no, ref_module, ref_line_no, delete_yn, created_by, updated_by)
-       VALUES ($1,$2,$3,'${TxType.OUT}',$4,$5,$6,$7,$8,$9,$10,$11,$12,'N',$8,$8)`,
-      [companyId, item.warehouseId, item.inventoryId,
-       qty.negated().toFixed(4), avgPrice.toFixed(4), amount.negated().toFixed(4),
-       txDate, operator, item.docNo, item.refNo ?? null, item.refModule ?? null, item.refLineNo ?? null],
+    const price = currentQty.gt(0)
+      ? currentAmount.div(currentQty).toDecimalPlaces(4) : new Decimal(0);
+    const amount = qty.mul(price);
+    status.qty = currentQty.sub(qty).toFixed(4);
+    status.amount = currentAmount.sub(amount).toFixed(4);
+    status.updatedBy = operator;
+    await runner.manager.getRepository(InventoryStatus).save(status);
+    await this.saveHistory(
+      runner, companyId, item, historyType,
+      qty.negated(), price, amount.negated(), txDate, operator,
     );
   }
 
-  // -----------------------------------------------------------------------
-  // 이동 (출고 창고 → 입고 창고)
-  // -----------------------------------------------------------------------
   private async executeMove(
-    qr: any,
+    runner: QueryRunner,
     companyId: string,
     item: TxItem,
-    statusMap: Map<string, StatusRow | null>,
-    txDate: Date,
+    statuses: Map<string, InventoryStatus | null>,
+    txDate: Date | string,
     operator: string,
-  ) {
-    if (!item.targetWarehouseId) {
-      throw new BadRequestException('이동 처리에는 대상 창고가 필요합니다.');
-    }
+  ): Promise<void> {
+    if (!item.targetWarehouseId) throw new BadRequestException('이동 처리에는 대상 창고가 필요합니다.');
     if (item.warehouseId === item.targetWarehouseId) {
       throw new BadRequestException('이동 출고 창고와 대상 창고가 같을 수 없습니다.');
     }
-
-    // 출고 처리
-    await this.executeOut(qr, companyId, item, statusMap, txDate, operator);
-    // 입고 처리 (targetWarehouseId로 변환)
-    const inItem: TxItem = { ...item, txTypeCode: TxType.IN, warehouseId: item.targetWarehouseId! };
-    await this.executeIn(qr, companyId, inItem, statusMap, txDate, operator);
-    // 이력의 tx_type_code를 MOVE_OUT / MOVE_IN으로 수정
-    await qr.query(
-      `UPDATE inventory_history SET tx_type_code='${MoveTxType.MOVE_OUT}'
-       WHERE company_id=$1 AND warehouse_id=$2 AND inventory_id=$3
-         AND doc_no=$4 AND tx_type_code='${TxType.OUT}' AND tx_date=$5`,
-      [companyId, item.warehouseId, item.inventoryId, item.docNo, txDate],
+    const warehouses = await runner.manager.getRepository(Warehouse).find({
+      where: [
+        { companyId, id: item.warehouseId, deleteYn: 'N' },
+        { companyId, id: item.targetWarehouseId, deleteYn: 'N' },
+      ],
+    });
+    const source = warehouses.find((warehouse) => warehouse.id === item.warehouseId);
+    const target = warehouses.find((warehouse) => warehouse.id === item.targetWarehouseId);
+    if (!source || !target) throw new BadRequestException('유효한 이동 창고를 찾을 수 없습니다.');
+    if (source.plantId !== target.plantId) {
+      throw new BadRequestException(
+        '다른 플랜트 간 이동은 보내는 플랜트에서 출고/플랜트이동, 받는 플랜트에서 입고/플랜트이동으로 각각 처리하세요.',
+      );
+    }
+    await this.executeOut(
+      runner, companyId, item, statuses, txDate, operator, MoveTxType.MOVE_OUT,
     );
-    await qr.query(
-      `UPDATE inventory_history SET tx_type_code='${MoveTxType.MOVE_IN}'
-       WHERE company_id=$1 AND warehouse_id=$2 AND inventory_id=$3
-         AND doc_no=$4 AND tx_type_code='${TxType.IN}' AND tx_date=$5`,
-      [companyId, item.targetWarehouseId, item.inventoryId, item.docNo, txDate],
+    await this.executeIn(
+      runner, companyId,
+      { ...item, txTypeCode: TxType.IN, warehouseId: item.targetWarehouseId },
+      statuses, txDate, operator, MoveTxType.MOVE_IN,
     );
   }
 
-  // -----------------------------------------------------------------------
-  // 조정 (ADJ)
-  // -----------------------------------------------------------------------
   private async executeAdj(
-    qr: any,
+    runner: QueryRunner,
     companyId: string,
     item: TxItem,
-    statusMap: Map<string, StatusRow | null>,
-    txDate: Date,
+    statuses: Map<string, InventoryStatus | null>,
+    txDate: Date | string,
     operator: string,
-  ) {
+  ): Promise<void> {
     const key = `${item.warehouseId}:${item.inventoryId}`;
-    const status = statusMap.get(key);
-    const adjQty = new Decimal(item.qty);
-    const adjAmount = new Decimal(item.unitPrice ?? '0').mul(adjQty);
-
-    const newQty = new Decimal(status?.qty ?? '0').add(adjQty);
-    const newAmount = new Decimal(status?.amount ?? '0').add(adjAmount);
-
-    if (newQty.lt(0)) {
-      throw new BadRequestException(
-        `조정 후 재고가 음수가 될 수 없습니다. 창고=${item.warehouseId}, 자재=${item.inventoryId}, 현재고=${new Decimal(status?.qty ?? '0').toFixed(4)}, 조정수량=${adjQty.toFixed(4)}`,
-      );
+    const repository = runner.manager.getRepository(InventoryStatus);
+    let status = statuses.get(key);
+    const qty = new Decimal(item.qty);
+    const price = new Decimal(item.unitPrice ?? '0');
+    const amount = price.mul(qty);
+    const newQty = new Decimal(status?.qty ?? '0').add(qty);
+    const newAmount = new Decimal(status?.amount ?? '0').add(amount);
+    if (newQty.lt(0)) throw new BadRequestException('조정 후 재고가 음수가 될 수 없습니다.');
+    if (!status) {
+      status = repository.create({
+        companyId,
+        warehouseId: item.warehouseId,
+        inventoryId: item.inventoryId,
+        createdBy: operator,
+        deleteYn: 'N',
+      });
     }
-
-    if (status) {
-      await qr.query(
-        `UPDATE inventory_status SET qty=$1, amount=$2, updated_by=$3
-         WHERE company_id=$4 AND warehouse_id=$5 AND inventory_id=$6`,
-        [newQty.toFixed(4), newAmount.toFixed(4), operator,
-         companyId, item.warehouseId, item.inventoryId],
-      );
-    } else {
-      await qr.query(
-        `INSERT INTO inventory_status
-           (company_id, warehouse_id, inventory_id, qty, amount, delete_yn, created_by, updated_by)
-         VALUES ($1,$2,$3,$4,$5,'N',$6,$6)`,
-        [companyId, item.warehouseId, item.inventoryId,
-         newQty.toFixed(4), newAmount.toFixed(4), operator],
-      );
-    }
-    await qr.query(
-      `INSERT INTO inventory_history
-         (company_id, warehouse_id, inventory_id, tx_type_code,
-          qty, unit_price, amount, tx_date, user_id, doc_no,
-          ref_line_no, delete_yn, created_by, updated_by)
-       VALUES ($1,$2,$3,'${TxType.ADJ}',$4,$5,$6,$7,$8,$9,'N',$8,$8)`,
-      [companyId, item.warehouseId, item.inventoryId,
-       adjQty.toFixed(4), new Decimal(item.unitPrice ?? '0').toFixed(4), adjAmount.toFixed(4),
-       txDate, operator, item.docNo, item.refLineNo ?? null],
+    status.qty = newQty.toFixed(4);
+    status.amount = newAmount.toFixed(4);
+    status.updatedBy = operator;
+    status = await repository.save(status);
+    statuses.set(key, status);
+    await this.saveHistory(
+      runner, companyId, item, TxType.ADJ, qty, price, amount, txDate, operator,
     );
   }
 
-  // -----------------------------------------------------------------------
-  // 재고 마감 (M4 버그 해결 — 현재 재고 대신 해당 월 이력 집계)
-  // -----------------------------------------------------------------------
+  private async saveHistory(
+    runner: QueryRunner,
+    companyId: string,
+    item: TxItem,
+    txTypeCode: string,
+    qty: Decimal,
+    unitPrice: Decimal,
+    amount: Decimal,
+    txDate: Date | string,
+    operator: string,
+  ): Promise<void> {
+    const repository = runner.manager.getRepository(InventoryHistory);
+    await repository.save(repository.create({
+      companyId,
+      warehouseId: item.warehouseId,
+      inventoryId: item.inventoryId,
+      txTypeCode,
+      txReasonCode: this.resolveReason(item),
+      qty: qty.toFixed(4),
+      unitPrice: unitPrice.toFixed(4),
+      amount: amount.toFixed(4),
+      txDate: this.toDateOnly(txDate),
+      userId: operator,
+      docNo: item.docNo ?? null,
+      refNo: item.refNo ?? null,
+      refModule: item.refModule ?? null,
+      refLineNo: item.refLineNo ?? null,
+      createdBy: operator,
+      updatedBy: operator,
+      deleteYn: 'N',
+    }));
+  }
+
   async closeMonth(closingYm: string, operator: string): Promise<void> {
     const { companyId } = getTenantContext();
-    const year = parseInt(closingYm.slice(0, 4));
-    const month = parseInt(closingYm.slice(4, 6));
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0); // 월말 마지막 날
-
-    const statuses = await this.dataSource.query<StatusRow[]>(
-      `SELECT * FROM inventory_status WHERE company_id=$1 AND delete_yn='N'`,
-      [companyId],
-    );
-
+    const year = Number(closingYm.slice(0, 4));
+    const month = Number(closingYm.slice(4, 6));
+    const start = `${year}-${String(month).padStart(2, '0')}-01`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const end = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+    const statuses = await this.dataSource.getRepository(InventoryStatus).find({
+      where: { companyId, deleteYn: 'N' },
+    });
+    const historyRepository = this.dataSource.getRepository(InventoryHistory);
+    const closingRepository = this.dataSource.getRepository(InventoryMonthlyClosing);
     for (const status of statuses) {
-      // ✅ 해당 월 이력만 집계 (M4 버그 수정 핵심)
-      const histories = await this.dataSource.query(
-        `SELECT tx_type_code, qty, amount FROM inventory_history
-         WHERE company_id=$1 AND warehouse_id=$2 AND inventory_id=$3
-           AND tx_date >= $4 AND tx_date <= $5 AND delete_yn='N'`,
-        [companyId, status.warehouse_id, status.inventory_id, startDate, endDate],
-      );
-
+      const histories = await historyRepository.find({
+        where: {
+          companyId,
+          warehouseId: status.warehouseId,
+          inventoryId: status.inventoryId,
+          txDate: Between(start, end),
+          deleteYn: 'N',
+        },
+      });
       let inQty = new Decimal(0), inAmt = new Decimal(0);
       let outQty = new Decimal(0), outAmt = new Decimal(0);
       let moveQty = new Decimal(0), moveAmt = new Decimal(0);
       let adjQty = new Decimal(0), adjAmt = new Decimal(0);
-
-      for (const h of histories) {
-        const q = new Decimal(h.qty);
-        const a = new Decimal(h.amount);
-        switch (h.tx_type_code.toUpperCase()) {
-          case TxType.IN:       inQty = inQty.add(q); inAmt = inAmt.add(a); break;
-          case TxType.OUT:      outQty = outQty.add(q.abs()); outAmt = outAmt.add(a.abs()); break;
-          case MoveTxType.MOVE_IN:  moveQty = moveQty.add(q); moveAmt = moveAmt.add(a); break;
-          case MoveTxType.MOVE_OUT: moveQty = moveQty.add(q); moveAmt = moveAmt.add(a); break;
-          case TxType.ADJ:      adjQty = adjQty.add(q); adjAmt = adjAmt.add(a); break;
-        }
-      }
-
-      // 마감 수량 = 해당 월 이력 합산 (기존 현재 재고 사용 버그 수정)
-      const closingQty = inQty.sub(outQty).add(moveQty).add(adjQty);
-      const closingAmount = inAmt.sub(outAmt).add(moveAmt).add(adjAmt);
-
-      await this.dataSource.query(
-        `INSERT INTO inventory_monthly_closing
-           (company_id, warehouse_id, inventory_id, closing_ym,
-            in_qty, in_amount, out_qty, out_amount,
-            move_qty, move_amount, adj_qty, adj_amount,
-            closing_qty, closing_amount, delete_yn, created_by, updated_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'N',$15,$15)
-         ON CONFLICT (company_id, warehouse_id, inventory_id, closing_ym)
-         DO UPDATE SET
-           in_qty=$5, in_amount=$6, out_qty=$7, out_amount=$8,
-           move_qty=$9, move_amount=$10, adj_qty=$11, adj_amount=$12,
-           closing_qty=$13, closing_amount=$14, updated_by=$15`,
-        [companyId, status.warehouse_id, status.inventory_id, closingYm,
-         inQty.toFixed(4), inAmt.toFixed(4),
-         outQty.toFixed(4), outAmt.toFixed(4),
-         moveQty.toFixed(4), moveAmt.toFixed(4),
-         adjQty.toFixed(4), adjAmt.toFixed(4),
-         closingQty.toFixed(4), closingAmount.toFixed(4),
-         operator],
-      );
+      histories.forEach((history) => {
+        const qty = new Decimal(history.qty);
+        const amount = new Decimal(history.amount);
+        if (history.txTypeCode === TxType.IN) { inQty = inQty.add(qty); inAmt = inAmt.add(amount); }
+        else if (history.txTypeCode === TxType.OUT) { outQty = outQty.add(qty.abs()); outAmt = outAmt.add(amount.abs()); }
+        else if ([MoveTxType.MOVE_IN, MoveTxType.MOVE_OUT].includes(history.txTypeCode as MoveTxType)) {
+          moveQty = moveQty.add(qty); moveAmt = moveAmt.add(amount);
+        } else if (history.txTypeCode === TxType.ADJ) { adjQty = adjQty.add(qty); adjAmt = adjAmt.add(amount); }
+      });
+      const existing = await closingRepository.findOne({
+        where: {
+          companyId,
+          warehouseId: status.warehouseId,
+          inventoryId: status.inventoryId,
+          closingYm,
+        },
+      });
+      const closing = existing ?? closingRepository.create({
+        companyId,
+        warehouseId: status.warehouseId,
+        inventoryId: status.inventoryId,
+        closingYm,
+        createdBy: operator,
+        deleteYn: 'N',
+      });
+      Object.assign(closing, {
+        inQty: inQty.toFixed(4), inAmount: inAmt.toFixed(4),
+        outQty: outQty.toFixed(4), outAmount: outAmt.toFixed(4),
+        moveQty: moveQty.toFixed(4), moveAmount: moveAmt.toFixed(4),
+        adjQty: adjQty.toFixed(4), adjAmount: adjAmt.toFixed(4),
+        closingQty: inQty.sub(outQty).add(moveQty).add(adjQty).toFixed(4),
+        closingAmount: inAmt.sub(outAmt).add(moveAmt).add(adjAmt).toFixed(4),
+        updatedBy: operator,
+      });
+      await closingRepository.save(closing);
     }
   }
 
-  // -----------------------------------------------------------------------
-  // 조회
-  // -----------------------------------------------------------------------
-  async getStatusList(companyId: string): Promise<any[]> {
-    return this.dataSource.query(
-      `SELECT * FROM inventory_status WHERE company_id = $1 AND delete_yn = 'N'`,
-      [companyId],
-    );
+  getStatusList(companyId: string): Promise<InventoryStatus[]> {
+    return this.dataSource.getRepository(InventoryStatus).find({
+      where: { companyId, deleteYn: 'N' },
+    });
   }
 
-  async getHistoryList(companyId: string): Promise<any[]> {
-    return this.dataSource.query(
-      `SELECT * FROM inventory_history WHERE company_id = $1 AND delete_yn = 'N' ORDER BY history_no DESC`,
-      [companyId],
-    );
+  getHistoryList(companyId: string): Promise<InventoryHistory[]> {
+    return this.dataSource.getRepository(InventoryHistory).find({
+      where: { companyId, deleteYn: 'N' },
+      order: { historyNo: 'DESC' },
+    });
   }
 
-  // -----------------------------------------------------------------------
-  // 유틸
-  // -----------------------------------------------------------------------
   private validateTxItem(item: TxItem): void {
-    const txType = item.txTypeCode?.toUpperCase();
-    if (![TxType.IN, TxType.OUT, TxType.MOVE, TxType.ADJ].includes(txType as TxType)) {
+    const type = item.txTypeCode?.toUpperCase();
+    if (![TxType.IN, TxType.OUT, TxType.MOVE, TxType.ADJ].includes(type as TxType)) {
       throw new BadRequestException(`유효하지 않은 수불 유형입니다: ${item.txTypeCode}`);
     }
-    if (!item.warehouseId) throw new BadRequestException('창고는 필수입니다.');
-    if (!item.inventoryId) throw new BadRequestException('자재는 필수입니다.');
-
+    if (!item.warehouseId || !item.inventoryId) throw new BadRequestException('창고와 자재는 필수입니다.');
     let qty: Decimal;
-    try {
-      qty = new Decimal(item.qty);
-    } catch {
-      throw new BadRequestException('수량 형식이 올바르지 않습니다.');
-    }
-
-    if (!qty.isFinite() || qty.isZero()) {
-      throw new BadRequestException('수량은 0이 아닌 숫자여야 합니다.');
-    }
-
-    if (txType !== TxType.ADJ && qty.lte(0)) {
+    try { qty = new Decimal(item.qty); } catch { throw new BadRequestException('수량 형식이 올바르지 않습니다.'); }
+    if (!qty.isFinite() || qty.isZero()) throw new BadRequestException('수량은 0이 아닌 숫자여야 합니다.');
+    if (type !== TxType.ADJ && qty.lte(0)) {
       throw new BadRequestException('입고, 출고, 이동 수량은 0보다 커야 합니다.');
     }
+    const reason = this.resolveReason(item);
+    const allowed: Record<TxType, TxReason[]> = {
+      [TxType.IN]: [TxReason.GENERAL, TxReason.PURCHASE, TxReason.RETURN, TxReason.PLANT_TRANSFER],
+      [TxType.OUT]: [TxReason.GENERAL, TxReason.WORK_ORDER, TxReason.DISPOSAL, TxReason.PLANT_TRANSFER],
+      [TxType.MOVE]: [TxReason.TRANSFER],
+      [TxType.ADJ]: [TxReason.STOCKTAKING],
+    };
+    if (!allowed[type as TxType].includes(reason)) {
+      throw new BadRequestException(`수불 유형 ${type}에 사용할 수 없는 거래 사유입니다: ${reason}`);
+    }
+  }
+
+  private resolveReason(item: TxItem): TxReason {
+    const type = item.txTypeCode.toUpperCase();
+    if (type === TxType.MOVE) return TxReason.TRANSFER;
+    if (type === TxType.ADJ) return TxReason.STOCKTAKING;
+    if (item.refModule === AppModule.PUR && type === TxType.IN) return TxReason.PURCHASE;
+    return item.txReasonCode ?? TxReason.GENERAL;
   }
 
   private extractSortedKeys(items: TxItem[]): { warehouseId: string; inventoryId: string }[] {
-    const keySet = new Set<string>();
-    for (const item of items) {
-      keySet.add(`${item.warehouseId}:${item.inventoryId}`);
-      if (item.txTypeCode === TxType.MOVE && item.targetWarehouseId) {
-        keySet.add(`${item.targetWarehouseId}:${item.inventoryId}`);
+    const keys = new Set<string>();
+    items.forEach((item) => {
+      keys.add(`${item.warehouseId}:${item.inventoryId}`);
+      if (item.txTypeCode.toUpperCase() === TxType.MOVE && item.targetWarehouseId) {
+        keys.add(`${item.targetWarehouseId}:${item.inventoryId}`);
       }
-    }
-    return [...keySet]
-      .sort()
-      .map((k) => {
-        const [warehouseId, inventoryId] = k.split(':');
-        return { warehouseId, inventoryId };
-      });
+    });
+    return [...keys].sort().map((key) => {
+      const [warehouseId, inventoryId] = key.split(':');
+      return { warehouseId, inventoryId };
+    });
   }
 
   private async getUserDept(companyId: string, userId: string): Promise<string | null> {
-    const rows = await this.dataSource.query(
-      `SELECT department_id FROM users WHERE company_id=$1 AND id=$2`,
-      [companyId, userId],
-    );
-    return rows[0]?.department_id ?? null;
+    const user = await this.dataSource.getRepository(User).findOne({
+      where: { companyId, id: userId, deleteYn: 'N' },
+    });
+    return user?.departmentId ?? null;
+  }
+
+  private toDateOnly(value: Date | string): string {
+    if (typeof value === 'string') {
+      const match = value.match(/^\d{4}-\d{2}-\d{2}/);
+      if (match) return match[0];
+    }
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('거래일자 형식이 올바르지 않습니다.');
+    }
+    return [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, '0'),
+      String(date.getDate()).padStart(2, '0'),
+    ].join('-');
   }
 }

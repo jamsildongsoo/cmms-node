@@ -1,19 +1,36 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { DataSource, EntityManager, MoreThan } from 'typeorm';
 import Decimal from 'decimal.js';
 import { SequenceService, AppModule } from '../../common/sequence/sequence.service';
 import { InventoryTxService } from '../inventory-tx/inventory-tx.service';
-import { DocStatus, ProcStatus, TxType } from '../../common/constants/status.constants';
+import {
+  DocStatus,
+  ProcStatus,
+  TxReason,
+  TxType,
+} from '../../common/constants/status.constants';
 import { resolveActivePlantId } from '../../common/utils/plant.util';
+import { PurchaseRequest } from '../../entities/purchase-request.entity';
+import { PurchaseRequestItem } from '../../entities/purchase-request-item.entity';
+import { InventoryHistory } from '../../entities/inventory-history.entity';
+import { User } from '../../entities/users.entity';
+import { Role } from '../../entities/role.entity';
+import { Warehouse } from '../../entities/warehouse.entity';
+import { Vendor } from '../../entities/vendor.entity';
+import { ProcurementRepository } from './procurement.repository';
 
 export interface ItemLine {
   lineNo: number;
   inventoryId: string;
   qty: string;
   unit?: string | null;
+  receivedQty?: string;
   remarks?: string | null;
 }
-
 export interface SaveRequest {
   header: {
     id?: string | null;
@@ -21,43 +38,51 @@ export interface SaveRequest {
     warehouseId: string;
     requestDate?: string | Date;
     requestType?: string | null;
+    title?: string;
     vendorId?: string | null;
     remarks?: string | null;
     status?: string;
   };
   items?: ItemLine[];
-  confirm?: boolean;
 }
-
-export interface RequestDetail {
-  header: any;
-  items: ItemLine[];
-}
-
+export interface RequestDetail { header: PurchaseRequestResponse; items: ItemLine[] }
 export interface OrderRequest {
-  requestId: string;
-  vendorId: string;
-  orderDate?: string | Date;
-  etaDate?: string | Date;
+  requestId: string; vendorId: string; purchaseManager: string;
+  purchaseManagerContact?: string | null; orderDate?: string | Date; etaDate?: string | Date;
 }
-
-export interface ShipRequest {
-  requestId: string;
-  shipStartDate?: string | Date;
-}
-
-export interface ReceiveLine {
-  lineNo: number;
-  qty: string;
-  unitPrice: string;
-}
-
+export interface ShipRequest { requestId: string; shipStartDate?: string | Date }
+export interface ReceiveLine { lineNo: number; qty: string; unitPrice: string }
 export interface ReceiveRequest {
-  requestId: string;
-  txDate?: string | Date;
-  lines?: ReceiveLine[];
-  close?: boolean;
+  requestId: string; warehouseId: string; txDate?: string | Date;
+  lines?: ReceiveLine[]; close?: boolean;
 }
+export interface PurchaseRequestResponse {
+  companyId: string; id: string; plantId: string; warehouseId: string;
+  requesterId: string; requestDate: string; requestType: string | null;
+  title: string; approvalId: string | null;
+  vendorId: string | null; purchaseManager: string | null; purchaseManagerContact: string | null;
+  orderDate: string | null; etaDate: string | null;
+  shipStartDate: string | null; status: string; procStatus: string | null;
+  remarks: string | null; createdAt: string; createdBy: string;
+}
+export interface ReceivableRequestResponse extends PurchaseRequestResponse {
+  requestedQty: string;
+  remainingQty: string;
+}
+export interface VendorRequest {
+  id?: string;
+  name?: string;
+  bizNo?: string | null;
+  contact?: string | null;
+  manager?: string | null;
+  remarks?: string | null;
+}
+
+const dateOnly = (value?: string | Date | null): string | null => {
+  if (!value) return null;
+  return value instanceof Date ? value.toISOString().slice(0, 10) : value.slice(0, 10);
+};
+const today = (): string => new Date().toISOString().slice(0, 10);
 
 @Injectable()
 export class ProcurementService {
@@ -65,467 +90,533 @@ export class ProcurementService {
     private readonly dataSource: DataSource,
     private readonly sequenceService: SequenceService,
     private readonly inventoryTxService: InventoryTxService,
+    private readonly procurementRepository: ProcurementRepository,
   ) {}
 
-  async getRequests(companyId: string, operator: string, reqPlantId?: string | null): Promise<any[]> {
-    const activePlant = await resolveActivePlantId(this.dataSource, companyId, operator, reqPlantId);
-    if (!activePlant) {
-      return this.dataSource.query(
-        `SELECT * FROM purchase_request WHERE company_id = $1 AND delete_yn = 'N' ORDER BY id DESC`,
-        [companyId],
-      );
-    }
-    return this.dataSource.query(
-      `SELECT * FROM purchase_request WHERE company_id = $1 AND plant_id = $2 AND delete_yn = 'N' ORDER BY id DESC`,
-      [companyId, activePlant],
-    );
+  async getRequests(
+    companyId: string,
+    operator: string,
+    requestedPlantId?: string | null,
+  ): Promise<PurchaseRequestResponse[]> {
+    return (await this.procurementRepository.findByRequester(
+      companyId, operator,
+    )).map((entity) => this.toResponse(entity));
+  }
+
+  async getManagementRequests(companyId: string): Promise<PurchaseRequestResponse[]> {
+    return (await this.procurementRepository.findAll(companyId))
+      .map((entity) => this.toResponse(entity));
+  }
+
+  getVendors(companyId: string): Promise<Vendor[]> {
+    return this.dataSource.getRepository(Vendor).find({
+      where: { companyId, deleteYn: 'N' },
+      order: { name: 'ASC' },
+    });
+  }
+
+  async createVendor(
+    companyId: string,
+    input: VendorRequest,
+    operator: string,
+  ): Promise<Vendor> {
+    const id = input.id?.trim().toUpperCase();
+    const name = input.name?.trim();
+    if (!id || !name) throw new BadRequestException('공급업체 코드와 이름은 필수입니다.');
+    const repository = this.dataSource.getRepository(Vendor);
+    const existing = await repository.findOne({ where: { companyId, id } });
+    if (existing?.deleteYn === 'N') throw new BadRequestException('이미 존재하는 공급업체 코드입니다.');
+    const vendor = existing ?? repository.create({
+      companyId,
+      id,
+      createdBy: operator,
+    });
+    Object.assign(vendor, {
+      name,
+      bizNo: input.bizNo?.trim() || null,
+      contact: input.contact?.trim() || null,
+      manager: input.manager?.trim() || null,
+      remarks: input.remarks?.trim() || null,
+      deleteYn: 'N',
+      updatedBy: operator,
+    });
+    return repository.save(vendor);
+  }
+
+  async updateVendor(
+    companyId: string,
+    id: string,
+    input: VendorRequest,
+    operator: string,
+  ): Promise<Vendor> {
+    const repository = this.dataSource.getRepository(Vendor);
+    const vendor = await repository.findOne({
+      where: { companyId, id: id.trim().toUpperCase(), deleteYn: 'N' },
+    });
+    if (!vendor) throw new NotFoundException('공급업체를 찾을 수 없습니다.');
+    const name = input.name?.trim();
+    if (!name) throw new BadRequestException('공급업체 이름은 필수입니다.');
+    Object.assign(vendor, {
+      name,
+      bizNo: input.bizNo?.trim() || null,
+      contact: input.contact?.trim() || null,
+      manager: input.manager?.trim() || null,
+      remarks: input.remarks?.trim() || null,
+      updatedBy: operator,
+    });
+    return repository.save(vendor);
+  }
+
+  async deleteVendor(companyId: string, id: string, operator: string): Promise<void> {
+    const repository = this.dataSource.getRepository(Vendor);
+    const vendor = await repository.findOne({
+      where: { companyId, id: id.trim().toUpperCase(), deleteYn: 'N' },
+    });
+    if (!vendor) throw new NotFoundException('공급업체를 찾을 수 없습니다.');
+    vendor.deleteYn = 'Y';
+    vendor.updatedBy = operator;
+    await repository.save(vendor);
   }
 
   async getRequestDetail(companyId: string, id: string): Promise<RequestDetail> {
-    const prs = await this.dataSource.query(
-      `SELECT * FROM purchase_request WHERE company_id = $1 AND id = $2 AND delete_yn = 'N'`,
-      [companyId, id],
-    );
-    if (!prs.length) {
-      throw new NotFoundException('구매요청을 찾을 수 없습니다.');
-    }
-
-    const items = await this.dataSource.query(
-      `SELECT
-        line_no as "lineNo",
-        inventory_id as "inventoryId",
-        qty,
-        unit,
-        received_qty as "receivedQty",
-        remarks
-      FROM purchase_request_item 
-      WHERE company_id = $1 AND request_id = $2
-      ORDER BY line_no ASC`,
-      [companyId, id],
-    );
-
+    const request = await this.mustGetActive(companyId, id);
+    const items = await this.procurementRepository.findItems(companyId, id);
     return {
-      header: prs[0],
-      items,
+      header: this.toResponse(request),
+      items: items.map((item) => ({
+        lineNo: item.lineNo,
+        inventoryId: item.inventoryId,
+        qty: item.qty,
+        unit: item.unit,
+        receivedQty: item.receivedQty,
+        remarks: item.remarks,
+      })),
     };
   }
 
-  async createOrUpdate(companyId: string, req: SaveRequest, operator: string): Promise<any> {
-    const { header, items, confirm } = req;
-    const isNew = !header.id || header.id.trim() === '';
-
-    const userRows = await this.dataSource.query(
-      `SELECT department_id, role_id, last_login_plant_id FROM users WHERE company_id = $1 AND id = $2`,
-      [companyId, operator],
-    );
-    if (!userRows.length) {
-      throw new BadRequestException('사용자 정보를 찾을 수 없습니다.');
+  async getReceivableRequest(companyId: string, id: string): Promise<RequestDetail> {
+    const request = await this.mustGetConfirmed(companyId, id);
+    if (![ProcStatus.ORDERED, ProcStatus.SHIPPING, ProcStatus.PARTIAL_RECEIVED]
+      .includes(request.procStatus as ProcStatus)) {
+      throw new BadRequestException('발주·배송중·부분입고 상태의 구매요청만 입고할 수 있습니다.');
     }
-    const user = userRows[0];
+    return this.getRequestDetail(companyId, id);
+  }
 
-    const multi = await this.isMultiPlant(companyId, user.role_id);
-    let targetPlantId = header.plantId;
-    if (!multi) {
-      if (!user.last_login_plant_id) {
-        throw new BadRequestException('지정 플랜트가 없어 구매요청을 생성할 수 없습니다.');
-      }
-      targetPlantId = user.last_login_plant_id;
-    }
-
-    const qr = this.dataSource.createQueryRunner();
-    await qr.connect();
-    await qr.startTransaction();
-
-    try {
-      let prNo = header.id;
-      const requestDateStr = header.requestDate
-        ? (header.requestDate instanceof Date ? header.requestDate.toISOString().split('T')[0] : header.requestDate)
-        : new Date().toISOString().split('T')[0];
-
-      if (isNew) {
-        prNo = await this.sequenceService.generateNextNo(companyId, AppModule.PUR, user.department_id);
-        await qr.query(
-          `INSERT INTO purchase_request 
-            (company_id, id, plant_id, warehouse_id, requester_id, request_date, request_type, vendor_id, status, proc_status, remarks, created_by, updated_by, delete_yn)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, $10, $11, $11, 'N')`,
-          [
-            companyId, prNo, targetPlantId, header.warehouseId, operator, requestDateStr,
-            header.requestType ?? null, header.vendorId ?? null, DocStatus.TEMP, header.remarks ?? null, operator
-          ],
-        );
-      } else {
-        const existing = await qr.query(
-          `SELECT * FROM purchase_request WHERE company_id = $1 AND id = $2 AND delete_yn = 'N' FOR UPDATE`,
-          [companyId, prNo],
-        );
-        if (!existing.length) {
-          throw new NotFoundException('구매요청을 찾을 수 없습니다.');
-        }
-        if (existing[0].status !== DocStatus.TEMP) {
-          throw new BadRequestException('저장 상태(T)에서만 수정할 수 있습니다.');
-        }
-
-        await qr.query(
-          `UPDATE purchase_request
-           SET warehouse_id = $3, vendor_id = $4, request_type = $5, remarks = $6, updated_by = $7
-           WHERE company_id = $1 AND id = $2`,
-          [companyId, prNo, header.warehouseId, header.vendorId ?? null, header.requestType ?? null, header.remarks ?? null, operator],
-        );
-
-        await qr.query(
-          `DELETE FROM purchase_request_item WHERE company_id = $1 AND request_id = $2`,
-          [companyId, prNo],
-        );
-      }
-
-      if (items && items.length > 0) {
-        let lineNo = 1;
-        for (const item of items) {
-          await qr.query(
-            `INSERT INTO purchase_request_item 
-              (company_id, request_id, line_no, inventory_id, qty, unit, received_qty, remarks)
-             VALUES ($1, $2, $3, $4, $5, $6, '0', $7)`,
-            [companyId, prNo, lineNo++, item.inventoryId, new Decimal(item.qty).toFixed(4), item.unit ?? null, item.remarks ?? null],
-          );
-        }
-      }
-
-      if (confirm) {
-        await qr.query(
-          `UPDATE purchase_request SET status = $3, updated_by = $4 WHERE company_id = $1 AND id = $2`,
-          [companyId, prNo, DocStatus.SELF_CONFIRMED, operator],
-        );
-      }
-
-      await qr.commitTransaction();
-
-      const saved = await this.dataSource.query(
-        `SELECT * FROM purchase_request WHERE company_id = $1 AND id = $2`,
-        [companyId, prNo],
+  async getReceivableRequests(companyId: string): Promise<ReceivableRequestResponse[]> {
+    const requests = (await this.procurementRepository.findAll(companyId))
+      .filter((request) =>
+        [DocStatus.CONFIRMED, DocStatus.SELF_CONFIRMED].includes(request.status as DocStatus)
+        && [ProcStatus.ORDERED, ProcStatus.SHIPPING, ProcStatus.PARTIAL_RECEIVED]
+          .includes(request.procStatus as ProcStatus));
+    const result: ReceivableRequestResponse[] = [];
+    for (const request of requests) {
+      const items = await this.procurementRepository.findItems(companyId, request.id);
+      const requestedQty = items.reduce(
+        (sum, item) => sum.add(item.qty), new Decimal(0),
       );
-      return saved[0];
-    } catch (err) {
-      await qr.rollbackTransaction();
-      throw err;
-    } finally {
-      await qr.release();
-    }
-  }
-
-  async confirm(companyId: string, requestId: string, operator: string): Promise<any> {
-    const pr = await this.mustGetActive(companyId, requestId);
-    if (pr.status !== DocStatus.TEMP) {
-      throw new BadRequestException('저장 상태(T)에서만 확정할 수 있습니다.');
-    }
-
-    const itemCount = await this.dataSource.query(
-      `SELECT COUNT(*) as cnt FROM purchase_request_item WHERE company_id = $1 AND request_id = $2`,
-      [companyId, requestId],
-    );
-    if (Number(itemCount[0].cnt) === 0) {
-      throw new BadRequestException('자재 라인이 없는 구매요청은 확정할 수 없습니다.');
-    }
-
-    await this.dataSource.query(
-      `UPDATE purchase_request SET status = $3, updated_by = $4 WHERE company_id = $1 AND id = $2`,
-      [companyId, requestId, DocStatus.SELF_CONFIRMED, operator],
-    );
-
-    const saved = await this.dataSource.query(
-      `SELECT * FROM purchase_request WHERE company_id = $1 AND id = $2`,
-      [companyId, requestId],
-    );
-    return saved[0];
-  }
-
-  async placeOrder(companyId: string, req: OrderRequest, operator: string): Promise<any> {
-    const pr = await this.mustGetConfirmed(companyId, req.requestId);
-    const orderDateStr = req.orderDate
-      ? (req.orderDate instanceof Date ? req.orderDate.toISOString().split('T')[0] : req.orderDate)
-      : new Date().toISOString().split('T')[0];
-    const etaDateStr = req.etaDate
-      ? (req.etaDate instanceof Date ? req.etaDate.toISOString().split('T')[0] : req.etaDate)
-      : null;
-
-    await this.dataSource.query(
-      `UPDATE purchase_request
-       SET vendor_id = $3, order_date = $4, eta_date = $5, proc_status = $6, updated_by = $7
-       WHERE company_id = $1 AND id = $2`,
-      [companyId, req.requestId, req.vendorId, orderDateStr, etaDateStr, ProcStatus.ORDERED, operator],
-    );
-
-    const saved = await this.dataSource.query(
-      `SELECT * FROM purchase_request WHERE company_id = $1 AND id = $2`,
-      [companyId, req.requestId],
-    );
-    return saved[0];
-  }
-
-  async startShipping(companyId: string, req: ShipRequest, operator: string): Promise<any> {
-    const pr = await this.mustGetConfirmed(companyId, req.requestId);
-    const shipStartDateStr = req.shipStartDate
-      ? (req.shipStartDate instanceof Date ? req.shipStartDate.toISOString().split('T')[0] : req.shipStartDate)
-      : new Date().toISOString().split('T')[0];
-
-    await this.dataSource.query(
-      `UPDATE purchase_request
-       SET ship_start_date = $3, proc_status = $4, updated_by = $5
-       WHERE company_id = $1 AND id = $2`,
-      [companyId, req.requestId, shipStartDateStr, ProcStatus.SHIPPING, operator],
-    );
-
-    const saved = await this.dataSource.query(
-      `SELECT * FROM purchase_request WHERE company_id = $1 AND id = $2`,
-      [companyId, req.requestId],
-    );
-    return saved[0];
-  }
-
-  async close(companyId: string, requestId: string, operator: string): Promise<any> {
-    const pr = await this.mustGetConfirmed(companyId, requestId);
-    if (pr.proc_status === ProcStatus.CLOSED) {
-      throw new BadRequestException('이미 종료된 요청입니다.');
-    }
-
-    await this.dataSource.query(
-      `UPDATE purchase_request
-       SET proc_status = $3, updated_by = $4
-       WHERE company_id = $1 AND id = $2`,
-      [companyId, requestId, ProcStatus.CLOSED, operator],
-    );
-
-    const saved = await this.dataSource.query(
-      `SELECT * FROM purchase_request WHERE company_id = $1 AND id = $2`,
-      [companyId, requestId],
-    );
-    return saved[0];
-  }
-
-  async receive(companyId: string, req: ReceiveRequest, operator: string): Promise<any> {
-    const pr = await this.mustGetConfirmed(companyId, req.requestId);
-    if (pr.proc_status !== ProcStatus.ORDERED && pr.proc_status !== ProcStatus.SHIPPING && pr.proc_status !== ProcStatus.RECEIVED) {
-      throw new BadRequestException(`입고는 발주(O), 배송중(D), 입고(I) 상태에서만 가능합니다. 현재: ${pr.proc_status ?? 'null'}`);
-    }
-    if (pr.proc_status === ProcStatus.CLOSED) {
-      throw new BadRequestException('종료된 요청에는 입고할 수 없습니다.');
-    }
-    if (!req.lines || req.lines.length === 0) {
-      throw new BadRequestException('입고 라인이 비어 있습니다.');
-    }
-
-    const prItems = await this.dataSource.query(
-      `SELECT * FROM purchase_request_item WHERE company_id = $1 AND request_id = $2`,
-      [companyId, pr.id],
-    );
-
-    const userRows = await this.dataSource.query(
-      `SELECT department_id FROM users WHERE company_id = $1 AND id = $2`,
-      [companyId, operator],
-    );
-    const userDept = userRows[0]?.department_id ?? null;
-    const docNo = await this.sequenceService.generateNextNo(companyId, AppModule.STK, userDept);
-    const txDateStr = req.txDate
-      ? (req.txDate instanceof Date ? req.txDate.toISOString().split('T')[0] : req.txDate)
-      : new Date().toISOString().split('T')[0];
-
-    const txItems: any[] = [];
-    for (const line of req.lines) {
-      const prItem = prItems.find((it: any) => it.line_no === line.lineNo);
-      if (!prItem) {
-        throw new BadRequestException(`PR 라인 ${line.lineNo}을 찾을 수 없습니다.`);
-      }
-
-      const inputDecimal = new Decimal(line.qty);
-      const currentReceived = new Decimal(prItem.received_qty);
-      const orderedQty = new Decimal(prItem.qty);
-      const newReceivedQty = currentReceived.add(inputDecimal);
-
-      if (newReceivedQty.gt(orderedQty)) {
-        throw new BadRequestException(
-          `입고 수량을 초과합니다. 라인 ${line.lineNo}: 주문=${orderedQty.toFixed(4)}, ` +
-          `기입고=${currentReceived.toFixed(4)}, 요청=${inputDecimal.toFixed(4)}, ` +
-          `잔여=${orderedQty.sub(currentReceived).toFixed(4)}`
-        );
-      }
-
-      const unitPriceDecimal = line.unitPrice != null
-        ? new Decimal(line.unitPrice)
-        : new Decimal(0);
-
-      txItems.push({
-        txTypeCode: TxType.IN,
-        warehouseId: pr.warehouse_id,
-        inventoryId: prItem.inventory_id,
-        qty: inputDecimal.toString(),
-        unitPrice: unitPriceDecimal.toString(),
-        txDate: new Date(txDateStr),
-        docNo,
-        refNo: pr.id,
-        refModule: AppModule.PUR,
-        refLineNo: String(line.lineNo),
+      const remainingQty = items.reduce(
+        (sum, item) => sum.add(Decimal.max(new Decimal(item.qty).sub(item.receivedQty), 0)),
+        new Decimal(0),
+      );
+      if (remainingQty.lte(0)) continue;
+      result.push({
+        ...this.toResponse(request),
+        requestedQty: requestedQty.toFixed(4),
+        remainingQty: remainingQty.toFixed(4),
       });
     }
-
-    // 재고 처리 먼저 (자체 트랜잭션) — 성공 시에만 PR 문서 업데이트
-    await this.inventoryTxService.processTransactions({ items: txItems });
-
-    for (const line of req.lines) {
-      const prItem = prItems.find((it: any) => it.line_no === line.lineNo);
-      const inputDecimal = new Decimal(line.qty);
-      const newReceivedQty = new Decimal(prItem.received_qty).add(inputDecimal);
-
-      await this.dataSource.query(
-        `UPDATE purchase_request_item SET received_qty = $4
-         WHERE company_id = $1 AND request_id = $2 AND line_no = $3`,
-        [companyId, pr.id, line.lineNo, newReceivedQty.toFixed(4)],
-      );
-    }
-
-    const finalProcStatus = req.close ? ProcStatus.CLOSED : ProcStatus.RECEIVED;
-    await this.dataSource.query(
-      `UPDATE purchase_request SET proc_status = $3, updated_by = $4 WHERE company_id = $1 AND id = $2`,
-      [companyId, pr.id, finalProcStatus, operator],
-    );
-
-    const saved = await this.dataSource.query(
-      `SELECT * FROM purchase_request WHERE company_id = $1 AND id = $2`,
-      [companyId, pr.id],
-    );
-    return saved[0];
+    return result;
   }
 
-  async cancelSlip(companyId: string, docNo: string, operator: string): Promise<void> {
-    const rows = await this.dataSource.query(
-      `SELECT * FROM inventory_history WHERE company_id = $1 AND doc_no = $2 ORDER BY history_no ASC`,
-      [companyId, docNo],
-    );
-    if (!rows.length) {
-      throw new BadRequestException(`전표를 찾을 수 없습니다: ${docNo}`);
+  async createOrUpdate(
+    companyId: string,
+    req: SaveRequest,
+    operator: string,
+  ): Promise<PurchaseRequestResponse> {
+    const { header, items = [] } = req;
+    const user = await this.dataSource.getRepository(User).findOne({
+      where: { companyId, id: operator, deleteYn: 'N' },
+    });
+    if (!user) throw new BadRequestException('사용자 정보를 찾을 수 없습니다.');
+    const multiPlant = await this.isMultiPlant(companyId, user.roleId);
+    const plantId = multiPlant ? header.plantId : user.lastLoginPlantId;
+    if (!plantId) {
+      throw new BadRequestException('지정 플랜트가 없어 구매요청을 생성할 수 없습니다.');
     }
 
-    const firstType = rows[0].tx_type_code;
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    let id = header.id?.trim() || '';
+    try {
+      const repository = runner.manager.getRepository(PurchaseRequest);
+      let entity: PurchaseRequest;
+      if (!id) {
+        id = await this.sequenceService.generateNextNo(
+          companyId, AppModule.PUR, user.departmentId,
+        );
+        entity = repository.create({
+          companyId,
+          id,
+          plantId,
+          requesterId: operator,
+          requestDate: dateOnly(header.requestDate) || today(),
+          status: DocStatus.TEMP,
+          procStatus: null,
+          createdBy: operator,
+          deleteYn: 'N',
+        });
+      } else {
+        entity = await this.findLocked(runner.manager, companyId, id);
+        if (![DocStatus.TEMP, DocStatus.REJECTED].includes(entity.status as DocStatus)) {
+          throw new BadRequestException('저장(T) 또는 반려(R) 상태에서만 수정할 수 있습니다.');
+        }
+        if (entity.status === DocStatus.REJECTED) {
+          entity.approvalId = null;
+          entity.status = DocStatus.TEMP;
+        }
+      }
+      Object.assign(entity, {
+        title: header.title?.trim() || '',
+        warehouseId: header.warehouseId,
+        vendorId: header.vendorId ?? null,
+        requestType: header.requestType ?? null,
+        remarks: header.remarks ?? null,
+        status: entity.status,
+        updatedBy: operator,
+      });
+      await repository.save(entity);
+      const itemRepository = runner.manager.getRepository(PurchaseRequestItem);
+      await itemRepository.delete({ companyId, requestId: id });
+      if (items.length) {
+        await itemRepository.save(items.map((item, index) =>
+          itemRepository.create({
+            companyId,
+            requestId: id,
+            lineNo: index + 1,
+            inventoryId: item.inventoryId,
+            qty: new Decimal(item.qty).toFixed(4),
+            unit: item.unit ?? null,
+            receivedQty: '0',
+            remarks: item.remarks ?? null,
+          }),
+        ));
+      }
+      await runner.commitTransaction();
+    } catch (error) {
+      await runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await runner.release();
+    }
+    return this.toResponse(await this.mustGetActive(companyId, id));
+  }
+
+  async confirm(
+    companyId: string, requestId: string, operator: string,
+  ): Promise<PurchaseRequestResponse> {
+    const entity = await this.mustGetActive(companyId, requestId);
+    if (entity.status !== DocStatus.TEMP) {
+      throw new BadRequestException('저장 상태(T)에서만 확정할 수 있습니다.');
+    }
+    const count = await this.dataSource.getRepository(PurchaseRequestItem).count({
+      where: { companyId, requestId },
+    });
+    if (!count) throw new BadRequestException('자재 라인이 없는 구매요청은 확정할 수 없습니다.');
+    entity.status = DocStatus.SELF_CONFIRMED;
+    entity.updatedBy = operator;
+    return this.toResponse(await this.dataSource.getRepository(PurchaseRequest).save(entity));
+  }
+
+  async placeOrder(
+    companyId: string, req: OrderRequest, operator: string,
+  ): Promise<PurchaseRequestResponse> {
+    const vendorId = req.vendorId?.trim();
+    const purchaseManager = req.purchaseManager?.trim();
+    if (!vendorId) throw new BadRequestException('벤더를 입력하세요.');
+    if (!purchaseManager) throw new BadRequestException('구매담당자를 입력하세요.');
+    const entity = await this.mustGetConfirmed(companyId, req.requestId);
+    Object.assign(entity, {
+      vendorId,
+      purchaseManager,
+      purchaseManagerContact: req.purchaseManagerContact?.trim() || null,
+      orderDate: dateOnly(req.orderDate) || today(),
+      etaDate: dateOnly(req.etaDate),
+      procStatus: ProcStatus.ORDERED,
+      updatedBy: operator,
+    });
+    return this.toResponse(await this.dataSource.getRepository(PurchaseRequest).save(entity));
+  }
+
+  async startShipping(
+    companyId: string, req: ShipRequest, operator: string,
+  ): Promise<PurchaseRequestResponse> {
+    const entity = await this.mustGetConfirmed(companyId, req.requestId);
+    entity.shipStartDate = dateOnly(req.shipStartDate) || today();
+    entity.procStatus = ProcStatus.SHIPPING;
+    entity.updatedBy = operator;
+    return this.toResponse(await this.dataSource.getRepository(PurchaseRequest).save(entity));
+  }
+
+  async close(
+    companyId: string, requestId: string, operator: string,
+  ): Promise<PurchaseRequestResponse> {
+    const entity = await this.mustGetConfirmed(companyId, requestId);
+    if (entity.procStatus === ProcStatus.CLOSED) {
+      throw new BadRequestException('이미 종료된 요청입니다.');
+    }
+    entity.procStatus = ProcStatus.CLOSED;
+    entity.updatedBy = operator;
+    return this.toResponse(await this.dataSource.getRepository(PurchaseRequest).save(entity));
+  }
+
+  async receive(
+    companyId: string, req: ReceiveRequest, operator: string,
+  ): Promise<PurchaseRequestResponse> {
+    if (!req.lines?.length) throw new BadRequestException('입고 라인이 비어 있습니다.');
+    if (!req.warehouseId) throw new BadRequestException('입고 창고를 선택하세요.');
+    const user = await this.dataSource.getRepository(User).findOne({
+      where: { companyId, id: operator, deleteYn: 'N' },
+    });
+    const docNo = await this.sequenceService.generateNextNo(
+      companyId, AppModule.STK, user?.departmentId ?? null,
+    );
+    const txDate = dateOnly(req.txDate) || today();
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction('READ COMMITTED');
+    try {
+      const request = await runner.manager.getRepository(PurchaseRequest)
+        .createQueryBuilder('request')
+        .setLock('pessimistic_write')
+        .where('request.companyId = :companyId', { companyId })
+        .andWhere('request.id = :requestId', { requestId: req.requestId })
+        .andWhere('request.deleteYn = :deleteYn', { deleteYn: 'N' })
+        .getOne();
+      if (!request) throw new NotFoundException('구매요청을 찾을 수 없습니다.');
+      if (![DocStatus.SELF_CONFIRMED, DocStatus.CONFIRMED].includes(request.status as DocStatus)) {
+        throw new BadRequestException('결재완료(C) 또는 직접확정(S) 상태가 아닙니다.');
+      }
+      if (![ProcStatus.ORDERED, ProcStatus.SHIPPING, ProcStatus.PARTIAL_RECEIVED]
+        .includes(request.procStatus as ProcStatus)) {
+        throw new BadRequestException(
+          `입고는 발주·배송중·부분입고 상태에서만 가능합니다. 현재: ${request.procStatus ?? 'null'}`,
+        );
+      }
+      const warehouse = await runner.manager.getRepository(Warehouse).findOne({
+        where: { companyId, id: req.warehouseId, deleteYn: 'N' },
+      });
+      if (!warehouse) throw new BadRequestException('유효한 입고 창고를 찾을 수 없습니다.');
+      const itemRepository = runner.manager.getRepository(PurchaseRequestItem);
+      const items = await itemRepository.createQueryBuilder('item')
+        .setLock('pessimistic_write')
+        .where('item.companyId = :companyId', { companyId })
+        .andWhere('item.requestId = :requestId', { requestId: request.id })
+        .orderBy('item.lineNo', 'ASC')
+        .getMany();
+      const changed = new Map<number, string>();
+      const txItems = req.lines.map((line) => {
+        const item = items.find((candidate) => candidate.lineNo === line.lineNo);
+        if (!item) throw new BadRequestException(`PR 라인 ${line.lineNo}을 찾을 수 없습니다.`);
+        const input = new Decimal(line.qty);
+        if (!input.isFinite() || input.lte(0)) {
+          throw new BadRequestException(`라인 ${line.lineNo}의 입고수량은 0보다 커야 합니다.`);
+        }
+        const received = new Decimal(item.receivedQty);
+        const ordered = new Decimal(item.qty);
+        const next = received.add(input);
+        if (next.gt(ordered)) {
+          throw new BadRequestException(
+            `입고 수량을 초과합니다. 라인 ${line.lineNo}: 요청=${ordered.toFixed(4)}, `
+            + `기입고=${received.toFixed(4)}, 입고=${input.toFixed(4)}, `
+            + `잔여=${ordered.sub(received).toFixed(4)}`,
+          );
+        }
+        changed.set(line.lineNo, next.toFixed(4));
+        return {
+          txTypeCode: TxType.IN,
+          txReasonCode: TxReason.PURCHASE,
+          warehouseId: req.warehouseId,
+          inventoryId: item.inventoryId,
+          qty: input.toString(),
+          unitPrice: new Decimal(line.unitPrice ?? 0).toString(),
+          txDate: new Date(txDate),
+          docNo,
+          refNo: request.id,
+          refModule: AppModule.PUR,
+          refLineNo: String(line.lineNo),
+        };
+      });
+      await this.inventoryTxService.processTransactions(
+        { items: txItems },
+        { runner, companyId, userId: operator },
+      );
+      await itemRepository.save(items
+        .filter((item) => changed.has(item.lineNo))
+        .map((item) => {
+          item.receivedQty = changed.get(item.lineNo)!;
+          return item;
+        }));
+      const allReceived = items.every((item) =>
+        new Decimal(changed.get(item.lineNo) ?? item.receivedQty).gte(item.qty));
+      request.procStatus = req.close
+        ? ProcStatus.CLOSED
+        : allReceived ? ProcStatus.RECEIVED : ProcStatus.PARTIAL_RECEIVED;
+      request.updatedBy = operator;
+      const saved = await runner.manager.getRepository(PurchaseRequest).save(request);
+      await runner.commitTransaction();
+      return this.toResponse(saved);
+    } catch (error) {
+      await runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await runner.release();
+    }
+  }
+
+  async cancelSlip(
+    companyId: string, docNo: string, _operator: string,
+  ): Promise<void> {
+    const historyRepository = this.dataSource.getRepository(InventoryHistory);
+    const histories = await historyRepository.find({
+      where: { companyId, docNo },
+      order: { historyNo: 'ASC' },
+    });
+    if (!histories.length) {
+      throw new BadRequestException(`전표를 찾을 수 없습니다: ${docNo}`);
+    }
+    const firstType = histories[0].txTypeCode;
     if (firstType !== TxType.IN && firstType !== TxType.OUT) {
       throw new BadRequestException(`IN/OUT 전표만 취소 가능합니다 (현재: ${firstType}).`);
     }
-
-    let prId: string | null = null;
-    for (const h of rows) {
-      if (h.tx_type_code !== firstType) {
+    let requestId: string | null = null;
+    for (const history of histories) {
+      if (history.txTypeCode !== firstType) {
         throw new BadRequestException('동일 전표 내 거래 타입이 일관되지 않습니다.');
       }
-      if (!prId && h.ref_module === AppModule.PUR) {
-        prId = h.ref_no;
-      }
-
-      const subsequent = await this.dataSource.query(
-        `SELECT 1 FROM inventory_history 
-         WHERE company_id = $1 AND warehouse_id = $2 AND inventory_id = $3 AND history_no > $4 
-         LIMIT 1`,
-        [companyId, h.warehouse_id, h.inventory_id, h.history_no],
-      );
-      if (subsequent.length > 0) {
-        throw new BadRequestException(`후속 거래가 있어 취소할 수 없습니다 (품목 ${h.inventory_id}).`);
+      if (!requestId && history.refModule === AppModule.PUR) requestId = history.refNo;
+      const subsequent = await historyRepository.exist({
+        where: {
+          companyId,
+          warehouseId: history.warehouseId,
+          inventoryId: history.inventoryId,
+          historyNo: MoreThan(history.historyNo),
+        },
+      });
+      if (subsequent) {
+        throw new BadRequestException(
+          `후속 거래가 있어 취소할 수 없습니다 (품목 ${history.inventoryId}).`,
+        );
       }
     }
-
     const reverseType = firstType === TxType.IN ? TxType.OUT : TxType.IN;
-    const txItems: any[] = [];
-    for (const h of rows) {
-      const qtyDecimal = new Decimal(h.qty).abs();
-      const tx: any = {
-        warehouseId: h.warehouse_id,
-        inventoryId: h.inventory_id,
+    await this.inventoryTxService.processTransactions({
+      items: histories.map((history) => ({
+        warehouseId: history.warehouseId,
+        inventoryId: history.inventoryId,
         txTypeCode: reverseType,
-        qty: qtyDecimal.toString(),
+        txReasonCode: TxReason.GENERAL,
+        qty: new Decimal(history.qty).abs().toString(),
+        ...(firstType === TxType.OUT
+          ? { unitPrice: new Decimal(history.unitPrice).toString() } : {}),
         txDate: new Date(),
         docNo,
-        refNo: h.ref_no,
-        refModule: h.ref_module,
-      };
-
-      if (firstType === TxType.OUT) {
-        tx.unitPrice = new Decimal(h.unit_price).toString();
-      }
-      txItems.push(tx);
-    }
-
-    const qr = this.dataSource.createQueryRunner();
-    await qr.connect();
-    await qr.startTransaction();
-
-    try {
-      await this.inventoryTxService.processTransactions({ items: txItems });
-
-      if (firstType === TxType.IN && prId) {
-        const prItems = await qr.query(
-          `SELECT * FROM purchase_request_item WHERE company_id = $1 AND request_id = $2`,
-          [companyId, prId],
+        refNo: history.refNo ?? undefined,
+        refModule: history.refModule ?? undefined,
+      })),
+    });
+    if (firstType === TxType.IN && requestId) {
+      const items = await this.procurementRepository.findItems(companyId, requestId);
+      for (const history of histories) {
+        const item = items.find(
+          (candidate) => String(candidate.lineNo) === history.refLineNo,
         );
-
-        for (const h of rows) {
-          // ref_line_no로 정확한 라인 매칭
-          const prItem = prItems.find((pri: any) => String(pri.line_no) === h.ref_line_no);
-          if (!prItem) continue;
-
-          const currentReceived = new Decimal(prItem.received_qty);
-          const historyQty = new Decimal(h.qty);
-          const updatedReceived = Decimal.max(currentReceived.sub(historyQty), 0);
-
-          await qr.query(
-            `UPDATE purchase_request_item SET received_qty = $4
-             WHERE company_id = $1 AND request_id = $2 AND line_no = $3`,
-            [companyId, prId, prItem.line_no, updatedReceived.toFixed(4)],
-          );
-        }
+        if (!item) continue;
+        item.receivedQty = Decimal.max(
+          new Decimal(item.receivedQty).sub(history.qty), 0,
+        ).toFixed(4);
       }
-
-      await qr.commitTransaction();
-    } catch (err) {
-      await qr.rollbackTransaction();
-      throw err;
-    } finally {
-      await qr.release();
+      await this.dataSource.getRepository(PurchaseRequestItem).save(items);
     }
   }
 
-  async deleteRequest(companyId: string, requestId: string, operator: string): Promise<void> {
-    const pr = await this.mustGetActive(companyId, requestId);
-    if (pr.status !== DocStatus.TEMP) {
-      throw new BadRequestException('저장 상태(T)에서만 삭제할 수 있습니다. 확정 이후는 종료(E)로 처리하세요.');
+  async deleteRequest(
+    companyId: string, requestId: string, operator: string,
+  ): Promise<void> {
+    const entity = await this.mustGetActive(companyId, requestId);
+    if (entity.status !== DocStatus.TEMP) {
+      throw new BadRequestException(
+        '저장 상태(T)에서만 삭제할 수 있습니다. 확정 이후는 종료(E)로 처리하세요.',
+      );
     }
-    await this.dataSource.query(
-      `UPDATE purchase_request SET delete_yn = 'Y', updated_by = $3 
-       WHERE company_id = $1 AND id = $2`,
-      [companyId, requestId, operator],
-    );
+    entity.deleteYn = 'Y';
+    entity.updatedBy = operator;
+    await this.dataSource.getRepository(PurchaseRequest).save(entity);
   }
 
-  private async mustGetActive(companyId: string, requestId: string): Promise<any> {
-    const rows = await this.dataSource.query(
-      `SELECT * FROM purchase_request WHERE company_id = $1 AND id = $2 AND delete_yn = 'N'`,
-      [companyId, requestId],
-    );
-    if (!rows.length) {
-      throw new NotFoundException('구매요청을 찾을 수 없습니다.');
-    }
-    return rows[0];
+  private async mustGetActive(
+    companyId: string, requestId: string,
+  ): Promise<PurchaseRequest> {
+    const entity = await this.procurementRepository.findOne(companyId, requestId);
+    if (!entity) throw new NotFoundException('구매요청을 찾을 수 없습니다.');
+    return entity;
   }
 
-  private async mustGetConfirmed(companyId: string, requestId: string): Promise<any> {
-    const pr = await this.mustGetActive(companyId, requestId);
-    if (pr.status !== DocStatus.SELF_CONFIRMED) {
-      throw new BadRequestException('확정(S) 상태가 아닙니다.');
+  private async mustGetConfirmed(
+    companyId: string, requestId: string,
+  ): Promise<PurchaseRequest> {
+    const entity = await this.mustGetActive(companyId, requestId);
+    if (![DocStatus.SELF_CONFIRMED, DocStatus.CONFIRMED].includes(entity.status as DocStatus)) {
+      throw new BadRequestException('결재완료(C) 또는 직접확정(S) 상태가 아닙니다.');
     }
-    return pr;
+    return entity;
   }
 
   private async isMultiPlant(companyId: string, roleId: string | null): Promise<boolean> {
     if (!roleId) return false;
-    const rows = await this.dataSource.query(
-      `SELECT multi_plant FROM role WHERE company_id = $1 AND id = $2`,
-      [companyId, roleId],
-    );
-    return rows[0]?.multi_plant === 'Y';
+    const role = await this.dataSource.getRepository(Role).findOne({
+      where: { companyId, id: roleId, deleteYn: 'N' },
+    });
+    return role?.multiPlant === 'Y';
   }
 
+  private async findLocked(
+    manager: EntityManager, companyId: string, id: string,
+  ): Promise<PurchaseRequest> {
+    const entity = await manager.getRepository(PurchaseRequest)
+      .createQueryBuilder('request')
+      .setLock('pessimistic_write')
+      .where('request.companyId = :companyId', { companyId })
+      .andWhere('request.id = :id', { id })
+      .andWhere('request.deleteYn = :notDeleted', { notDeleted: 'N' })
+      .getOne();
+    if (!entity) throw new NotFoundException('구매요청을 찾을 수 없습니다.');
+    return entity;
+  }
+
+  private toResponse(entity: PurchaseRequest): PurchaseRequestResponse {
+    return {
+      companyId: entity.companyId,
+      id: entity.id,
+      plantId: entity.plantId,
+      warehouseId: entity.warehouseId,
+      requesterId: entity.requesterId,
+      requestDate: entity.requestDate,
+      title: entity.title,
+      requestType: entity.requestType,
+      approvalId: entity.approvalId,
+      vendorId: entity.vendorId,
+      purchaseManager: entity.purchaseManager,
+      purchaseManagerContact: entity.purchaseManagerContact,
+      orderDate: entity.orderDate,
+      etaDate: entity.etaDate,
+      shipStartDate: entity.shipStartDate,
+      status: entity.status,
+      procStatus: entity.procStatus,
+      remarks: entity.remarks,
+      createdAt: entity.createdAt.toISOString(),
+      createdBy: entity.createdBy,
+    };
+  }
 }

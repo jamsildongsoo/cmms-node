@@ -10,6 +10,7 @@ import { User } from '../../entities/users.entity';
 import { Warehouse } from '../../entities/warehouse.entity';
 import { CodeGroup } from '../../entities/code-group.entity';
 import { CodeItem } from '../../entities/code-item.entity';
+import { Company } from '../../entities/company.entity';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { CodeItem } from '../../entities/code-item.entity';
       Warehouse,
       CodeGroup,
       CodeItem,
+      Company,
     ]),
   ],
   controllers: [MdmController, MetaController],

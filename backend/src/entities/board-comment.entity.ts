@@ -1,4 +1,12 @@
-import { Entity, PrimaryColumn, Column, CreateDateColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryColumn,
+} from 'typeorm';
+import { Board } from './board.entity';
 
 @Entity('board_comment')
 export class BoardComment {
@@ -22,4 +30,13 @@ export class BoardComment {
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
+
+  @ManyToOne(() => Board, (board) => board.comments, {
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'board_id', referencedColumnName: 'id' },
+  ])
+  board?: Board;
 }

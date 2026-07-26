@@ -91,6 +91,13 @@ export class MasterController {
     return this.masterService.getInventoriesByCompany(companyId);
   }
 
+  /** 업무 입력화면 자재 선택용 읽기 전용 참조 API. */
+  @Get('refs/inventories')
+  async getInventoriesForUse(): Promise<Inventory[]> {
+    const { companyId } = getTenantContext();
+    return this.masterService.getInventoriesByCompany(companyId);
+  }
+
   @Get('inventories/:id')
   @Permission(AppModule.INV, 'R')
   async getInventory(@Param('id') id: string): Promise<Inventory> {

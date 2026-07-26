@@ -1,4 +1,5 @@
-import { Entity, PrimaryColumn, Column } from 'typeorm';
+import { Entity, PrimaryColumn, Column, JoinColumn, ManyToOne } from 'typeorm';
+import { WorkOrder } from './work-order.entity';
 
 @Entity('work_order_item')
 export class WorkOrderItem {
@@ -22,4 +23,14 @@ export class WorkOrderItem {
 
   @Column({ name: 'work_result', type: 'text', nullable: true })
   workResult!: string | null;
+
+  @ManyToOne(() => WorkOrder, (workOrder) => workOrder.items, {
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'plant_id', referencedColumnName: 'plantId' },
+    { name: 'work_order_id', referencedColumnName: 'id' },
+  ])
+  workOrder?: WorkOrder;
 }

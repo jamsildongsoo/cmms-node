@@ -32,6 +32,10 @@ export interface SignUpRequest {
   name: string;
   password: string;
   departmentId?: string;
+  email?: string;
+  phone?: string;
+  position?: string;
+  title?: string;
 }
 
 /**

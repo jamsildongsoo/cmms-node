@@ -1,14 +1,28 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { DataSource, EntityManager } from 'typeorm';
 import { SequenceService, AppModule } from '../../common/sequence/sequence.service';
 import { resolveActivePlantId } from '../../common/utils/plant.util';
 import { DocStatus } from '../../common/constants/status.constants';
+import {
+  WorkPermit,
+  WorkPermitCheckItem,
+} from '../../entities/work-permit.entity';
+import {
+  SaveWorkPermitDto,
+  WorkPermitResponseDto,
+} from './dto/work-permit.dto';
+import { WorkPermitRepository } from './work-permit.repository';
 
 @Injectable()
 export class WorkPermitService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly sequenceService: SequenceService,
+    private readonly workPermitRepository: WorkPermitRepository,
   ) {}
 
   async getWorkPermitsByCompany(
@@ -16,129 +30,220 @@ export class WorkPermitService {
     operator: string,
     searchType?: string,
     searchValue?: string,
-  ): Promise<any[]> {
-    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator);
-    const conditions = [`wp.company_id = $1`, `wp.delete_yn = 'N'`];
-    const params: unknown[] = [companyId];
-    if (activePlantId) {
-      params.push(activePlantId);
-      conditions.push(`wp.plant_id = $${params.length}`);
-    }
-    if (searchValue && ['id', 'title', 'supervisor'].includes(searchType || '')) {
-      params.push(searchValue);
-      const index = params.length;
-      if (searchType === 'id') conditions.push(`wp.id ILIKE '%' || $${index} || '%'`);
-      if (searchType === 'title') conditions.push(`wp.title ILIKE '%' || $${index} || '%'`);
-      if (searchType === 'supervisor') {
-        conditions.push(`(wp.supervisor_id ILIKE '%' || $${index} || '%' OR supervisor.name ILIKE '%' || $${index} || '%')`);
-      }
-    }
-    return this.dataSource.query(
-      `SELECT wp.*, wp.created_at as "createdAt", wp.created_by as "createdBy"
-         FROM work_permit wp
-         LEFT JOIN users supervisor
-           ON wp.company_id = supervisor.company_id
-          AND wp.supervisor_id = supervisor.id
-        WHERE ${conditions.join(' AND ')}
-        ORDER BY wp.id DESC`,
-      params,
-    );
+  ): Promise<WorkPermitResponseDto[]> {
+    const plantId = await resolveActivePlantId(this.dataSource, companyId, operator);
+    return (
+      await this.workPermitRepository.findAll(
+        companyId,
+        plantId ?? undefined,
+        searchType,
+        searchValue,
+      )
+    ).map((entity) => this.toResponse(entity));
   }
 
-  async getWorkPermitDetails(companyId: string, plantId: string, id: string, operator: string): Promise<any> {
-    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, plantId);
-    const permits = await this.dataSource.query(
-      `SELECT wp.*, wp.created_at as "createdAt", wp.created_by as "createdBy"
-         FROM work_permit wp
-        WHERE company_id = $1 AND plant_id = $2 AND id = $3 AND delete_yn = 'N'`,
-      [companyId, activePlantId, id],
+  async getWorkPermitDetails(
+    companyId: string,
+    plantId: string,
+    id: string,
+    operator: string,
+  ): Promise<WorkPermitResponseDto> {
+    const activePlantId = await resolveActivePlantId(
+      this.dataSource,
+      companyId,
+      operator,
+      plantId,
     );
-    if (!permits.length) {
-      throw new NotFoundException('작업허가서를 찾을 수 없습니다.');
-    }
-    return permits[0];
+    if (!activePlantId) throw new BadRequestException('사업장을 확인할 수 없습니다.');
+    const entity = await this.workPermitRepository.findOne(
+      companyId,
+      activePlantId,
+      id,
+    );
+    if (!entity) throw new NotFoundException('작업허가서를 찾을 수 없습니다.');
+    return this.toResponse(entity);
   }
 
-  async saveWorkPermit(companyId: string, permit: any, operator: string): Promise<any> {
-    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, permit.plantId);
-    const qr = this.dataSource.createQueryRunner();
-    await qr.connect();
-    await qr.startTransaction();
-
+  async saveWorkPermit(
+    companyId: string,
+    input: SaveWorkPermitDto,
+    operator: string,
+  ): Promise<WorkPermitResponseDto> {
+    const plantId = await resolveActivePlantId(
+      this.dataSource,
+      companyId,
+      operator,
+      input.plantId,
+    );
+    if (!plantId) throw new BadRequestException('사업장을 확인할 수 없습니다.');
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    let id = input.id?.trim() || '';
     try {
-      let wpId = permit.id;
-      const isNew = !wpId || wpId.trim() === '';
-
-      if (isNew) {
-        wpId = await this.sequenceService.generateNextNo(companyId, AppModule.WP, permit.departmentId);
-      }
-
-      const stringifyJson = (val: any) => {
-        if (!val) return null;
-        return typeof val === 'object' ? JSON.stringify(val) : val;
-      };
-
-      const startAtStr = permit.startAt
-        ? (permit.startAt instanceof Date ? permit.startAt.toISOString() : permit.startAt)
-        : null;
-      const endAtStr = permit.endAt
-        ? (permit.endAt instanceof Date ? permit.endAt.toISOString() : permit.endAt)
-        : null;
-
-      if (isNew) {
-        await qr.query(
-          `INSERT INTO work_permit 
-            (company_id, plant_id, id, equipment_id, work_order_id, title, step_stage, permit_type_codes, start_at, end_at, department_id, supervisor_id, work_summary, risk_factors, safety_measures, json_general, json_fire, json_confined, json_electric, json_high_place, json_excavation, json_heavy_load, remarks, file_group_id, ref_no, ref_module, approval_id, status, created_by, updated_by, delete_yn)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $29, 'N')`,
-          [
-            companyId, activePlantId, wpId, permit.equipmentId, permit.workOrderId ?? null, permit.title,
-            permit.stepStage, permit.permitTypeCodes, startAtStr, endAtStr, permit.departmentId,
-            permit.supervisorId, permit.workSummary ?? null, permit.riskFactors ?? null, permit.safetyMeasures ?? null,
-            stringifyJson(permit.jsonGeneral), stringifyJson(permit.jsonFire), stringifyJson(permit.jsonConfined),
-            stringifyJson(permit.jsonElectric), stringifyJson(permit.jsonHighPlace), stringifyJson(permit.jsonExcavation),
-            stringifyJson(permit.jsonHeavyLoad), permit.remarks ?? null, permit.fileGroupId ?? null,
-            permit.refNo ?? null, permit.refModule ?? null, permit.approvalId ?? null, permit.status || DocStatus.TEMP, operator
-          ],
+      const repository = runner.manager.getRepository(WorkPermit);
+      let entity: WorkPermit;
+      if (!id) {
+        id = await this.sequenceService.generateNextNo(
+          companyId,
+          AppModule.WP,
+          input.departmentId,
         );
+        entity = repository.create({
+          companyId,
+          plantId,
+          id,
+          createdBy: operator,
+          deleteYn: 'N',
+        });
       } else {
-        await qr.query(
-          `UPDATE work_permit 
-           SET equipment_id = $4, work_order_id = $5, title = $6, step_stage = $7, permit_type_codes = $8, start_at = $9, end_at = $10, department_id = $11, supervisor_id = $12, work_summary = $13, risk_factors = $14, safety_measures = $15, json_general = $16, json_fire = $17, json_confined = $18, json_electric = $19, json_high_place = $20, json_excavation = $21, json_heavy_load = $22, remarks = $23, file_group_id = $24, ref_no = $25, ref_module = $26, approval_id = $27, status = $28, updated_by = $29
-           WHERE company_id = $1 AND plant_id = $2 AND id = $3`,
-          [
-            companyId, activePlantId, wpId, permit.equipmentId, permit.workOrderId ?? null, permit.title,
-            permit.stepStage, permit.permitTypeCodes, startAtStr, endAtStr, permit.departmentId,
-            permit.supervisorId, permit.workSummary ?? null, permit.riskFactors ?? null, permit.safetyMeasures ?? null,
-            stringifyJson(permit.jsonGeneral), stringifyJson(permit.jsonFire), stringifyJson(permit.jsonConfined),
-            stringifyJson(permit.jsonElectric), stringifyJson(permit.jsonHighPlace), stringifyJson(permit.jsonExcavation),
-            stringifyJson(permit.jsonHeavyLoad), permit.remarks ?? null, permit.fileGroupId ?? null,
-            permit.refNo ?? null, permit.refModule ?? null, permit.approvalId ?? null, permit.status || DocStatus.TEMP, operator
-          ],
+        entity = await this.findLocked(
+          runner.manager,
+          companyId,
+          plantId,
+          id,
         );
+        if (![DocStatus.TEMP, DocStatus.REJECTED].includes(entity.status as DocStatus)) {
+          throw new BadRequestException('임시저장 또는 반려 상태의 작업허가서만 수정할 수 있습니다.');
+        }
       }
-
-      await qr.commitTransaction();
-
-      const savedList = await this.dataSource.query(
-        `SELECT * FROM work_permit WHERE company_id = $1 AND plant_id = $2 AND id = $3`,
-        [companyId, activePlantId, wpId],
-      );
-      return savedList[0];
-    } catch (err) {
-      await qr.rollbackTransaction();
-      throw err;
+      Object.assign(entity, {
+        equipmentId: input.equipmentId,
+        workOrderId: input.workOrderId ?? null,
+        title: input.title,
+        stepStage: input.stepStage,
+        permitTypeCodes: input.permitTypeCodes,
+        startAt: input.startAt ? new Date(input.startAt) : null,
+        endAt: input.endAt ? new Date(input.endAt) : null,
+        departmentId: input.departmentId,
+        supervisorId: input.supervisorId,
+        workSummary: input.workSummary ?? null,
+        riskFactors: input.riskFactors ?? null,
+        safetyMeasures: input.safetyMeasures ?? null,
+        jsonGeneral: this.parseChecks(input.jsonGeneral),
+        jsonFire: this.parseChecks(input.jsonFire),
+        jsonConfined: this.parseChecks(input.jsonConfined),
+        jsonElectric: this.parseChecks(input.jsonElectric),
+        jsonHighPlace: this.parseChecks(input.jsonHighPlace),
+        jsonExcavation: this.parseChecks(input.jsonExcavation),
+        jsonHeavyLoad: this.parseChecks(input.jsonHeavyLoad),
+        remarks: input.remarks ?? null,
+        fileGroupId: input.fileGroupId ?? null,
+        refNo: input.refNo ?? null,
+        refModule: input.refModule ?? null,
+        approvalId: entity.status === DocStatus.REJECTED ? null : (input.approvalId ?? null),
+        status: input.status || DocStatus.TEMP,
+        updatedBy: operator,
+      });
+      await repository.save(entity);
+      await runner.commitTransaction();
+    } catch (error) {
+      await runner.rollbackTransaction();
+      throw error;
     } finally {
-      await qr.release();
+      await runner.release();
+    }
+    const saved = await this.workPermitRepository.findOne(companyId, plantId, id);
+    if (!saved) throw new NotFoundException('저장된 작업허가서를 찾을 수 없습니다.');
+    return this.toResponse(saved);
+  }
+
+  async deleteWorkPermit(
+    companyId: string,
+    plantId: string,
+    id: string,
+    operator: string,
+  ): Promise<void> {
+    const activePlantId = await resolveActivePlantId(
+      this.dataSource,
+      companyId,
+      operator,
+      plantId,
+    );
+    if (!activePlantId) throw new BadRequestException('사업장을 확인할 수 없습니다.');
+    const repository = this.dataSource.getRepository(WorkPermit);
+    const entity = await repository.findOne({
+      where: { companyId, plantId: activePlantId, id, deleteYn: 'N' },
+    });
+    if (!entity) throw new NotFoundException('작업허가서를 찾을 수 없습니다.');
+    if (entity.status !== DocStatus.TEMP) {
+      throw new BadRequestException('임시저장 상태의 작업허가서만 삭제할 수 있습니다.');
+    }
+    entity.deleteYn = 'Y';
+    entity.updatedBy = operator;
+    await repository.save(entity);
+  }
+
+  private async findLocked(
+    manager: EntityManager,
+    companyId: string,
+    plantId: string,
+    id: string,
+  ): Promise<WorkPermit> {
+    const entity = await manager
+      .getRepository(WorkPermit)
+      .createQueryBuilder('wp')
+      .setLock('pessimistic_write')
+      .where('wp.companyId = :companyId', { companyId })
+      .andWhere('wp.plantId = :plantId', { plantId })
+      .andWhere('wp.id = :id', { id })
+      .andWhere('wp.deleteYn = :notDeleted', { notDeleted: 'N' })
+      .getOne();
+    if (!entity) throw new NotFoundException('작업허가서를 찾을 수 없습니다.');
+    return entity;
+  }
+
+  private parseChecks(
+    value?: WorkPermitCheckItem[] | string | null,
+  ): WorkPermitCheckItem[] | null {
+    if (!value) return null;
+    if (Array.isArray(value)) return value;
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (!Array.isArray(parsed)) {
+        throw new BadRequestException('작업허가 체크시트 형식이 올바르지 않습니다.');
+      }
+      return parsed as WorkPermitCheckItem[];
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadRequestException('작업허가 체크시트 JSON 형식이 올바르지 않습니다.');
     }
   }
 
-  async deleteWorkPermit(companyId: string, plantId: string, id: string, operator: string): Promise<void> {
-    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, plantId);
-    await this.dataSource.query(
-      `UPDATE work_permit 
-       SET delete_yn = 'Y', updated_by = $4 
-       WHERE company_id = $1 AND plant_id = $2 AND id = $3 AND delete_yn = 'N'`,
-      [companyId, activePlantId, id, operator],
-    );
+  private toResponse(entity: WorkPermit): WorkPermitResponseDto {
+    return {
+      companyId: entity.companyId,
+      plantId: entity.plantId,
+      id: entity.id,
+      equipmentId: entity.equipmentId,
+      equipmentName: entity.equipment?.name ?? null,
+      workOrderId: entity.workOrderId,
+      title: entity.title,
+      stepStage: entity.stepStage,
+      permitTypeCodes: entity.permitTypeCodes,
+      startAt: entity.startAt?.toISOString() ?? null,
+      endAt: entity.endAt?.toISOString() ?? null,
+      departmentId: entity.departmentId,
+      supervisorId: entity.supervisorId,
+      workSummary: entity.workSummary,
+      riskFactors: entity.riskFactors,
+      safetyMeasures: entity.safetyMeasures,
+      jsonGeneral: entity.jsonGeneral,
+      jsonFire: entity.jsonFire,
+      jsonConfined: entity.jsonConfined,
+      jsonElectric: entity.jsonElectric,
+      jsonHighPlace: entity.jsonHighPlace,
+      jsonExcavation: entity.jsonExcavation,
+      jsonHeavyLoad: entity.jsonHeavyLoad,
+      remarks: entity.remarks,
+      fileGroupId:
+        entity.fileGroupId == null ? null : Number(entity.fileGroupId),
+      refNo: entity.refNo,
+      refModule: entity.refModule,
+      approvalId: entity.approvalId,
+      status: entity.status,
+      createdAt: entity.createdAt.toISOString(),
+      createdBy: entity.createdBy,
+    };
   }
 }

@@ -1,5 +1,15 @@
-import { Entity, PrimaryColumn, PrimaryGeneratedColumn, Column } from 'typeorm';
+import {
+  Column,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  OneToMany,
+  PrimaryColumn,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { BaseEntity } from './base.entity';
+import { BoardComment } from './board-comment.entity';
+import { User } from './users.entity';
 
 @Entity('board')
 export class Board extends BaseEntity {
@@ -29,4 +39,14 @@ export class Board extends BaseEntity {
 
   @Column({ type: 'varchar',  name: 'ref_module', length: 50, nullable: true })
   refModule!: string | null;
+
+  @ManyToOne(() => User, { createForeignKeyConstraints: false })
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'created_by', referencedColumnName: 'id' },
+  ])
+  creator?: User;
+
+  @OneToMany(() => BoardComment, (comment) => comment.board)
+  comments?: BoardComment[];
 }

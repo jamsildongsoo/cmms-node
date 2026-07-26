@@ -1,6 +1,6 @@
 import { Entity, PrimaryColumn, Column } from 'typeorm';
 
-/** 로그인 이력 — auth/system 서비스가 raw SQL로 사용 (감사 컬럼 없음) */
+/** 로그인 이력(감사 컬럼 없음). */
 @Entity('login_history')
 export class LoginHistory {
   @PrimaryColumn({ name: 'company_id', length: 50 })

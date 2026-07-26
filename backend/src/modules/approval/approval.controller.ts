@@ -6,9 +6,13 @@ import {
   Param,
   UseGuards,
 } from '@nestjs/common';
-import { ApprovalService, ApprovalDetailResponse } from './approval.service';
+import { ApprovalService } from './approval.service';
 import { ApprovalSubmitDto } from './dto/approval-submit.dto';
 import { ApprovalActionDto } from './dto/approval-action.dto';
+import {
+  ApprovalDetailResponseDto,
+  ApprovalResponseDto,
+} from './dto/approval-response.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionGuard, Permission } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
@@ -21,42 +25,42 @@ export class ApprovalController {
 
   @Post('submit')
   @Permission(AppModule.APR, 'C')
-  async submitApproval(@Body() request: ApprovalSubmitDto): Promise<any> {
+  async submitApproval(@Body() request: ApprovalSubmitDto): Promise<ApprovalResponseDto> {
     const { companyId, userId } = getTenantContext();
     return this.approvalService.submitApproval(companyId, request, userId);
   }
 
   @Get('sent')
   @Permission(AppModule.APR, 'R')
-  async getSentApprovals(): Promise<any[]> {
+  async getSentApprovals(): Promise<ApprovalResponseDto[]> {
     const { companyId, userId } = getTenantContext();
     return this.approvalService.getSentApprovals(companyId, userId);
   }
 
   @Get('pending')
   @Permission(AppModule.APR, 'R')
-  async getPendingApprovals(): Promise<any[]> {
+  async getPendingApprovals(): Promise<ApprovalResponseDto[]> {
     const { companyId, userId } = getTenantContext();
     return this.approvalService.getPendingApprovals(companyId, userId);
   }
 
   @Get('referenced')
   @Permission(AppModule.APR, 'R')
-  async getReferencedApprovals(): Promise<any[]> {
+  async getReferencedApprovals(): Promise<ApprovalResponseDto[]> {
     const { companyId, userId } = getTenantContext();
     return this.approvalService.getReferencedApprovals(companyId, userId);
   }
 
   @Get('processed')
   @Permission(AppModule.APR, 'R')
-  async getProcessedApprovals(): Promise<any[]> {
+  async getProcessedApprovals(): Promise<ApprovalResponseDto[]> {
     const { companyId, userId } = getTenantContext();
     return this.approvalService.getProcessedApprovals(companyId, userId);
   }
 
   @Get(':id/details')
   @Permission(AppModule.APR, 'R')
-  async getApprovalDetails(@Param('id') id: string): Promise<ApprovalDetailResponse> {
+  async getApprovalDetails(@Param('id') id: string): Promise<ApprovalDetailResponseDto> {
     const { companyId } = getTenantContext();
     return this.approvalService.getApprovalDetails(companyId, id);
   }

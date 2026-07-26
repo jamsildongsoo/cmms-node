@@ -1,7 +1,9 @@
-import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
 import { Department } from './department.entity';
 import { Equipment } from './equipment.entity';
 import { BaseEntity } from './base.entity';
+import { User } from './users.entity';
+import { WorkOrderItem } from './work-order-item.entity';
 
 @Entity('work_order')
 export class WorkOrder extends BaseEntity {
@@ -33,7 +35,7 @@ export class WorkOrder extends BaseEntity {
   workerId!: string | null;
 
   @Column({ name: 'work_date', type: 'date', nullable: true })
-  workDate!: Date | string | null;
+  workDate!: string | null;
 
   @Column({ name: 'cost', type: 'numeric', precision: 15, scale: 2, default: '0' })
   cost!: string;
@@ -61,4 +63,29 @@ export class WorkOrder extends BaseEntity {
 
   @Column({ name: 'status', length: 1, default: 'T' })
   status!: string;
+
+  @ManyToOne(() => Equipment, { createForeignKeyConstraints: false })
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'plant_id', referencedColumnName: 'plantId' },
+    { name: 'equipment_id', referencedColumnName: 'id' },
+  ])
+  equipment?: Equipment;
+
+  @ManyToOne(() => Department, { createForeignKeyConstraints: false })
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'department_id', referencedColumnName: 'id' },
+  ])
+  department?: Department;
+
+  @ManyToOne(() => User, { createForeignKeyConstraints: false })
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'worker_id', referencedColumnName: 'id' },
+  ])
+  worker?: User | null;
+
+  @OneToMany(() => WorkOrderItem, (item) => item.workOrder)
+  items?: WorkOrderItem[];
 }

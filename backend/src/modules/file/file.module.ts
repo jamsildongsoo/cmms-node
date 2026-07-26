@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MulterModule } from '@nestjs/platform-express';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { memoryStorage } from 'multer';
 import { FileController } from './file.controller';
 import { FileStorageService } from './file-storage.service';
@@ -15,10 +16,20 @@ import {
   FileUploadConfigModule,
   FileUploadSettings,
 } from './file-upload.config';
+import { FileAttachment } from '../../entities/file-attachment.entity';
+import { FileAttachmentItem } from '../../entities/file-attachment-item.entity';
+import { RoleDetail } from '../../entities/role-detail.entity';
+import { User } from '../../entities/users.entity';
 
 @Module({
   imports: [
     FileUploadConfigModule,
+    TypeOrmModule.forFeature([
+      FileAttachment,
+      FileAttachmentItem,
+      RoleDetail,
+      User,
+    ]),
     MulterModule.registerAsync({
       imports: [FileUploadConfigModule],
       inject: [FILE_UPLOAD_SETTINGS],

@@ -3,6 +3,8 @@ import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
 import axiosInstance from '../api/axios';
 import { getApiErrorMessage } from '../utils/apiError';
+import ListBadge from '../components/ListBadge';
+import ListIconButton from '../components/ListIconButton';
 import { 
   Building2, FolderTree, 
   Plus, Edit2, Trash2, Check, X, Shield, Save 
@@ -101,7 +103,6 @@ function PlantManager({ notify }: { notify: (type: 'success' | 'error', t: strin
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!id || !name) return;
-
     try {
       if (editingId) {
         await axiosInstance.put(`/mdm/plants/${editingId}`, { name });
@@ -201,18 +202,18 @@ function PlantManager({ notify }: { notify: (type: 'success' | 'error', t: strin
                     <td className="p-3 font-mono text-slate-400">{plant.id}</td>
                     <td className="p-3 font-semibold">{plant.name}</td>
                     <td className="p-3 text-right space-x-2">
-                      <button
+                      <ListIconButton
                         onClick={() => { setEditingId(plant.id); setId(plant.id); setName(plant.name); }}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-blue-400 transition-colors border-0 cursor-pointer bg-transparent"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                      <button
+                        label={`${plant.name} 수정`}
+                        icon={Edit2}
+                        tone="accent"
+                      />
+                      <ListIconButton
                         onClick={() => handleDelete(plant.id)}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-rose-400 transition-colors border-0 cursor-pointer bg-transparent"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                        label={`${plant.name} 삭제`}
+                        icon={Trash2}
+                        tone="danger"
+                      />
                     </td>
                   </tr>
                 ))
@@ -374,23 +375,23 @@ function DeptManager({ notify }: { notify: (type: 'success' | 'error', t: string
                     </td>
                     <td className="p-3 font-mono text-slate-500">{dept.parentId || '-'}</td>
                     <td className="p-3 text-right space-x-2">
-                      <button
+                      <ListIconButton
                         onClick={() => {
                           setEditingId(dept.id);
                           setId(dept.id);
                           setName(dept.name);
                           setParentId(dept.parentId || '');
                         }}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-blue-400 transition-colors border-0 cursor-pointer bg-transparent"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                      <button
+                        label={`${dept.name} 수정`}
+                        icon={Edit2}
+                        tone="accent"
+                      />
+                      <ListIconButton
                         onClick={() => handleDelete(dept.id)}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-rose-400 transition-colors border-0 cursor-pointer bg-transparent"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                        label={`${dept.name} 삭제`}
+                        icon={Trash2}
+                        tone="danger"
+                      />
                     </td>
                   </tr>
                 ))
@@ -447,6 +448,10 @@ function UserManager({ notify }: { notify: (type: 'success' | 'error', t: string
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!id || !name) return;
+    if (!lastLoginPlantId) {
+      notify('error', '지정 플랜트를 선택해주세요.');
+      return;
+    }
 
     try {
       const payload = {
@@ -602,13 +607,14 @@ function UserManager({ notify }: { notify: (type: 'success' | 'error', t: string
             </select>
           </div>
           <div>
-            <label className="block text-slate-400 text-xs mb-1.5">지정 플랜트 (선택 — 비우면 로그인 시 자동매핑)</label>
+            <label className="block text-slate-400 text-xs mb-1.5">지정 플랜트 <span className="text-rose-500">*</span></label>
             <select
+              required
               value={lastLoginPlantId}
               onChange={(e) => setLastLoginPlantId(e.target.value)}
               className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 text-xs outline-none transition-colors"
             >
-              <option value="">자동매핑</option>
+              <option value="">-- 지정 플랜트 선택 --</option>
               {plants.map(p => <option key={p.id} value={p.id}>{p.id} — {p.name}</option>)}
             </select>
           </div>
@@ -656,23 +662,19 @@ function UserManager({ notify }: { notify: (type: 'success' | 'error', t: string
                   <td className="p-3 font-semibold text-slate-200">{u.name}</td>
                   <td className="p-3">{depts.find(d => d.id === u.departmentId)?.name || '-'}</td>
                   <td className="p-3">
-                    <span className="px-2 py-0.5 rounded bg-blue-950/60 border border-blue-900/50 text-blue-400 text-[10px] font-bold">
+                    <ListBadge>
                       {roles.find(r => r.id === u.roleId)?.roleName || u.roleId}
-                    </span>
+                    </ListBadge>
                   </td>
                   <td className="p-3 text-slate-400">{u.email || '-'}</td>
                   <td className="p-3 text-slate-400">{u.position ? `${u.position}/${u.title || '-'}` : '-'}</td>
                   <td className="p-3">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                      u.useYn === 'Y' 
-                        ? 'bg-emerald-950 text-emerald-400 border border-emerald-900' 
-                        : 'bg-rose-950 text-rose-400 border border-rose-900'
-                    }`}>
+                    <ListBadge>
                       {u.useYn === 'Y' ? '활성' : '비활성'}
-                    </span>
+                    </ListBadge>
                   </td>
                   <td className="p-3 text-right space-x-1.5">
-                    <button
+                    <ListIconButton
                       onClick={() => {
                         setEditingId(u.id);
                         setId(u.id);
@@ -686,16 +688,16 @@ function UserManager({ notify }: { notify: (type: 'success' | 'error', t: string
                         setUseYn(u.useYn);
                         setLastLoginPlantId(u.lastLoginPlantId || '');
                       }}
-                      className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-blue-400 transition-colors border-0 cursor-pointer bg-transparent"
-                    >
-                      <Edit2 size={13} />
-                    </button>
-                    <button
+                      label={`${u.name} 수정`}
+                      icon={Edit2}
+                      tone="accent"
+                    />
+                    <ListIconButton
                       onClick={() => handleDelete(u.id)}
-                      className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-rose-400 transition-colors border-0 cursor-pointer bg-transparent"
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                      label={`${u.name} 삭제`}
+                      icon={Trash2}
+                      tone="danger"
+                    />
                   </td>
                 </tr>
               ))}
@@ -1072,18 +1074,18 @@ function WarehouseManager({ notify }: { notify: (type: 'success' | 'error', t: s
                     <td className="p-3 font-semibold">{wh.name}</td>
                     <td className="p-3 text-slate-400">{wh.plantId || <span className="text-slate-600">공통</span>}</td>
                     <td className="p-3 text-right space-x-2">
-                      <button
+                      <ListIconButton
                         onClick={() => { setEditingId(wh.id); setId(wh.id); setName(wh.name); setPlantId(wh.plantId || ''); }}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-blue-400 transition-colors border-0 cursor-pointer bg-transparent"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                      <button
+                        label={`${wh.name} 수정`}
+                        icon={Edit2}
+                        tone="accent"
+                      />
+                      <ListIconButton
                         onClick={() => handleDelete(wh.id)}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-rose-400 transition-colors border-0 cursor-pointer bg-transparent"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                        label={`${wh.name} 삭제`}
+                        icon={Trash2}
+                        tone="danger"
+                      />
                     </td>
                   </tr>
                 ))
@@ -1355,7 +1357,7 @@ function CodeManager({ notify }: { notify: (type: 'success' | 'error', t: string
                       </td>
                       <td className="p-3 text-slate-400">{item.sortOrder}</td>
                       <td className="p-3 text-right space-x-2">
-                        <button
+                        <ListIconButton
                           onClick={() => {
                             setItemEditingId(item.id);
                             setItemId(item.id);
@@ -1363,16 +1365,16 @@ function CodeManager({ notify }: { notify: (type: 'success' | 'error', t: string
                             setLegalInspectYn(item.legalInspectYn);
                             setSortOrder(item.sortOrder);
                           }}
-                          className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-blue-400 transition-colors border-0 cursor-pointer bg-transparent"
-                        >
-                          <Edit2 size={13} />
-                        </button>
-                        <button
+                          label={`${item.name} 수정`}
+                          icon={Edit2}
+                          tone="accent"
+                        />
+                        <ListIconButton
                           onClick={() => handleItemDelete(item.id)}
-                          className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-rose-400 transition-colors border-0 cursor-pointer bg-transparent"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                          label={`${item.name} 삭제`}
+                          icon={Trash2}
+                          tone="danger"
+                        />
                       </td>
                     </tr>
                   ))

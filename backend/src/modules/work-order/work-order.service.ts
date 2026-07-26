@@ -1,44 +1,30 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { DataSource, EntityManager } from 'typeorm';
 import { SequenceService, AppModule } from '../../common/sequence/sequence.service';
 import { resolveActivePlantId } from '../../common/utils/plant.util';
 import { DocStatus } from '../../common/constants/status.constants';
 import { toFixedSafe } from '../../common/utils/decimal.util';
-
-export interface WorkOrderSaveRequest {
-  workOrder: {
-    plantId: string;
-    id?: string | null;
-    equipmentId: string;
-    title: string;
-    stepStage: string;
-    woTypeCode: string;
-    departmentId: string;
-    workerId?: string | null;
-    workDate?: Date | string | null;
-    cost?: string;
-    manHours?: string;
-    manHoursUnit?: string;
-    remarks?: string | null;
-    fileGroupId?: string | number | null;
-    refNo?: string | null;
-    refModule?: string | null;
-    approvalId?: string | null;
-    status: string;
-  };
-  workItems: Array<{
-    itemNo: number;
-    workName: string;
-    workMethod?: string | null;
-    workResult?: string | null;
-  }>;
-}
+import { WorkOrder } from '../../entities/work-order.entity';
+import { WorkOrderItem } from '../../entities/work-order-item.entity';
+import {
+  SaveWorkOrderDto,
+  WorkOrderDetailsDto,
+  WorkOrderItemDto,
+  WorkOrderItemResponseDto,
+  WorkOrderResponseDto,
+} from './dto/work-order.dto';
+import { WorkOrderRepository } from './work-order.repository';
 
 @Injectable()
 export class WorkOrderService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly sequenceService: SequenceService,
+    private readonly workOrderRepository: WorkOrderRepository,
   ) {}
 
   async getWorkOrdersByCompany(
@@ -46,153 +32,235 @@ export class WorkOrderService {
     operator: string,
     searchType?: string,
     searchValue?: string,
-  ): Promise<any[]> {
-    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator);
-    const conditions = [`wo.company_id = $1`, `wo.delete_yn = 'N'`];
-    const params: unknown[] = [companyId];
-    if (activePlantId) {
-      params.push(activePlantId);
-      conditions.push(`wo.plant_id = $${params.length}`);
-    }
-    if (searchValue && ['id', 'title', 'worker'].includes(searchType || '')) {
-      params.push(searchValue);
-      const index = params.length;
-      if (searchType === 'id') conditions.push(`wo.id ILIKE '%' || $${index} || '%'`);
-      if (searchType === 'title') conditions.push(`wo.title ILIKE '%' || $${index} || '%'`);
-      if (searchType === 'worker') {
-        conditions.push(`(wo.worker_id ILIKE '%' || $${index} || '%' OR worker.name ILIKE '%' || $${index} || '%')`);
-      }
-    }
-    return this.dataSource.query(
-      `SELECT wo.*, wo.created_at as "createdAt", wo.created_by as "createdBy"
-         FROM work_order wo
-         LEFT JOIN users worker
-           ON wo.company_id = worker.company_id
-          AND wo.worker_id = worker.id
-        WHERE ${conditions.join(' AND ')}
-        ORDER BY wo.id DESC`,
-      params,
-    );
+  ): Promise<WorkOrderResponseDto[]> {
+    const plantId = await resolveActivePlantId(this.dataSource, companyId, operator);
+    return (
+      await this.workOrderRepository.findAll(
+        companyId,
+        plantId ?? undefined,
+        searchType,
+        searchValue,
+      )
+    ).map((entity) => this.toResponse(entity));
   }
 
-  async getWorkOrderDetails(companyId: string, plantId: string, id: string, operator: string): Promise<WorkOrderSaveRequest> {
-    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, plantId);
-    const workOrders = await this.dataSource.query(
-      `SELECT wo.*, wo.created_at as "createdAt", wo.created_by as "createdBy"
-         FROM work_order wo
-        WHERE company_id = $1 AND plant_id = $2 AND id = $3 AND delete_yn = 'N'`,
-      [companyId, activePlantId, id],
+  async getWorkOrderDetails(
+    companyId: string,
+    plantId: string,
+    id: string,
+    operator: string,
+  ): Promise<WorkOrderDetailsDto> {
+    const activePlantId = await resolveActivePlantId(
+      this.dataSource,
+      companyId,
+      operator,
+      plantId,
     );
-    if (!workOrders.length) {
-      throw new NotFoundException('작업 지시를 찾을 수 없습니다.');
-    }
-
-    const items = await this.dataSource.query(
-      `SELECT 
-        item_no as "itemNo",
-        work_name as "workName",
-        work_method as "workMethod",
-        work_result as "workResult"
-      FROM work_order_item 
-      WHERE company_id = $1 AND plant_id = $2 AND work_order_id = $3 
-      ORDER BY item_no ASC`,
-      [companyId, activePlantId, id],
+    if (!activePlantId) throw new BadRequestException('사업장을 확인할 수 없습니다.');
+    const workOrder = await this.workOrderRepository.findOne(
+      companyId,
+      activePlantId,
+      id,
     );
-
+    if (!workOrder) throw new NotFoundException('작업 지시를 찾을 수 없습니다.');
+    const items = await this.workOrderRepository.findItems(
+      companyId,
+      activePlantId,
+      id,
+    );
     return {
-      workOrder: workOrders[0],
-      workItems: items,
+      workOrder: this.toResponse(workOrder),
+      workItems: items.map((item) => this.toItemResponse(item)),
     };
   }
 
-  async saveWorkOrder(companyId: string, request: WorkOrderSaveRequest, operator: string): Promise<any> {
-    const { workOrder, workItems } = request;
-    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, workOrder.plantId);
-    const qr = this.dataSource.createQueryRunner();
-    await qr.connect();
-    await qr.startTransaction();
-
+  async saveWorkOrder(
+    companyId: string,
+    request: SaveWorkOrderDto,
+    operator: string,
+  ): Promise<WorkOrderResponseDto> {
+    const { workOrder: input, workItems } = request;
+    const plantId = await resolveActivePlantId(
+      this.dataSource,
+      companyId,
+      operator,
+      input.plantId,
+    );
+    if (!plantId) throw new BadRequestException('사업장을 확인할 수 없습니다.');
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    let id = input.id?.trim() || '';
     try {
-      let woId = workOrder.id;
-      const isNew = !woId || woId.trim() === '';
-
-      if (isNew) {
-        woId = await this.sequenceService.generateNextNo(companyId, AppModule.WO, workOrder.departmentId);
-      }
-
-      const workDateStr = workOrder.workDate
-        ? (workOrder.workDate instanceof Date ? workOrder.workDate.toISOString().split('T')[0] : workOrder.workDate)
-        : null;
-
-      if (isNew) {
-        await qr.query(
-          `INSERT INTO work_order 
-            (company_id, plant_id, id, equipment_id, title, step_stage, wo_type_code, department_id, worker_id, work_date, cost, man_hours, man_hours_unit, remarks, file_group_id, ref_no, ref_module, approval_id, status, created_by, updated_by, delete_yn)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $20, 'N')`,
-          [
-            companyId, activePlantId, woId, workOrder.equipmentId, workOrder.title, workOrder.stepStage,
-            workOrder.woTypeCode, workOrder.departmentId, workOrder.workerId ?? null, workDateStr,
-            toFixedSafe(workOrder.cost, 2), toFixedSafe(workOrder.manHours, 2), workOrder.manHoursUnit || 'H',
-            workOrder.remarks ?? null, workOrder.fileGroupId ?? null, workOrder.refNo ?? null,
-            workOrder.refModule ?? null, workOrder.approvalId ?? null, workOrder.status || DocStatus.TEMP, operator
-          ],
+      const repository = runner.manager.getRepository(WorkOrder);
+      let entity: WorkOrder;
+      if (!id) {
+        id = await this.sequenceService.generateNextNo(
+          companyId,
+          AppModule.WO,
+          input.departmentId,
         );
+        entity = repository.create({
+          companyId,
+          plantId,
+          id,
+          createdBy: operator,
+          deleteYn: 'N',
+        });
       } else {
-        await qr.query(
-          `UPDATE work_order 
-           SET equipment_id = $4, title = $5, step_stage = $6, wo_type_code = $7, department_id = $8, worker_id = $9, work_date = $10, cost = $11, man_hours = $12, man_hours_unit = $13, remarks = $14, file_group_id = $15, ref_no = $16, ref_module = $17, approval_id = $18, status = $19, updated_by = $20
-           WHERE company_id = $1 AND plant_id = $2 AND id = $3`,
-          [
-            companyId, activePlantId, woId, workOrder.equipmentId, workOrder.title, workOrder.stepStage,
-            workOrder.woTypeCode, workOrder.departmentId, workOrder.workerId ?? null, workDateStr,
-            toFixedSafe(workOrder.cost, 2), toFixedSafe(workOrder.manHours, 2), workOrder.manHoursUnit || 'H',
-            workOrder.remarks ?? null, workOrder.fileGroupId ?? null, workOrder.refNo ?? null,
-            workOrder.refModule ?? null, workOrder.approvalId ?? null, workOrder.status || DocStatus.TEMP, operator
-          ],
+        entity = await this.findLocked(
+          runner.manager,
+          companyId,
+          plantId,
+          id,
         );
-      }
-
-      await qr.query(
-        `DELETE FROM work_order_item WHERE company_id = $1 AND plant_id = $2 AND work_order_id = $3`,
-        [companyId, activePlantId, woId],
-      );
-
-      if (workItems && workItems.length > 0) {
-        for (const item of workItems) {
-          await qr.query(
-            `INSERT INTO work_order_item
-              (company_id, plant_id, work_order_id, item_no, work_name, work_method, work_result)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [
-              companyId, activePlantId, woId, item.itemNo, item.workName,
-              item.workMethod ?? null, item.workResult ?? null
-            ],
-          );
+        if (![DocStatus.TEMP, DocStatus.REJECTED].includes(entity.status as DocStatus)) {
+          throw new BadRequestException('임시저장 또는 반려 상태의 작업지시만 수정할 수 있습니다.');
         }
       }
-
-      await qr.commitTransaction();
-
-      const savedList = await this.dataSource.query(
-        `SELECT * FROM work_order WHERE company_id = $1 AND plant_id = $2 AND id = $3`,
-        [companyId, activePlantId, woId],
+      Object.assign(entity, {
+        equipmentId: input.equipmentId,
+        title: input.title,
+        stepStage: input.stepStage,
+        woTypeCode: input.woTypeCode,
+        departmentId: input.departmentId,
+        workerId: input.workerId ?? null,
+        workDate: input.workDate ?? null,
+        cost: toFixedSafe(input.cost, 2),
+        manHours: toFixedSafe(input.manHours, 2),
+        manHoursUnit: input.manHoursUnit || 'H',
+        remarks: input.remarks ?? null,
+        fileGroupId: input.fileGroupId ?? null,
+        refNo: input.refNo ?? null,
+        refModule: input.refModule ?? null,
+        approvalId: entity.status === DocStatus.REJECTED ? null : (input.approvalId ?? null),
+        status: input.status || DocStatus.TEMP,
+        updatedBy: operator,
+      });
+      await repository.save(entity);
+      await this.replaceItems(
+        runner.manager,
+        companyId,
+        plantId,
+        id,
+        workItems,
       );
-      return savedList[0];
-    } catch (err) {
-      await qr.rollbackTransaction();
-      throw err;
+      await runner.commitTransaction();
+    } catch (error) {
+      await runner.rollbackTransaction();
+      throw error;
     } finally {
-      await qr.release();
+      await runner.release();
     }
+    const saved = await this.workOrderRepository.findOne(companyId, plantId, id);
+    if (!saved) throw new NotFoundException('저장된 작업지시를 찾을 수 없습니다.');
+    return this.toResponse(saved);
   }
 
-  async deleteWorkOrder(companyId: string, plantId: string, id: string, operator: string): Promise<void> {
-    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, plantId);
-    await this.dataSource.query(
-      `UPDATE work_order 
-       SET delete_yn = 'Y', updated_by = $4 
-       WHERE company_id = $1 AND plant_id = $2 AND id = $3 AND delete_yn = 'N'`,
-      [companyId, activePlantId, id, operator],
+  async deleteWorkOrder(
+    companyId: string,
+    plantId: string,
+    id: string,
+    operator: string,
+  ): Promise<void> {
+    const activePlantId = await resolveActivePlantId(
+      this.dataSource,
+      companyId,
+      operator,
+      plantId,
     );
+    if (!activePlantId) throw new BadRequestException('사업장을 확인할 수 없습니다.');
+    const repository = this.dataSource.getRepository(WorkOrder);
+    const entity = await repository.findOne({
+      where: { companyId, plantId: activePlantId, id, deleteYn: 'N' },
+    });
+    if (!entity) throw new NotFoundException('작업 지시를 찾을 수 없습니다.');
+    if (entity.status !== DocStatus.TEMP) {
+      throw new BadRequestException('임시저장 상태의 작업지시만 삭제할 수 있습니다.');
+    }
+    entity.deleteYn = 'Y';
+    entity.updatedBy = operator;
+    await repository.save(entity);
+  }
+
+  private async findLocked(
+    manager: EntityManager,
+    companyId: string,
+    plantId: string,
+    id: string,
+  ): Promise<WorkOrder> {
+    const entity = await manager
+      .getRepository(WorkOrder)
+      .createQueryBuilder('wo')
+      .setLock('pessimistic_write')
+      .where('wo.companyId = :companyId', { companyId })
+      .andWhere('wo.plantId = :plantId', { plantId })
+      .andWhere('wo.id = :id', { id })
+      .andWhere('wo.deleteYn = :notDeleted', { notDeleted: 'N' })
+      .getOne();
+    if (!entity) throw new NotFoundException('작업 지시를 찾을 수 없습니다.');
+    return entity;
+  }
+
+  private async replaceItems(
+    manager: EntityManager,
+    companyId: string,
+    plantId: string,
+    workOrderId: string,
+    items: WorkOrderItemDto[],
+  ): Promise<void> {
+    const repository = manager.getRepository(WorkOrderItem);
+    await repository.delete({ companyId, plantId, workOrderId });
+    if (!items.length) return;
+    await repository.save(
+      items.map((item, index) =>
+        repository.create({
+          companyId,
+          plantId,
+          workOrderId,
+          itemNo: index + 1,
+          workName: item.workName,
+          workMethod: item.workMethod ?? null,
+          workResult: item.workResult ?? null,
+        }),
+      ),
+    );
+  }
+
+  private toResponse(entity: WorkOrder): WorkOrderResponseDto {
+    return {
+      companyId: entity.companyId,
+      plantId: entity.plantId,
+      id: entity.id,
+      equipmentId: entity.equipmentId,
+      equipmentName: entity.equipment?.name ?? null,
+      title: entity.title,
+      stepStage: entity.stepStage,
+      woTypeCode: entity.woTypeCode,
+      departmentId: entity.departmentId,
+      workerId: entity.workerId,
+      workDate: entity.workDate,
+      cost: Number(entity.cost),
+      manHours: Number(entity.manHours),
+      manHoursUnit: entity.manHoursUnit,
+      remarks: entity.remarks,
+      fileGroupId:
+        entity.fileGroupId == null ? null : Number(entity.fileGroupId),
+      refNo: entity.refNo,
+      refModule: entity.refModule,
+      approvalId: entity.approvalId,
+      status: entity.status,
+      createdAt: entity.createdAt.toISOString(),
+      createdBy: entity.createdBy,
+    };
+  }
+
+  private toItemResponse(item: WorkOrderItem): WorkOrderItemResponseDto {
+    return {
+      itemNo: item.itemNo,
+      workName: item.workName,
+      workMethod: item.workMethod,
+      workResult: item.workResult,
+    };
   }
 }

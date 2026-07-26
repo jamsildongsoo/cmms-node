@@ -9,6 +9,11 @@ import { User } from '../../entities/users.entity';
 import { Warehouse } from '../../entities/warehouse.entity';
 import { CodeGroup } from '../../entities/code-group.entity';
 import { CodeItem } from '../../entities/code-item.entity';
+import { Company } from '../../entities/company.entity';
+import {
+  CreateCompanyDto,
+  CreateCompanyResponseDto,
+} from './dto/create-company.dto';
 import { CodeUtil } from '../../common/utils/code.util';
 import { AppModule } from '../../common/sequence/sequence.service';
 import * as bcrypt from 'bcryptjs';
@@ -88,6 +93,20 @@ const DEFAULT_CODE_GROUPS = [
       ['ETC', '기타 구매'],
     ],
   },
+  {
+    id: 'TX_REASON',
+    name: '재고 거래 사유',
+    items: [
+      ['GENERAL', '일반'],
+      ['PURCHASE', '구매요청'],
+      ['RETURN', '반품/회수'],
+      ['WORK_ORDER', '작업지시'],
+      ['DISPOSAL', '폐기'],
+      ['TRANSFER', '창고이동'],
+      ['PLANT_TRANSFER', '플랜트이동'],
+      ['STOCKTAKING', '재고실사'],
+    ],
+  },
 ] as const;
 
 @Injectable()
@@ -102,6 +121,7 @@ export class MdmService {
     @InjectRepository(Warehouse) private readonly warehouseRepo: Repository<Warehouse>,
     @InjectRepository(CodeGroup) private readonly codeGroupRepo: Repository<CodeGroup>,
     @InjectRepository(CodeItem) private readonly codeItemRepo: Repository<CodeItem>,
+    @InjectRepository(Company) private readonly companyRepo: Repository<Company>,
   ) {}
 
   // =========================================================================
@@ -406,6 +426,7 @@ export class MdmService {
         exists.phone = userDto.phone || null;
         exists.position = userDto.position || null;
         exists.title = userDto.title || null;
+        exists.lastLoginPlantId = CodeUtil.normalizeOrNull(userDto.lastLoginPlantId);
         exists.passwordHash = await bcrypt.hash('1234', 12); // 복구 시에도 임시 비번 리셋
         exists.useYn = 'Y';
         exists.deleteYn = 'N';
@@ -425,6 +446,7 @@ export class MdmService {
       phone: userDto.phone || null,
       position: userDto.position || null,
       title: userDto.title || null,
+      lastLoginPlantId: CodeUtil.normalizeOrNull(userDto.lastLoginPlantId),
       passwordHash: hash,
       useYn: 'Y',
       mustChangePassword: 'Y',
@@ -661,22 +683,29 @@ export class MdmService {
     if (!group) throw new BadRequestException('코드그룹을 찾을 수 없습니다.');
   }
 
-  async getCompanies(): Promise<any[]> {
-    return this.dataSource.query(
-      `SELECT * FROM company WHERE delete_yn = 'N' ORDER BY id ASC`
-    );
+  async getCompanies(): Promise<Company[]> {
+    return this.companyRepo.find({
+      where: { deleteYn: 'N' },
+      order: { id: 'ASC' },
+    });
   }
 
   async validateSystemAdminUser(userId: string): Promise<boolean> {
-    const rows = await this.dataSource.query(
-      `SELECT role_id FROM users
-       WHERE company_id = 'SYSTEM' AND id = $1 AND use_yn = 'Y' AND delete_yn = 'N'`,
-      [userId],
-    );
-    return rows.length > 0 && rows[0].role_id?.toUpperCase() === 'SYSTEM';
+    const user = await this.userRepo.findOne({
+      where: {
+        companyId: 'SYSTEM',
+        id: userId,
+        useYn: 'Y',
+        deleteYn: 'N',
+      },
+    });
+    return user?.roleId?.toUpperCase() === 'SYSTEM';
   }
 
-  async createCompany(body: any, operator: string): Promise<any> {
+  async createCompany(
+    body: CreateCompanyDto,
+    operator: string,
+  ): Promise<CreateCompanyResponseDto> {
     const { id, name, businessNumber, email, adminId, adminName, adminPassword } = body;
     if (!id || !name || !adminId || !adminName || !adminPassword) {
       throw new BadRequestException('필수 입력 항목이 누락되었습니다.');
@@ -690,18 +719,26 @@ export class MdmService {
     await qr.startTransaction();
 
     try {
-      const existingCompany = await qr.query(
-        `SELECT * FROM company WHERE id = $1`,
-        [coId]
-      );
-      if (existingCompany.length > 0) {
+      const manager = qr.manager;
+      const companyRepository = manager.getRepository(Company);
+      const existingCompany = await companyRepository.findOne({
+        where: { id: coId },
+      });
+      if (existingCompany) {
         throw new BadRequestException('이미 존재하는 회사 코드입니다.');
       }
 
-      await qr.query(
-        `INSERT INTO company (id, name, business_number, email, use_yn, created_by, updated_by, delete_yn)
-         VALUES ($1, $2, $3, $4, 'Y', $5, $5, 'N')`,
-        [coId, name.trim(), businessNumber?.trim() || null, email?.trim() || null, operator]
+      await companyRepository.save(
+        companyRepository.create({
+          id: coId,
+          name: name.trim(),
+          businessNumber: businessNumber?.trim() || null,
+          email: email?.trim() || null,
+          useYn: 'Y',
+          createdBy: operator,
+          updatedBy: operator,
+          deleteYn: 'N',
+        }),
       );
 
       const rolesToSeed = [
@@ -711,48 +748,87 @@ export class MdmService {
         { id: 'USER', name: '정비원', multiPlant: 'N' },
       ];
 
-      for (const r of rolesToSeed) {
-        await qr.query(
-          `INSERT INTO role (company_id, id, role_name, multi_plant, created_by, updated_by, delete_yn)
-           VALUES ($1, $2, $3, $4, $5, $5, 'N')`,
-          [coId, r.id, r.name, r.multiPlant, operator]
-        );
+      const roleRepository = manager.getRepository(Role);
+      await roleRepository.save(
+        rolesToSeed.map((role) =>
+          roleRepository.create({
+            companyId: coId,
+            id: role.id,
+            roleName: role.name,
+            multiPlant: role.multiPlant,
+            createdBy: operator,
+            updatedBy: operator,
+            deleteYn: 'N',
+          }),
+        ),
+      );
 
-        const appModules = Object.values(AppModule);
-        for (const m of appModules) {
-          // 신규 회사 기본 Role은 초기 운영 편의를 위해 전 권한 Y로 생성하고,
-          // 회사 담당자가 권한관리 화면에서 역할별 정책에 맞게 보정한다.
-          await qr.query(
-            `INSERT INTO role_detail (company_id, role_id, module_detail, perm_c, perm_r, perm_u, perm_d, perm_a)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [coId, r.id, m, 'Y', 'Y', 'Y', 'Y', 'Y']
-          );
-        }
-      }
+      const roleDetailRepository = manager.getRepository(RoleDetail);
+      const appModules = Object.values(AppModule);
+      await roleDetailRepository.save(
+        rolesToSeed.flatMap((role) =>
+          appModules.map((moduleDetail) =>
+            roleDetailRepository.create({
+              companyId: coId,
+              roleId: role.id,
+              moduleDetail,
+              permC: 'Y',
+              permR: 'Y',
+              permU: 'Y',
+              permD: 'Y',
+              permA: 'Y',
+            }),
+          ),
+        ),
+      );
 
-      for (const group of DEFAULT_CODE_GROUPS) {
-        await qr.query(
-          `INSERT INTO code_group (company_id, id, name, system_use_yn, created_by, updated_by, delete_yn)
-           VALUES ($1, $2, $3, 'Y', $4, $4, 'N')`,
-          [coId, group.id, group.name, operator]
-        );
+      const codeGroupRepository = manager.getRepository(CodeGroup);
+      await codeGroupRepository.save(
+        DEFAULT_CODE_GROUPS.map((group) =>
+          codeGroupRepository.create({
+            companyId: coId,
+            id: group.id,
+            name: group.name,
+            systemUseYn: 'Y',
+            createdBy: operator,
+            updatedBy: operator,
+            deleteYn: 'N',
+          }),
+        ),
+      );
 
-        for (const [idx, item] of group.items.entries()) {
-          await qr.query(
-            `INSERT INTO code_item (company_id, group_id, id, name, legal_inspect_yn, sort_order)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [coId, group.id, item[0], item[1], item[0] === 'LEGAL' ? 'Y' : 'N', idx + 1]
-          );
-        }
-      }
+      const codeItemRepository = manager.getRepository(CodeItem);
+      await codeItemRepository.save(
+        DEFAULT_CODE_GROUPS.flatMap((group) =>
+          group.items.map((item, index) =>
+            codeItemRepository.create({
+              companyId: coId,
+              groupId: group.id,
+              id: item[0],
+              name: item[1],
+              legalInspectYn: item[0] === 'LEGAL' ? 'Y' : 'N',
+              sortOrder: index + 1,
+            }),
+          ),
+        ),
+      );
 
       const hash = await bcrypt.hash(adminPassword, 12);
-      await qr.query(
-        `INSERT INTO users (
-           company_id, id, name, password_hash, use_yn, role_id, 
-           must_change_password, failed_login_count, created_by, updated_by, delete_yn
-         ) VALUES ($1, $2, $3, $4, 'Y', 'ADMIN', 'Y', 0, $5, $5, 'N')`,
-        [coId, admId, adminName.trim(), hash, operator]
+      const userRepository = manager.getRepository(User);
+      await userRepository.save(
+        userRepository.create({
+          companyId: coId,
+          id: admId,
+          name: adminName.trim(),
+          passwordHash: hash,
+          useYn: 'Y',
+          roleId: 'ADMIN',
+          mustChangePassword: 'Y',
+          failedLoginCount: 0,
+          createdBy: operator,
+          updatedBy: operator,
+          deleteYn: 'N',
+        }),
       );
 
       await qr.commitTransaction();

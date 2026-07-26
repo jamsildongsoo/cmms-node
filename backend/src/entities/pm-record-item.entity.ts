@@ -1,4 +1,5 @@
-import { Entity, PrimaryColumn, Column } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { PmRecord } from './pm-record.entity';
 
 @Entity('pm_record_item')
 export class PmRecordItem {
@@ -34,4 +35,14 @@ export class PmRecordItem {
 
   @Column({ name: 'check_value', type: 'numeric', precision: 15, scale: 4, nullable: true })
   checkValue!: string | null;
+
+  @ManyToOne(() => PmRecord, (record) => record.checkItems, {
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'plant_id', referencedColumnName: 'plantId' },
+    { name: 'pm_record_id', referencedColumnName: 'id' },
+  ])
+  pmRecord?: PmRecord;
 }

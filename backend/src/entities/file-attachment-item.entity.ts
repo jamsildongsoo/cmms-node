@@ -1,6 +1,6 @@
 import { Entity, PrimaryColumn, Column } from 'typeorm';
 
-/** 첨부파일 상세 — file-storage 서비스가 raw SQL로 사용 (감사 컬럼 없음) */
+/** 첨부파일 상세(감사 컬럼 없음). */
 @Entity('file_attachment_item')
 export class FileAttachmentItem {
   @PrimaryColumn({ name: 'company_id', length: 50 })

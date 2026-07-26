@@ -1,437 +1,421 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
-import { DataSource } from 'typeorm';
-import { SequenceService, AppModule } from '../../common/sequence/sequence.service';
-import { DocStatus } from '../../common/constants/status.constants';
-import { addDateOnly, toDateOnly } from '../../common/utils/date-only.util';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { DataSource, EntityManager, MoreThan } from 'typeorm';
+import { Approval } from '../../entities/approval.entity';
+import { ApprovalStep } from '../../entities/approval-step.entity';
+import { EquipmentCheckCycle } from '../../entities/equipment-check-cycle.entity';
+import { PmRecord } from '../../entities/pm-record.entity';
+import { User } from '../../entities/users.entity';
+import { WorkOrder } from '../../entities/work-order.entity';
+import { WorkPermit } from '../../entities/work-permit.entity';
+import { PurchaseRequest } from '../../entities/purchase-request.entity';
 import {
-  ApprovalStepType,
-  ApprovalResult,
   ApprovalAction,
+  ApprovalResult,
+  ApprovalStepType,
 } from '../../common/constants/approval.constants';
+import { DocStatus } from '../../common/constants/status.constants';
+import { SequenceService, AppModule } from '../../common/sequence/sequence.service';
+import { addDateOnly } from '../../common/utils/date-only.util';
+import { ApprovalActionDto } from './dto/approval-action.dto';
+import {
+  ApprovalDetailResponseDto,
+  ApprovalResponseDto,
+  ApprovalStepResponseDto,
+} from './dto/approval-response.dto';
+import { ApprovalSubmitDto } from './dto/approval-submit.dto';
+import { ApprovalRepository } from './approval.repository';
 
-export interface ApprovalSubmitRequest {
-  approval: {
-    id?: string | null;
-    title: string;
-    content?: Record<string, unknown> | null;
-    fileGroupId?: string | number | null;
-    status?: string;
-  };
-  steps?: Array<{
-    approverId: string;
-    approvalType: string; // D, A, G, R
-  }>;
-  refNo?: string | null;
-  refModule?: string | null;
-}
-
-export interface ApprovalActionRequest {
-  action: ApprovalAction;
-  comments?: string | null;
-}
-
-export interface ApprovalDetailResponse {
-  approval: any;
-  steps: any[];
-}
-
-interface ApprovalRow {
-  id: string;
-  title: string;
-  content: Record<string, unknown> | null;
-  drafter_id: string;
-  file_group_id: string | number | null;
-  status: string;
-  created_at: string | Date;
-  updated_at: string | Date;
-}
-
-/**
- * [동시성 규칙] 결재 문서를 변경하는 모든 경로(상신/재상신/결재처리)는
- * 트랜잭션 시작 시 부모 approval 행을 `SELECT … FOR UPDATE`로 선행 잠근다.
- * 이 단일 락이 동시 요청(더블클릭·재상신 겹침)을 직렬화해 이중 처리를 막는다.
- * 새 변경 경로를 추가할 때도 반드시 이 규칙을 따른다.
- */
 @Injectable()
 export class ApprovalService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly sequenceService: SequenceService,
+    private readonly approvalRepository: ApprovalRepository,
   ) {}
 
-  async submitApproval(companyId: string, request: ApprovalSubmitRequest, operator: string): Promise<any> {
-    const { approval, steps, refNo, refModule } = request;
-    const hasApprover = steps && steps.some((s) => s.approvalType === ApprovalStepType.APPROVAL || s.approvalType === ApprovalStepType.AGREEMENT);
-
-    const qr = this.dataSource.createQueryRunner();
-    await qr.connect();
-    await qr.startTransaction();
-
-    try {
-      let appNo = approval.id;
-      const isNew = !appNo || appNo.trim() === '';
-
-      if (isNew) {
-        const userDeptRows = await qr.query(
-          `SELECT department_id FROM users WHERE company_id = $1 AND id = $2`,
-          [companyId, operator],
-        );
-        const userDept = userDeptRows[0]?.department_id ?? null;
-        appNo = await this.sequenceService.generateNextNo(companyId, AppModule.APR, userDept);
-      } else {
-        // [동시성 규칙] 모든 결재 변경은 부모 approval 행을 FOR UPDATE로 선행 잠근다.
-        // 재상신 vs 결재처리 동시 요청을 직렬화해 이중 처리/상태 뒤틀림을 막는다.
-        const existing = await qr.query(
-          `SELECT * FROM approval WHERE company_id = $1 AND id = $2 AND delete_yn = 'N' FOR UPDATE`,
-          [companyId, appNo],
-        );
-        if (!existing.length) {
-          throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
-        }
-        if (existing[0].status !== DocStatus.TEMP) {
-          throw new BadRequestException('임시저장 상태에서만 재상신할 수 있습니다.');
-        }
-        // 결재선 교체: 요청에 steps가 있을 때만 기존 결재자(step_no>0)를 교체.
-        // 기안(step_no=0)은 항상 보존된다.
-        if (steps) {
-          await qr.query(
-            `DELETE FROM approval_step WHERE company_id = $1 AND approval_id = $2 AND step_no > 0`,
-            [companyId, appNo],
-          );
-        }
-      }
-
-      // 결재선이 구성되어 있어도 임시저장 요청은 T 상태를 유지한다.
-      // status를 보내지 않는 일반 상신만 결재선 유무에 따라 상태를 결정한다.
-      const status = approval.status === DocStatus.TEMP
+  async submitApproval(
+    companyId: string,
+    request: ApprovalSubmitDto,
+    operator: string,
+  ): Promise<ApprovalResponseDto> {
+    const { approval: input, steps, refNo, refModule } = request;
+    this.validateReference(refModule ?? null, refNo ?? null);
+    const hasApprover = !!steps?.some((step) =>
+      [ApprovalStepType.APPROVAL, ApprovalStepType.AGREEMENT].includes(
+        step.approvalType as ApprovalStepType,
+      ),
+    );
+    const status =
+      input.status === DocStatus.TEMP
         ? DocStatus.TEMP
         : hasApprover
           ? DocStatus.IN_PROGRESS
           : DocStatus.TEMP;
 
-      if (isNew) {
-        await qr.query(
-          `INSERT INTO approval
-            (company_id, id, title, content, drafter_id, file_group_id, status, created_by, updated_by, delete_yn)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, 'N')`,
-          [
-            companyId, appNo, approval.title, approval.content ?? null, operator,
-            approval.fileGroupId ?? null, status, operator
-          ],
-        );
-        // 신규 문서: 기안 step 생성
-        await qr.query(
-          `INSERT INTO approval_step
-            (company_id, approval_id, step_no, approver_id, approval_type, approval_result, action_at, comments)
-           VALUES ($1, $2, 0, $3, '${ApprovalStepType.DRAFT}', '${ApprovalResult.APPROVED}', NOW(), '상신함')`,
-          [companyId, appNo, operator],
-        );
-      } else {
-        await qr.query(
-          `UPDATE approval
-           SET title = $3, content = $4, file_group_id = $5, status = $6, updated_by = $7
-           WHERE company_id = $1 AND id = $2`,
-          [
-            companyId, appNo, approval.title, approval.content ?? null,
-            approval.fileGroupId ?? null, status, operator
-          ],
-        );
-      }
-
-      // 결재자 steps 삽입: 신규/재상신 공용. 재상신 시에는 이미 step_no>0이 삭제되었으므로 중복 없음.
-      if (steps && steps.length > 0) {
-        for (let i = 0; i < steps.length; i++) {
-          const step = steps[i];
-          await qr.query(
-            `INSERT INTO approval_step 
-              (company_id, approval_id, step_no, approver_id, approval_type, approval_result, action_at, comments)
-             VALUES ($1, $2, $3, $4, $5, NULL, NULL, NULL)`,
-            [companyId, appNo, i + 1, step.approverId, step.approvalType],
-          );
-        }
-      }
-
-      if (hasApprover && refNo && refModule) {
-        await this.updateLinkedModuleStatus(qr, companyId, refModule as string, refNo as string, appNo!, DocStatus.IN_PROGRESS, operator);
-      }
-
-      await qr.commitTransaction();
-
-      const saved = await this.dataSource.query(
-        `SELECT * FROM approval WHERE company_id = $1 AND id = $2`,
-        [companyId, appNo],
-      );
-      return this.toApprovalResponse(saved[0]);
-    } catch (err) {
-      await qr.rollbackTransaction();
-      throw err;
-    } finally {
-      await qr.release();
-    }
-  }
-
-  async getSentApprovals(companyId: string, userId: string): Promise<any[]> {
-    const rows = await this.dataSource.query(
-      `SELECT * FROM approval WHERE company_id = $1 AND drafter_id = $2 AND delete_yn = 'N' ORDER BY id DESC`,
-      [companyId, userId],
-    );
-    return rows.map((row: ApprovalRow) => this.toApprovalResponse(row));
-  }
-
-  async getPendingApprovals(companyId: string, userId: string): Promise<any[]> {
-    const mySteps = await this.dataSource.query(
-      `SELECT approval_id, step_no FROM approval_step 
-       WHERE company_id = $1 AND approver_id = $2 
-         AND approval_result IS NULL
-         AND (approval_type = '${ApprovalStepType.APPROVAL}' OR approval_type = '${ApprovalStepType.AGREEMENT}')`,
-      [companyId, userId],
-    );
-
-    const pendingApprovals: any[] = [];
-    for (const step of mySteps) {
-      const isCurrent = await this.isCurrentTurn(companyId, step.approval_id, userId);
-      if (isCurrent) {
-        const rows = await this.dataSource.query(
-          `SELECT * FROM approval WHERE company_id = $1 AND id = $2 AND status = '${DocStatus.IN_PROGRESS}' AND delete_yn = 'N'`,
-          [companyId, step.approval_id],
-        );
-        if (rows.length > 0) {
-          pendingApprovals.push(this.toApprovalResponse(rows[0]));
-        }
-      }
-    }
-
-    return pendingApprovals;
-  }
-
-  async getReferencedApprovals(companyId: string, userId: string): Promise<any[]> {
-    const rows = await this.dataSource.query(
-      `SELECT a.* FROM approval a
-       JOIN approval_step s ON a.company_id = s.company_id AND a.id = s.approval_id
-       WHERE a.company_id = $1 AND s.approver_id = $2 AND s.approval_type = '${ApprovalStepType.REFERENCE}' AND a.delete_yn = 'N'
-       ORDER BY a.id DESC`,
-      [companyId, userId],
-    );
-    return rows.map((row: ApprovalRow) => this.toApprovalResponse(row));
-  }
-
-  async getProcessedApprovals(companyId: string, userId: string): Promise<any[]> {
-    const rows = await this.dataSource.query(
-      `SELECT DISTINCT a.* FROM approval a
-       JOIN approval_step s ON a.company_id = s.company_id AND a.id = s.approval_id
-       WHERE a.company_id = $1 
-         AND s.approver_id = $2 
-         AND s.approval_result IS NOT NULL
-         AND (s.approval_type = '${ApprovalStepType.APPROVAL}' OR s.approval_type = '${ApprovalStepType.AGREEMENT}')
-         AND a.delete_yn = 'N'
-       ORDER BY a.id DESC`,
-      [companyId, userId],
-    );
-    return rows.map((row: ApprovalRow) => this.toApprovalResponse(row));
-  }
-
-  async getApprovalDetails(companyId: string, id: string): Promise<ApprovalDetailResponse> {
-    const rows = await this.dataSource.query(
-      `SELECT * FROM approval WHERE company_id = $1 AND id = $2 AND delete_yn = 'N'`,
-      [companyId, id],
-    );
-    if (!rows.length) {
-      throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
-    }
-
-    const steps = await this.dataSource.query(
-      `SELECT 
-        step_no as "stepNo",
-        approver_id as "approverId",
-        approval_type as "approvalType",
-        approval_result as "approvalResult",
-        action_at as "actionAt",
-        comments
-      FROM approval_step 
-      WHERE company_id = $1 AND approval_id = $2 
-      ORDER BY step_no ASC`,
-      [companyId, id],
-    );
-
-    return {
-      approval: this.toApprovalResponse(rows[0]),
-      steps,
-    };
-  }
-
-  private toApprovalResponse(row: ApprovalRow): any {
-    return {
-      id: row.id,
-      title: row.title,
-      content: row.content,
-      drafterId: row.drafter_id,
-      fileGroupId: row.file_group_id == null ? null : Number(row.file_group_id),
-      status: row.status,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
-  }
-
-  async processApprovalAction(companyId: string, id: string, request: ApprovalActionRequest, approverId: string): Promise<void> {
-    const qr = this.dataSource.createQueryRunner();
-    await qr.connect();
-    await qr.startTransaction();
-
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    let approvalId = input.id?.trim() || '';
     try {
-      const approvals = await qr.query(
-        `SELECT * FROM approval WHERE company_id = $1 AND id = $2 AND delete_yn = 'N' FOR UPDATE`,
-        [companyId, id],
-      );
-      if (!approvals.length) {
-        throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
+      const repository = runner.manager.getRepository(Approval);
+      const stepRepository = runner.manager.getRepository(ApprovalStep);
+      const isNew = !approvalId;
+      let entity: Approval;
+
+      if (isNew) {
+        const drafter = await runner.manager.getRepository(User).findOne({
+          where: { companyId, id: operator, deleteYn: 'N' },
+        });
+        approvalId = await this.sequenceService.generateNextNo(
+          companyId,
+          AppModule.APR,
+          drafter?.departmentId ?? null,
+        );
+        entity = repository.create({
+          companyId,
+          id: approvalId,
+          drafterId: operator,
+          createdBy: operator,
+          updatedBy: operator,
+          deleteYn: 'N',
+        });
+      } else {
+        entity = await this.findLockedApproval(
+          runner.manager,
+          companyId,
+          approvalId,
+        );
+        if (entity.status !== DocStatus.TEMP) {
+          throw new BadRequestException('임시저장 상태에서만 재상신할 수 있습니다.');
+        }
+        if (steps) {
+          await stepRepository.delete({
+            companyId,
+            approvalId,
+            stepNo: MoreThan(0),
+          });
+        }
       }
-      const approval = approvals[0];
+
+      Object.assign(entity, {
+        title: input.title,
+        content: input.content ?? null,
+        fileGroupId: input.fileGroupId ?? null,
+        status,
+        refModule: refModule?.toUpperCase() || null,
+        refNo: refNo?.trim() || null,
+        updatedBy: operator,
+      });
+      await repository.save(entity);
+
+      if (isNew) {
+        await stepRepository.save(
+          stepRepository.create({
+            companyId,
+            approvalId,
+            stepNo: 0,
+            approverId: operator,
+            approvalType: ApprovalStepType.DRAFT,
+            approvalResult: ApprovalResult.APPROVED,
+            actionAt: new Date(),
+            comments: '상신함',
+          }),
+        );
+      }
+      if (steps?.length) {
+        await stepRepository.save(
+          steps.map((step, index) =>
+            stepRepository.create({
+              companyId,
+              approvalId,
+              stepNo: index + 1,
+              approverId: step.approverId,
+              approvalType: step.approvalType,
+              approvalResult: null,
+              actionAt: null,
+              comments: null,
+            }),
+          ),
+        );
+      }
+
+      if (status === DocStatus.IN_PROGRESS && entity.refModule && entity.refNo) {
+        await this.updateLinkedDocument(
+          runner.manager,
+          entity,
+          DocStatus.IN_PROGRESS,
+          operator,
+        );
+      }
+      await runner.commitTransaction();
+    } catch (error) {
+      await runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await runner.release();
+    }
+
+    const saved = await this.approvalRepository.findDetail(companyId, approvalId);
+    if (!saved) throw new NotFoundException('저장된 결재 문서를 찾을 수 없습니다.');
+    return this.toApprovalResponse(saved);
+  }
+
+  async getSentApprovals(companyId: string, userId: string): Promise<ApprovalResponseDto[]> {
+    return (await this.approvalRepository.findSent(companyId, userId)).map((item) =>
+      this.toApprovalResponse(item),
+    );
+  }
+
+  async getPendingApprovals(companyId: string, userId: string): Promise<ApprovalResponseDto[]> {
+    return (await this.approvalRepository.findPending(companyId, userId)).map((item) =>
+      this.toApprovalResponse(item),
+    );
+  }
+
+  async getReferencedApprovals(companyId: string, userId: string): Promise<ApprovalResponseDto[]> {
+    return (await this.approvalRepository.findReferenced(companyId, userId)).map((item) =>
+      this.toApprovalResponse(item),
+    );
+  }
+
+  async getProcessedApprovals(companyId: string, userId: string): Promise<ApprovalResponseDto[]> {
+    return (await this.approvalRepository.findProcessed(companyId, userId)).map((item) =>
+      this.toApprovalResponse(item),
+    );
+  }
+
+  async getApprovalDetails(companyId: string, id: string): Promise<ApprovalDetailResponseDto> {
+    const approval = await this.approvalRepository.findDetail(companyId, id);
+    if (!approval) throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
+    return {
+      approval: this.toApprovalResponse(approval),
+      steps: [...(approval.steps || [])]
+        .sort((a, b) => a.stepNo - b.stepNo)
+        .map((step) => this.toStepResponse(step)),
+    };
+  }
+
+  async processApprovalAction(
+    companyId: string,
+    id: string,
+    request: ApprovalActionDto,
+    approverId: string,
+  ): Promise<void> {
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    try {
+      const approval = await this.findLockedApproval(runner.manager, companyId, id);
       if (approval.status !== DocStatus.IN_PROGRESS) {
         throw new BadRequestException('이미 종료된 결재 문서입니다.');
       }
 
-      const steps = await qr.query(
-        `SELECT * FROM approval_step WHERE company_id = $1 AND approval_id = $2 ORDER BY step_no ASC`,
-        [companyId, id],
+      const repository = runner.manager.getRepository(ApprovalStep);
+      const steps = await repository.find({
+        where: { companyId, approvalId: id },
+        order: { stepNo: 'ASC' },
+      });
+      const current = steps.find(
+        (step) =>
+          [ApprovalStepType.APPROVAL, ApprovalStepType.AGREEMENT].includes(
+            step.approvalType as ApprovalStepType,
+          ) && step.approvalResult === null,
       );
-
-      const currentStep = steps.find((s: any) => (s.approval_type === ApprovalStepType.APPROVAL || s.approval_type === ApprovalStepType.AGREEMENT) && s.approval_result === null);
-      if (!currentStep) {
-        throw new BadRequestException('결재 대기 중인 단계가 없습니다.');
-      }
-      if (currentStep.approver_id !== approverId) {
+      if (!current) throw new BadRequestException('결재 대기 중인 단계가 없습니다.');
+      if (current.approverId !== approverId) {
         throw new BadRequestException('결재할 수 있는 권한이 없거나 대기 중이 아닙니다.');
       }
 
-      const resultValue = request.action === ApprovalAction.APPROVE ? ApprovalResult.APPROVED : ApprovalResult.REJECTED;
-      await qr.query(
-        `UPDATE approval_step 
-         SET approval_result = $4, action_at = NOW(), comments = $5
-         WHERE company_id = $1 AND approval_id = $2 AND step_no = $3`,
-        [companyId, id, currentStep.step_no, resultValue, request.comments ?? null],
-      );
+      current.approvalResult =
+        request.action === ApprovalAction.APPROVE
+          ? ApprovalResult.APPROVED
+          : ApprovalResult.REJECTED;
+      current.actionAt = new Date();
+      current.comments = request.comments ?? null;
+      await repository.save(current);
 
-      if (request.action === ApprovalAction.APPROVE) {
-        const remainingSteps = steps.filter(
-          (s: any) =>
-            (s.approval_type === ApprovalStepType.APPROVAL || s.approval_type === ApprovalStepType.AGREEMENT) &&
-            s.step_no !== currentStep.step_no &&
-            s.approval_result === null
+      if (request.action === ApprovalAction.REJECT) {
+        approval.status = DocStatus.REJECTED;
+        approval.updatedBy = approverId;
+        await runner.manager.getRepository(Approval).save(approval);
+        await this.updateLinkedDocument(
+          runner.manager,
+          approval,
+          DocStatus.REJECTED,
+          approverId,
         );
-
-        if (remainingSteps.length === 0) {
-          await qr.query(
-            `UPDATE approval SET status = '${DocStatus.CONFIRMED}', updated_by = $3 WHERE company_id = $1 AND id = $2`,
-            [companyId, id, approverId],
-          );
-          await this.propagateFinalConfirmation(qr, companyId, id, approverId);
-        }
       } else {
-        await qr.query(
-          `UPDATE approval SET status = '${DocStatus.REJECTED}', updated_by = $3 WHERE company_id = $1 AND id = $2`,
-          [companyId, id, approverId],
+        const hasRemaining = steps.some(
+          (step) =>
+            step.stepNo !== current.stepNo &&
+            [ApprovalStepType.APPROVAL, ApprovalStepType.AGREEMENT].includes(
+              step.approvalType as ApprovalStepType,
+            ) &&
+            step.approvalResult === null,
         );
-        await this.propagateRejection(qr, companyId, id, approverId);
+        if (!hasRemaining) {
+          approval.status = DocStatus.CONFIRMED;
+          approval.updatedBy = approverId;
+          await runner.manager.getRepository(Approval).save(approval);
+          await this.updateLinkedDocument(
+            runner.manager,
+            approval,
+            DocStatus.CONFIRMED,
+            approverId,
+          );
+        }
       }
-
-      await qr.commitTransaction();
-    } catch (err) {
-      await qr.rollbackTransaction();
-      throw err;
+      await runner.commitTransaction();
+    } catch (error) {
+      await runner.rollbackTransaction();
+      throw error;
     } finally {
-      await qr.release();
+      await runner.release();
     }
   }
 
-  private async updateLinkedModuleStatus(qr: any, companyId: string, refModule: string, refNo: string, approvalId: string, status: string, operator: string) {
-    const mod = refModule.toUpperCase();
-    if (mod === AppModule.PM) {
-      await qr.query(
-        `UPDATE pm_record SET approval_id = $3, status = $4, updated_by = $5
-         WHERE company_id = $1 AND id = $2 AND delete_yn = 'N'`,
-        [companyId, refNo, approvalId, status, operator],
-      );
-    } else if (mod === AppModule.WO) {
-      await qr.query(
-        `UPDATE work_order SET approval_id = $3, status = $4, updated_by = $5
-         WHERE company_id = $1 AND id = $2 AND delete_yn = 'N'`,
-        [companyId, refNo, approvalId, status, operator],
-      );
-    } else if (mod === AppModule.WP) {
-      await qr.query(
-        `UPDATE work_permit SET approval_id = $3, status = $4, updated_by = $5
-         WHERE company_id = $1 AND id = $2 AND delete_yn = 'N'`,
-        [companyId, refNo, approvalId, status, operator],
-      );
-    }
+  private async findLockedApproval(
+    manager: EntityManager,
+    companyId: string,
+    id: string,
+  ): Promise<Approval> {
+    const approval = await manager
+      .getRepository(Approval)
+      .createQueryBuilder('approval')
+      .setLock('pessimistic_write')
+      .where('approval.companyId = :companyId', { companyId })
+      .andWhere('approval.id = :id', { id })
+      .andWhere('approval.deleteYn = :notDeleted', { notDeleted: 'N' })
+      .getOne();
+    if (!approval) throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
+    return approval;
   }
 
-  private async propagateFinalConfirmation(qr: any, companyId: string, approvalId: string, operator: string) {
-    const pms = await qr.query(`SELECT * FROM pm_record WHERE company_id = $1 AND approval_id = $2`, [companyId, approvalId]);
-    for (const pm of pms) {
-      await qr.query(`UPDATE pm_record SET status = '${DocStatus.CONFIRMED}', updated_by = $3 WHERE company_id = $1 AND id = $2`, [companyId, pm.id, operator]);
-      if (pm.step_stage === 'R') {
-        await this.updateCheckCycleSchedule(qr, companyId, pm, operator);
+  private async updateLinkedDocument(
+    manager: EntityManager,
+    approval: Approval,
+    status: DocStatus,
+    operator: string,
+  ): Promise<void> {
+    if (!approval.refModule || !approval.refNo) return;
+    const values = { approvalId: approval.id, status, updatedBy: operator };
+    let affected = 0;
+    if (approval.refModule === AppModule.PM) {
+      const repository = manager.getRepository(PmRecord);
+      const record = await repository.findOne({
+        where: {
+          companyId: approval.companyId,
+          id: approval.refNo,
+          deleteYn: 'N',
+        },
+      });
+      if (record) {
+        Object.assign(record, values);
+        await repository.save(record);
+        affected = 1;
+        if (status === DocStatus.CONFIRMED && record.stepStage === 'R') {
+          await this.updateCheckCycle(manager, record, operator);
+        }
       }
-    }
-
-    await qr.query(`UPDATE work_order SET status = '${DocStatus.CONFIRMED}', updated_by = $3 WHERE company_id = $1 AND approval_id = $2`, [companyId, approvalId, operator]);
-    await qr.query(`UPDATE work_permit SET status = '${DocStatus.CONFIRMED}', updated_by = $3 WHERE company_id = $1 AND approval_id = $2`, [companyId, approvalId, operator]);
-  }
-
-  private async propagateRejection(qr: any, companyId: string, approvalId: string, operator: string) {
-    await qr.query(`UPDATE pm_record SET status = '${DocStatus.REJECTED}', updated_by = $3 WHERE company_id = $1 AND approval_id = $2`, [companyId, approvalId, operator]);
-    await qr.query(`UPDATE work_order SET status = '${DocStatus.REJECTED}', updated_by = $3 WHERE company_id = $1 AND approval_id = $2`, [companyId, approvalId, operator]);
-    await qr.query(`UPDATE work_permit SET status = '${DocStatus.REJECTED}', updated_by = $3 WHERE company_id = $1 AND approval_id = $2`, [companyId, approvalId, operator]);
-  }
-
-  private async updateCheckCycleSchedule(qr: any, companyId: string, pm: any, operator: string) {
-    if (pm.ref_no) {
-      const confirmedResults = await qr.query(
-        `SELECT id FROM pm_record
-         WHERE company_id = $1
-           AND plant_id = $2
-           AND step_stage = 'R'
-           AND ref_module = 'PM'
-           AND ref_no = $3
-           AND status IN ($4, $5)
-           AND id <> $6
-           AND delete_yn = 'N'`,
-        [companyId, pm.plant_id, pm.ref_no, DocStatus.SELF_CONFIRMED, DocStatus.CONFIRMED, pm.id],
+    } else if (approval.refModule === AppModule.WO) {
+      const result = await manager.getRepository(WorkOrder).update(
+        { companyId: approval.companyId, id: approval.refNo, deleteYn: 'N' },
+        values,
       );
-      if (confirmedResults.length > 0) {
+      affected = result.affected || 0;
+    } else if (approval.refModule === AppModule.WP) {
+      const result = await manager.getRepository(WorkPermit).update(
+        { companyId: approval.companyId, id: approval.refNo, deleteYn: 'N' },
+        values,
+      );
+      affected = result.affected || 0;
+    } else if (approval.refModule === AppModule.PUR) {
+      const result = await manager.getRepository(PurchaseRequest).update(
+        { companyId: approval.companyId, id: approval.refNo, deleteYn: 'N' },
+        values,
+      );
+      affected = result.affected || 0;
+    }
+    if (affected === 0) {
+      throw new NotFoundException('연계된 원본 문서를 찾을 수 없습니다.');
+    }
+  }
+
+  private async updateCheckCycle(
+    manager: EntityManager,
+    record: PmRecord,
+    operator: string,
+  ): Promise<void> {
+    if (record.refNo) {
+      const duplicate = await manager.getRepository(PmRecord).count({
+        where: {
+          companyId: record.companyId,
+          plantId: record.plantId,
+          stepStage: 'R',
+          refModule: AppModule.PM,
+          refNo: record.refNo,
+          status: DocStatus.CONFIRMED,
+          deleteYn: 'N',
+        },
+      });
+      if (duplicate > 1) {
         throw new BadRequestException('이미 확정된 예방점검 실적이 있는 계획입니다.');
       }
     }
+    const repository = manager.getRepository(EquipmentCheckCycle);
+    const cycle = await repository.findOne({
+      where: {
+        companyId: record.companyId,
+        plantId: record.plantId,
+        equipmentId: record.equipmentId,
+        checkTypeCode: record.checkTypeCode,
+        deleteYn: 'N',
+      },
+    });
+    if (!cycle || !record.workDate) return;
+    cycle.lastCheckDate = record.workDate;
+    cycle.nextCheckDate = addDateOnly(record.workDate, cycle.cycleVal, cycle.cycleUnit);
+    cycle.updatedBy = operator;
+    await repository.save(cycle);
+  }
 
-    const cycles = await qr.query(
-      `SELECT * FROM equipment_check_cycle 
-       WHERE company_id = $1 AND plant_id = $2 AND equipment_id = $3 AND check_type_code = $4 AND delete_yn = 'N'`,
-      [companyId, pm.plant_id, pm.equipment_id, pm.check_type_code],
-    );
-
-    if (cycles.length > 0) {
-      const cycle = cycles[0];
-      const workDate = toDateOnly(pm.work_date);
-      const nextDateStr = addDateOnly(workDate, Number(cycle.cycle_val), cycle.cycle_unit);
-
-      await qr.query(
-        `UPDATE equipment_check_cycle 
-         SET last_check_date = $5, next_check_date = $6, updated_by = $7
-         WHERE company_id = $1 AND plant_id = $2 AND equipment_id = $3 AND check_type_code = $4`,
-        [companyId, pm.plant_id, pm.equipment_id, pm.check_type_code, workDate, nextDateStr, operator],
-      );
+  private validateReference(refModule: string | null, refNo: string | null): void {
+    if (!!refModule !== !!refNo) {
+      throw new BadRequestException('연계 모듈과 원본 문서번호를 모두 입력해야 합니다.');
+    }
+    if (
+      refModule &&
+      ![AppModule.PM, AppModule.WO, AppModule.WP, AppModule.PUR].includes(
+        refModule.toUpperCase() as AppModule,
+      )
+    ) {
+      throw new BadRequestException('지원하지 않는 연계 모듈입니다.');
     }
   }
 
-  private async isCurrentTurn(companyId: string, approvalId: string, userId: string): Promise<boolean> {
-    const steps = await this.dataSource.query(
-      `SELECT * FROM approval_step 
-       WHERE company_id = $1 AND approval_id = $2 
-       ORDER BY step_no ASC`,
-      [companyId, approvalId],
-    );
-    const activeStep = steps.find((s: any) => (s.approval_type === ApprovalStepType.APPROVAL || s.approval_type === ApprovalStepType.AGREEMENT) && s.approval_result === null);
-    return activeStep ? activeStep.approver_id === userId : false;
+  private toApprovalResponse(entity: Approval): ApprovalResponseDto {
+    return {
+      id: entity.id,
+      title: entity.title,
+      content: entity.content,
+      drafterId: entity.drafterId,
+      fileGroupId: entity.fileGroupId == null ? null : Number(entity.fileGroupId),
+      status: entity.status,
+      refModule: entity.refModule,
+      refNo: entity.refNo,
+      createdAt: entity.createdAt.toISOString(),
+      updatedAt: entity.updatedAt.toISOString(),
+    };
+  }
+
+  private toStepResponse(step: ApprovalStep): ApprovalStepResponseDto {
+    return {
+      stepNo: step.stepNo,
+      approverId: step.approverId,
+      approvalType: step.approvalType,
+      approvalResult: step.approvalResult,
+      actionAt: step.actionAt?.toISOString() ?? null,
+      comments: step.comments,
+    };
   }
 }

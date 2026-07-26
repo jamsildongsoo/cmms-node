@@ -1,4 +1,5 @@
-import { Entity, PrimaryColumn, Column } from 'typeorm';
+import { Entity, PrimaryColumn, Column, JoinColumn, ManyToOne } from 'typeorm';
+import { PurchaseRequest } from './purchase-request.entity';
 
 @Entity('purchase_request_item')
 export class PurchaseRequestItem {
@@ -25,4 +26,13 @@ export class PurchaseRequestItem {
 
   @Column({ name: 'remarks', type: 'text', nullable: true })
   remarks!: string | null;
+
+  @ManyToOne(() => PurchaseRequest, (request) => request.items, {
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'request_id', referencedColumnName: 'id' },
+  ])
+  request?: PurchaseRequest;
 }

@@ -1,4 +1,6 @@
-import { Entity, PrimaryColumn, Column } from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, PrimaryColumn } from 'typeorm';
+import { Approval } from './approval.entity';
+import { User } from './users.entity';
 
 @Entity('approval_step')
 export class ApprovalStep {
@@ -15,14 +17,30 @@ export class ApprovalStep {
   approverId!: string;
 
   @Column({ name: 'approval_type', length: 1 })
-  approvalType!: string; // D: 기안, A: 결재, G: 합의, R: 참조
+  approvalType!: string;
 
-  @Column({ type: 'varchar',  name: 'approval_result', length: 1, nullable: true })
-  approvalResult!: string | null; // null(대기)/Y(승인)/N(반려)
+  @Column({ name: 'approval_result', type: 'varchar', length: 1, nullable: true })
+  approvalResult!: string | null;
 
   @Column({ name: 'action_at', type: 'timestamptz', nullable: true })
-  actionAt!: Date | string | null;
+  actionAt!: Date | null;
 
   @Column({ name: 'comments', type: 'text', nullable: true })
   comments!: string | null;
+
+  @ManyToOne(() => Approval, (approval) => approval.steps, {
+    createForeignKeyConstraints: false,
+  })
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'approval_id', referencedColumnName: 'id' },
+  ])
+  approval?: Approval;
+
+  @ManyToOne(() => User, { createForeignKeyConstraints: false })
+  @JoinColumn([
+    { name: 'company_id', referencedColumnName: 'companyId' },
+    { name: 'approver_id', referencedColumnName: 'id' },
+  ])
+  approver?: User;
 }

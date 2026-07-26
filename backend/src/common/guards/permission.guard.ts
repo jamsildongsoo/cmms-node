@@ -9,8 +9,10 @@ import { Reflector } from '@nestjs/core';
 import { DataSource } from 'typeorm';
 import { JwtPayload } from '../../modules/auth/auth.interfaces';
 import { AppModule, AppModuleLabel } from '../constants/module.constants';
-import { PermAction, PERM_COLUMN } from '../constants/permission.constants';
+import { PermAction } from '../constants/permission.constants';
 import { DocStatus } from '../constants/status.constants';
+import { User } from '../../entities/users.entity';
+import { RoleDetail } from '../../entities/role-detail.entity';
 
 export type { PermAction };
 
@@ -58,11 +60,15 @@ export class PermissionGuard implements CanActivate {
       if (user.companyId !== 'SYSTEM') {
         throw new ForbiddenException('SYSTEM 역할의 회사 정보가 올바르지 않습니다.');
       }
-      const dbUsers = await this.dataSource.query(
-        `SELECT role_id FROM users WHERE company_id = 'SYSTEM' AND id = $1 AND delete_yn = 'N'`,
-        [user.userId]
-      );
-      if (!dbUsers.length || dbUsers[0].role_id !== 'SYSTEM') {
+      const systemUser = await this.dataSource.getRepository(User).findOne({
+        select: { roleId: true },
+        where: {
+          companyId: 'SYSTEM',
+          id: user.userId,
+          deleteYn: 'N',
+        },
+      });
+      if (systemUser?.roleId !== 'SYSTEM') {
         throw new ForbiddenException('SYSTEM 관리자 권한을 확인할 수 없습니다.');
       }
       return true;
@@ -108,12 +114,17 @@ export class PermissionGuard implements CanActivate {
   private async checkMatrix(
     companyId: string, roleId: string, module: string, action: PermAction,
   ): Promise<boolean> {
-    const colName = PERM_COLUMN[action];
-    const rows = await this.dataSource.query(
-      `SELECT ${colName} FROM role_detail
-       WHERE company_id = $1 AND role_id = $2 AND module_detail = $3`,
-      [companyId, roleId, module],
-    );
-    return rows[0]?.[colName] === 'Y';
+    const permission = await this.dataSource.getRepository(RoleDetail).findOne({
+      where: { companyId, roleId, moduleDetail: module },
+    });
+    if (!permission) return false;
+    const actionProperty: Record<PermAction, keyof RoleDetail> = {
+      C: 'permC',
+      R: 'permR',
+      U: 'permU',
+      D: 'permD',
+      A: 'permA',
+    };
+    return permission[actionProperty[action]] === 'Y';
   }
 }

@@ -2,6 +2,7 @@ import PrintHeader from './PrintHeader';
 import { PrintSection, PrintField, PrintTable } from './PrintDoc';
 import { getCommonStatusLabel } from '../constants/status';
 import { formatDateTime } from '../utils/datetime';
+import ApprovalSignatureBox, { type ApprovalSignatureStep } from './ApprovalSignatureBox';
 
 interface WpCheckItem {
   question: string;
@@ -35,6 +36,7 @@ interface WorkPermitPrintProps {
   remarks?: string;
   checksheets: WpChecksheet[];
   selectedTypes: string[];
+  approvalSteps?: ApprovalSignatureStep[];
 }
 
 /** 작업허가서 — 전용 인쇄뷰(흑백). LOTO 체크시트는 선택된 유형만 페이지 분할로 표기. */
@@ -47,19 +49,22 @@ export default function WorkPermitPrint(p: WorkPermitPrintProps) {
       <PrintHeader approvalNo={p.approvalId} />
       <h1 className="text-center text-lg font-bold tracking-widest mb-4">안 전 작 업 허 가 서</h1>
 
-      <section className="border-y-2 border-black mb-5 text-[10px]">
-        <dl className="p-3 space-y-2">
+      <section className="grid grid-cols-2 border-y-2 border-black mb-5 text-[10px]">
+        <dl className="border-r border-gray-500 p-3 space-y-2">
           <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">문서번호</dt><dd className="font-mono">{p.wpNo}</dd></div>
           <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">작성일자</dt><dd className="font-mono">{p.createdAt || '-'}</dd></div>
           <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">부서명</dt><dd>{p.deptName || '-'}</dd></div>
           <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">작성자</dt><dd>{p.authorName || '-'}</dd></div>
         </dl>
+        <div className="p-3">
+          <ApprovalSignatureBox steps={p.approvalSteps || []} drafterDate={p.createdAt} />
+        </div>
       </section>
 
       <PrintSection title="문서 정보">
         <div className="divide-y divide-gray-300 border-y border-gray-400">
           <div className="grid grid-cols-2 gap-4 py-2">
-            <PrintField label="제목" value={p.title} />
+            <PrintField label="허가명" value={p.title} />
             <PrintField label="상태" value={getCommonStatusLabel(p.status)} />
           </div>
           <div className="grid grid-cols-2 gap-4 py-2">
@@ -67,8 +72,8 @@ export default function WorkPermitPrint(p: WorkPermitPrintProps) {
             <PrintField label="허가유형" value={p.permitTypeLabel} />
           </div>
           <div className="grid grid-cols-3 gap-4 py-2">
-            <PrintField label="작업 시작" value={fmt(p.startAt)} />
-            <PrintField label="작업 종료" value={fmt(p.endAt)} />
+            <PrintField label="시작 시간" value={fmt(p.startAt)} />
+            <PrintField label="종료 시간" value={fmt(p.endAt)} />
             <PrintField label="감독자" value={p.supervisorName} />
           </div>
         </div>

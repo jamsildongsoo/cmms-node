@@ -33,8 +33,8 @@ export default function Header() {
       <div className="flex items-center h-full">
         {/* 로고 영역 — 폭을 사이드바(w-56)와 동기화하여 우측 border-r이 사이드바 구분선과 일치 */}
         <div className="flex items-center gap-3 w-56 h-full px-5 border-r border-slate-800 shrink-0">
-          <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center text-white font-extrabold text-sm shadow-md shadow-blue-900/40 shrink-0">
-            K
+          <div className="w-12 h-7 rounded-lg bg-blue-600 flex items-center justify-center text-white font-extrabold text-[10px] tracking-wider shadow-md shadow-blue-900/40 shrink-0">
+            CMMS
           </div>
           <div className="leading-tight">
             <h1 className="text-sm font-extrabold text-slate-100 tracking-wide">설비관리시스템</h1>

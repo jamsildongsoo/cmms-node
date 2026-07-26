@@ -11,11 +11,14 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { PmService } from './pm.service';
 import {
-  PmService,
-  PmSaveRequest,
-  PmScheduleResponse,
-} from './pm.service';
+  PmCheckTemplateResponseDto,
+  PmRecordDetailsDto,
+  PmRecordResponseDto,
+  PmScheduleResponseDto,
+  SavePmRecordDto,
+} from './dto/pm.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionGuard, Permission, PermissionSave } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
@@ -30,7 +33,7 @@ export class PmController {
   @Permission(AppModule.PM, 'R')
   async getPmSchedules(
     @Query('targetDate') targetDateStr?: string,
-  ): Promise<PmScheduleResponse[]> {
+  ): Promise<PmScheduleResponseDto[]> {
     const { companyId } = getTenantContext();
     const date = targetDateStr ? new Date(targetDateStr) : new Date();
     return this.pmService.getPmSchedules(companyId, date);
@@ -43,7 +46,7 @@ export class PmController {
     @Query('searchType') searchType?: string,
     @Query('searchValue') searchValue?: string,
     @Query('showAll') showAll?: string,
-  ): Promise<any[]> {
+  ): Promise<PmRecordResponseDto[]> {
     const { companyId, userId } = getTenantContext();
     return this.pmService.getPmRecords(companyId, userId, stepStage, searchType, searchValue, showAll);
   }
@@ -53,7 +56,7 @@ export class PmController {
   async getPmRecordDetails(
     @Query('plantId') plantId: string,
     @Query('id') id: string,
-  ): Promise<PmSaveRequest> {
+  ): Promise<PmRecordDetailsDto> {
     const { companyId, userId } = getTenantContext();
     return this.pmService.getPmRecordDetails(companyId, plantId, id, userId);
   }
@@ -63,14 +66,14 @@ export class PmController {
   async getCheckTemplates(
     @Query('plantId') plantId: string,
     @Query('checkTypeCode') checkTypeCode: string,
-  ): Promise<any[]> {
+  ): Promise<PmCheckTemplateResponseDto[]> {
     const { companyId, userId } = getTenantContext();
     return this.pmService.getCheckTemplates(companyId, plantId, checkTypeCode, userId);
   }
 
   @Post('records')
   @PermissionSave(AppModule.PM, 'pmRecord.status')
-  async savePmRecord(@Body() request: PmSaveRequest): Promise<any> {
+  async savePmRecord(@Body() request: SavePmRecordDto): Promise<PmRecordResponseDto> {
     const { companyId, userId } = getTenantContext();
     return this.pmService.savePmRecord(companyId, request, userId);
   }

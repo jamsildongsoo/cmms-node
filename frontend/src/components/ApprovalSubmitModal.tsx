@@ -14,6 +14,7 @@ interface ApprovalSubmitModalProps {
   refModule: 'PM' | 'WO' | 'WP';
   refNo: string;
   defaultTitle: string;
+  defaultContent?: string;
   users: ApprovalUser[];
   currentUserId?: string;
   onClose: () => void;
@@ -25,6 +26,7 @@ export default function ApprovalSubmitModal({
   refModule,
   refNo,
   defaultTitle,
+  defaultContent = '',
   users,
   currentUserId,
   onClose,
@@ -39,10 +41,10 @@ export default function ApprovalSubmitModal({
   useEffect(() => {
     if (!open) return;
     setTitle(defaultTitle);
-    setContent('');
+    setContent(defaultContent);
     setApproverIds([]);
     setError('');
-  }, [open, defaultTitle, refNo]);
+  }, [open, defaultTitle, defaultContent, refNo]);
 
   if (!open) return null;
 
