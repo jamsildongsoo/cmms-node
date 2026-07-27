@@ -1,52 +1,32 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PackageCheck, X } from 'lucide-react';
 import { toast } from 'sonner';
-import axiosInstance from '../api/axios';
 import { todayLocal } from '../utils/datetime';
 import ListBadge from '../components/ListBadge';
 import ListIconButton from '../components/ListIconButton';
 import { getCommonStatusLabel, getProcStatusLabel } from '../constants/status';
-
-interface Warehouse {
-  id: string;
-  name: string;
-  plantId?: string | null;
-}
-
-interface ReceiptLine {
-  lineNo: number;
-  inventoryId: string;
-  qty: number;
-  receivedQty: number;
-  remaining: number;
-  inputQty: number;
-  unitPrice: number;
-  unit?: string | null;
-}
-
-interface RequestHeader {
-  id: string;
-  title: string;
-  plantId: string;
-  warehouseId: string;
-  requesterId: string;
-  status: string;
-  procStatus?: string | null;
-}
-
-interface ReceiptRequestSummary extends RequestHeader {
-  requestedQty: string;
-  remainingQty: string;
-}
+import { useAuthStore } from '../store/useAuthStore';
+import { APP_MODULE } from '../constants/module';
+import { getApiErrorMessage } from '../utils/apiError';
+import { procurementApi } from '../features/procurement/procurement.api';
+import { referenceApi } from '../features/mdm/reference.api';
+import type {
+  PurchaseReceiptItem,
+  PurchaseReceiptRequest,
+  PurchaseReceiptRequestSummary,
+} from '../features/procurement/procurement.types';
+import type { Warehouse } from '../features/mdm/mdm.types';
 
 export default function PurchaseReceipt() {
-  const [header, setHeader] = useState<RequestHeader | null>(null);
-  const [lines, setLines] = useState<ReceiptLine[]>([]);
+  const user = useAuthStore((state) => state.user);
+  const canCreate = user?.permissions?.[APP_MODULE.STK]?.C === 'Y';
+  const [header, setHeader] = useState<PurchaseReceiptRequest | null>(null);
+  const [lines, setLines] = useState<PurchaseReceiptItem[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [warehouseId, setWarehouseId] = useState('');
   const [txDate, setTxDate] = useState(todayLocal());
   const [saving, setSaving] = useState(false);
-  const [requests, setRequests] = useState<ReceiptRequestSummary[]>([]);
+  const [requests, setRequests] = useState<PurchaseReceiptRequestSummary[]>([]);
   const [searchType, setSearchType] = useState<'id' | 'title' | 'owner'>('id');
   const [searchValue, setSearchValue] = useState('');
   const filteredRequests = useMemo(() => {
@@ -60,26 +40,25 @@ export default function PurchaseReceipt() {
   }, [requests, searchType, searchValue]);
 
   useEffect(() => {
-    axiosInstance.get('/mdm/refs/warehouses')
-      .then((response) => setWarehouses(response.data || []))
+    referenceApi.getWarehouses()
+      .then(setWarehouses)
       .catch(() => toast.error('창고 정보를 불러오지 못했습니다.'));
     loadRequests();
   }, []);
 
-  const loadRequests = async () => {
+  async function loadRequests() {
     try {
-      const response = await axiosInstance.get('/procurement/receipts/requests');
-      setRequests(response.data || []);
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || '입고 대상 구매요청을 불러오지 못했습니다.');
+      setRequests(await procurementApi.getReceiptRequests());
+    } catch (error: unknown) {
+      toast.error(getApiErrorMessage(error, '입고 대상 구매요청을 불러오지 못했습니다.'));
     }
-  };
+  }
 
   const verifyRequest = async (selectedId: string) => {
     const id = selectedId.trim();
     try {
-      const response = await axiosInstance.get(`/procurement/receipts/request/${encodeURIComponent(id)}`);
-      const request = response.data.header as RequestHeader;
+      const response = await procurementApi.getReceiptRequest(id);
+      const request = response.header;
       if (!['C', 'S'].includes(request.status)) {
         throw new Error('결재완료 또는 직접확정된 구매요청만 입고할 수 있습니다.');
       }
@@ -88,7 +67,7 @@ export default function PurchaseReceipt() {
       }
       setHeader(request);
       setWarehouseId(request.warehouseId);
-      setLines((response.data.items || []).map((item: any) => {
+      setLines(response.items.map((item) => {
         const qty = Number(item.qty);
         const receivedQty = Number(item.receivedQty || 0);
         const remaining = Math.max(0, qty - receivedQty);
@@ -101,10 +80,12 @@ export default function PurchaseReceipt() {
           unitPrice: 0,
         };
       }));
-    } catch (error: any) {
+    } catch (error: unknown) {
       setHeader(null);
       setLines([]);
-      toast.error(error.response?.data?.message || error.message || '구매요청 번호를 확인할 수 없습니다.');
+      toast.error(error instanceof Error
+        ? error.message
+        : getApiErrorMessage(error, '구매요청 번호를 확인할 수 없습니다.'));
     }
   };
 
@@ -130,7 +111,7 @@ export default function PurchaseReceipt() {
     }
     setSaving(true);
     try {
-      await axiosInstance.post('/procurement/receipts', {
+      await procurementApi.receive({
         requestId: header.id,
         warehouseId,
         txDate,
@@ -140,8 +121,8 @@ export default function PurchaseReceipt() {
       setHeader(null);
       setLines([]);
       await loadRequests();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || '구매입고 처리에 실패했습니다.');
+    } catch (error: unknown) {
+      toast.error(getApiErrorMessage(error, '구매입고 처리에 실패했습니다.'));
     } finally {
       setSaving(false);
     }
@@ -221,9 +202,9 @@ export default function PurchaseReceipt() {
               <button type="button" onClick={() => setHeader(null)} className="mr-2 bg-slate-700 text-white rounded-lg px-5 py-2 text-xs font-semibold border-0 cursor-pointer">
                 취소
               </button>
-              <button disabled={saving} onClick={submit} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-5 py-2 text-xs font-semibold flex items-center gap-1.5 border-0 cursor-pointer disabled:opacity-50">
+              {canCreate && <button disabled={saving} onClick={submit} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-5 py-2 text-xs font-semibold flex items-center gap-1.5 border-0 cursor-pointer disabled:opacity-50">
                 <PackageCheck size={14} /> 입고 처리
-              </button>
+              </button>}
             </div>
           </div>
         </div>

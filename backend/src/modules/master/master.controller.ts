@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Delete,
   Body,
   Param,
@@ -54,9 +55,27 @@ export class MasterController {
 
   @Post('equipments')
   @Permission(AppModule.EQP, 'C')
-  async saveEquipment(@Body() request: EquipmentSaveRequest): Promise<Equipment> {
+  async createEquipment(@Body() request: EquipmentSaveRequest): Promise<Equipment> {
     const { companyId, userId } = getTenantContext();
-    return this.masterService.saveEquipment(companyId, request, userId);
+    return this.masterService.saveEquipment(companyId, request, userId, 'create');
+  }
+
+  /** 업무 입력화면 설비 선택용 — 사용자 플랜트 범위만 반환한다. */
+  @Get('refs/equipments')
+  async getEquipmentsForUse(
+    @Query('plantId') plantId?: string,
+  ): Promise<Equipment[]> {
+    const { companyId, userId } = getTenantContext();
+    return plantId
+      ? this.masterService.getEquipmentsByPlant(companyId, plantId, userId)
+      : this.masterService.getEquipmentsByCompany(companyId, userId);
+  }
+
+  @Put('equipments')
+  @Permission(AppModule.EQP, 'U')
+  async updateEquipment(@Body() request: EquipmentSaveRequest): Promise<Equipment> {
+    const { companyId, userId } = getTenantContext();
+    return this.masterService.saveEquipment(companyId, request, userId, 'update');
   }
 
   @Delete('equipments')
@@ -107,9 +126,24 @@ export class MasterController {
 
   @Post('inventories')
   @Permission(AppModule.INV, 'C')
-  async saveInventory(@Body() inventory: Partial<Inventory>): Promise<Inventory> {
+  async createInventory(@Body() inventory: Partial<Inventory>): Promise<Inventory> {
     const { companyId, userId } = getTenantContext();
-    return this.masterService.saveInventory(companyId, inventory, userId);
+    return this.masterService.saveInventory(companyId, inventory, userId, 'create');
+  }
+
+  @Put('inventories/:id')
+  @Permission(AppModule.INV, 'U')
+  async updateInventory(
+    @Param('id') id: string,
+    @Body() inventory: Partial<Inventory>,
+  ): Promise<Inventory> {
+    const { companyId, userId } = getTenantContext();
+    return this.masterService.saveInventory(
+      companyId,
+      { ...inventory, id },
+      userId,
+      'update',
+    );
   }
 
   @Delete('inventories/:id')

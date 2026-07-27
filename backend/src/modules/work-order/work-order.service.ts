@@ -78,6 +78,7 @@ export class WorkOrderService {
     companyId: string,
     request: SaveWorkOrderDto,
     operator: string,
+    mode: 'create' | 'update',
   ): Promise<WorkOrderResponseDto> {
     const { workOrder: input, workItems } = request;
     const plantId = await resolveActivePlantId(
@@ -91,6 +92,12 @@ export class WorkOrderService {
     await runner.connect();
     await runner.startTransaction();
     let id = input.id?.trim() || '';
+    if (mode === 'create' && id) {
+      throw new BadRequestException('신규 작업지시에는 문서번호를 지정할 수 없습니다.');
+    }
+    if (mode === 'update' && !id) {
+      throw new BadRequestException('수정할 작업지시 문서번호가 필요합니다.');
+    }
     try {
       const repository = runner.manager.getRepository(WorkOrder);
       let entity: WorkOrder;

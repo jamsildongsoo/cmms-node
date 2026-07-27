@@ -1,4 +1,4 @@
-import type { RichTextNode } from '../types/richText';
+import type { RichTextNode } from '../../types/richText';
 
 const text = (value: unknown, bold = false): RichTextNode => ({
   type: 'text',

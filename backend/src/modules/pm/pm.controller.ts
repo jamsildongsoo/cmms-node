@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Patch,
   Delete,
   Body,
@@ -75,7 +76,14 @@ export class PmController {
   @PermissionSave(AppModule.PM, 'pmRecord.status')
   async savePmRecord(@Body() request: SavePmRecordDto): Promise<PmRecordResponseDto> {
     const { companyId, userId } = getTenantContext();
-    return this.pmService.savePmRecord(companyId, request, userId);
+    return this.pmService.savePmRecord(companyId, request, userId, 'create');
+  }
+
+  @Put('records')
+  @PermissionSave(AppModule.PM, 'pmRecord.status', 'U')
+  async updatePmRecord(@Body() request: SavePmRecordDto): Promise<PmRecordResponseDto> {
+    const { companyId, userId } = getTenantContext();
+    return this.pmService.savePmRecord(companyId, request, userId, 'update');
   }
 
   @Patch('plans/:id/close')

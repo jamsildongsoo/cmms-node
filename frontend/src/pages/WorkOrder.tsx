@@ -2,54 +2,29 @@ import { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
-import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import { getCommonStatusLabel as getStatusLabel } from '../constants/status';
+import { APP_MODULE } from '../constants/module';
 import { formatDateOnly, todayLocal } from '../utils/datetime';
 import { getApiErrorMessage } from '../utils/apiError';
 import PrintHeader from '../components/PrintHeader';
 import WorkOrderPrint from '../components/WorkOrderPrint';
 import PrintWindowLayout from '../components/PrintWindowLayout';
 import { openPrintWindow } from '../utils/printWindow';
-import ApprovalDraftModal from '../components/ApprovalDraftModal';
+import { openListPrint } from '../utils/listPrint';
+import ApprovalDraftModal from '../features/approval/components/ApprovalDraftModal';
 import ListBadge from '../components/ListBadge';
 import ListIconButton from '../components/ListIconButton';
 import type { RichTextDocument } from '../types/richText';
 import { createWorkOrderApprovalContent } from '../utils/workOrderApprovalContent';
-import { loadApprovalSignatureSteps } from '../utils/approvalSignature';
+import { loadApprovalSignatureSteps } from '../features/approval/approval-signature';
+import type { WorkOrder as WorkOrderModel, WorkOrderItem as WorkOrderItemModel } from '../features/work-order/work-order.types';
+import { workOrderApi } from '../features/work-order/work-order.api';
+import { referenceApi } from '../features/mdm/reference.api';
+import { masterReferenceApi } from '../features/master/master-reference.api';
 import {
   ClipboardList, Edit2, Trash2, Printer, X, Plus, Trash, PlayCircle
 } from 'lucide-react';
-
-interface WorkOrderModel {
-  id: string;
-  plantId: string;
-  equipmentId: string;
-  title: string;
-  stepStage: string; // P: 계획, R: 실적
-  woTypeCode: string;
-  departmentId: string;
-  workerId: string | null;
-  workDate: string | null;
-  cost: number;
-  manHours: number;
-  manHoursUnit: string;
-  remarks: string | null;
-  fileGroupId: number | null;
-  refNo: string | null;
-  refModule: string | null;
-  approvalId: string | null;
-  status: string; // T, S, P, C, R, X
-  createdAt?: string | null;
-  createdBy?: string | null;
-}
-
-interface WorkOrderItemModel {
-  itemNo: number;
-  workName: string;
-  workMethod: string | null;
-  workResult: string | null;
-}
 
 export default function WorkOrder() {
   const user = useAuthStore((s) => s.user);
@@ -64,7 +39,7 @@ export default function WorkOrder() {
 
   // Form states
   const [isFormOpen, setIsFormOpen] = useState(false);
-  
+
   // Fields for WorkOrder
   const [woNo, setWoNo] = useState('');
   const [plantId, setPlantId] = useState('');
@@ -94,7 +69,12 @@ export default function WorkOrder() {
     content: RichTextDocument;
   } | null>(null);
 
-  const canDirectConfirm = user?.permissions?.WO?.A === 'Y';
+  const permission = user?.permissions?.[APP_MODULE.WO];
+  const canCreate = permission?.C === 'Y';
+  const canUpdate = permission?.U === 'Y';
+  const canDelete = permission?.D === 'Y';
+  const canDirectConfirm = permission?.A === 'Y';
+  const canSave = woNo ? canUpdate : canCreate;
 
   const fetchData = async () => {
     try {
@@ -103,26 +83,31 @@ export default function WorkOrder() {
         params.set('searchType', searchType);
         params.set('searchValue', searchValue);
       }
-      const [woRes, eqRes, deptRes, userRes] = await Promise.all([
-        axiosInstance.get(`/work-order?${params.toString()}`),
-        axiosInstance.get('/master/equipments'),
-        axiosInstance.get('/mdm/departments'),
-        axiosInstance.get('/mdm/users')
+      const [loadedWorkOrders, loadedEquipments, loadedDepartments, loadedUsers] = await Promise.all([
+        workOrderApi.getAll(params),
+        masterReferenceApi.getEquipments(),
+        referenceApi.getDepartments(),
+        referenceApi.getUsers(),
       ]);
-      setWorkOrders((woRes.data || []).map((workOrder: WorkOrderModel & { step_stage?: string }) => ({
+      setWorkOrders((loadedWorkOrders || []).map((workOrder: WorkOrderModel & { step_stage?: string }) => ({
         ...workOrder,
         stepStage: workOrder.stepStage || workOrder.step_stage || 'P',
         workDate: formatDateOnly(workOrder.workDate) || null,
       })));
-      setEquipments(eqRes.data);
-      setDepts(deptRes.data);
-      setUsersList(userRes.data);
+      setEquipments(loadedEquipments);
+      setDepts(loadedDepartments);
+      setUsersList(loadedUsers);
     } catch (err) {
       toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  // 검색 실행은 버튼이 담당하므로 최초 진입 시에만 자동 조회한다.
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void fetchData(); }, 0);
+    return () => window.clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleOpenCreate = () => {
     setWoNo('');
@@ -151,10 +136,9 @@ export default function WorkOrder() {
   const handleOpenEdit = async (wo: WorkOrderModel) => {
     setIsLoading(true);
     try {
-      const res = await axiosInstance.get(`/work-order/details?plantId=${wo.plantId}&id=${wo.id}`);
-      const data = res.data;
+      const data = await workOrderApi.getDetail(wo.plantId, wo.id);
       const w = data.workOrder;
-      
+
       const matchedEq = equipments.find(e => e.id === w.equipmentId);
       setEquipmentName(matchedEq ? matchedEq.name : w.equipmentId);
 
@@ -177,7 +161,7 @@ export default function WorkOrder() {
       setCreatedAt(w.createdAt || '');
       setCreatedBy(w.createdBy || '');
       setWorkItems(data.workItems || []);
-      
+
       setIsFormOpen(true);
     } catch (err) {
       toast.error(getApiErrorMessage(err, '작업지시 상세 기록을 불러오지 못했습니다.'));
@@ -189,7 +173,7 @@ export default function WorkOrder() {
   const handleDelete = async (wo: WorkOrderModel) => {
     if (!(await requestConfirmation('정말 이 작업지시를 삭제하시겠습니까?'))) return;
     try {
-      await axiosInstance.delete(`/work-order?plantId=${wo.plantId}&id=${wo.id}`);
+      await workOrderApi.delete(wo.plantId, wo.id);
       toast.success('작업지시가 삭제되었습니다.');
       fetchData();
     } catch (err) {
@@ -250,9 +234,11 @@ export default function WorkOrder() {
         workItems
       };
 
-      const response = await axiosInstance.post('/work-order', payload);
+      const saved = woNo
+        ? await workOrderApi.update(payload)
+        : await workOrderApi.create(payload);
       if (submitStatus === 'P') {
-        const savedId = response.data.id;
+        const savedId = saved.id;
         setWoNo(savedId);
         setApprovalRef({
           refNo: savedId,
@@ -260,11 +246,11 @@ export default function WorkOrder() {
           content: createWorkOrderApprovalContent({
             woNo: savedId,
             statusLabel: getStatusLabel('P'),
-            createdAt: formatDateOnly(response.data.createdAt),
+            createdAt: formatDateOnly(saved.createdAt),
             departmentName: depts.find((dept) => dept.id === departmentId)?.name || departmentId,
             authorName:
-              usersList.find((candidate) => candidate.id === response.data.createdBy)?.name
-              || response.data.createdBy
+              usersList.find((candidate) => candidate.id === saved.createdBy)?.name
+              || saved.createdBy
               || user?.name
               || '-',
             equipmentName: `${equipmentId} / ${equipmentName || equipmentId}`,
@@ -316,8 +302,8 @@ export default function WorkOrder() {
 
     setIsLoading(true);
     try {
-      const response = await axiosInstance.get(`/work-order/details?plantId=${plan.plantId}&id=${plan.id}`);
-      const detail = { ...plan, ...response.data.workOrder } as WorkOrderModel;
+      const response = await workOrderApi.getDetail(plan.plantId, plan.id);
+      const detail = { ...plan, ...response.workOrder } as WorkOrderModel;
       const matchedEquipment = equipments.find((equipment) => equipment.id === detail.equipmentId);
 
       setWoNo('');
@@ -335,11 +321,11 @@ export default function WorkOrder() {
       setManHoursUnit(detail.manHoursUnit || 'H');
       setRemarks('');
       setRefNo(detail.id);
-      setRefModule('WO');
+      setRefModule(APP_MODULE.WO);
       setApprovalId('');
       setCreatedAt('');
       setCreatedBy('');
-      setWorkItems((response.data.workItems || []).map((item: WorkOrderItemModel) => ({
+      setWorkItems((response.workItems || []).map((item: WorkOrderItemModel) => ({
         ...item,
         workResult: '',
       })));
@@ -359,8 +345,8 @@ export default function WorkOrder() {
     }
     const { printWindow, container } = printTarget;
     try {
-      const response = await axiosInstance.get(`/work-order/details?plantId=${wo.plantId}&id=${wo.id}`);
-      const detail = { ...wo, ...response.data.workOrder } as WorkOrderModel;
+      const response = await workOrderApi.getDetail(wo.plantId, wo.id);
+      const detail = { ...wo, ...response.workOrder } as WorkOrderModel;
       const approvalSteps = await loadApprovalSignatureSteps(detail.approvalId, usersList);
       createRoot(container).render(
         <PrintWindowLayout printWindow={printWindow} contentClassName="max-w-[180mm]">
@@ -380,7 +366,7 @@ export default function WorkOrder() {
             manHours={detail.manHours}
             manHoursUnit={detail.manHoursUnit}
             remarks={detail.remarks || undefined}
-            workItems={response.data.workItems || []}
+            workItems={response.workItems || []}
             approvalSteps={approvalSteps}
           />
         </PrintWindowLayout>,
@@ -395,51 +381,26 @@ export default function WorkOrder() {
   const handlePrint = () => {
     const printRows = activeSubTab === 'plan' ? plans : history;
     if (printRows.length === 0) { toast.error('인쇄할 목록이 없습니다.'); return; }
-    const user = useAuthStore.getState().user;
     const now = new Date();
     const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
-
-    const printWindow = window.open('', '_blank', 'width=1200,height=800');
-    if (!printWindow) { toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.'); return; }
-
-    const rows = printRows.map(wo => `
-      <tr>
-        <td class="mono">${wo.id}</td>
-        <td>${wo.title}</td>
-        <td>${equipments.find(e => e.id === wo.equipmentId)?.name || wo.equipmentId}</td>
-        <td>${getWoTypeLabel(wo.woTypeCode)}</td>
-        <td>${usersList.find(u => u.id === wo.workerId)?.name || wo.workerId || '-'}</td>
-        <td>${wo.workDate || '-'}</td>
-        <td>${getStatusLabel(wo.status)}</td>
-      </tr>
-    `).join('');
-
-    printWindow.document.title = '작업지시 목록 - 인쇄';
-    printWindow.document.write(`<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>작업지시 목록 - 인쇄</title>
-<style>
-@page { size: A4 landscape; margin: 10mm 10mm 14mm 10mm; }
-* { margin:0; padding:0; box-sizing:border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #000; padding: 10mm; }
-h1 { text-align: center; font-size: 14pt; margin-bottom: 4mm; border-bottom: 2px solid #000; padding-bottom: 3mm; }
-.print-info { display: flex; justify-content: space-between; font-size: 8pt; color: #666; border-bottom: 1px solid #ccc; padding-bottom: 2mm; margin-bottom: 4mm; }
-table { width: 100%; border-collapse: collapse; font-size: 8pt; }
-th, td { border: 1px solid #333; padding: 4px 6px; text-align: center; }
-th { background: #eee; font-weight: 600; }
-.mono { font-family: monospace; }
-.no-print { text-align: right; margin-bottom: 12px; }
-.no-print button { padding: 8px 20px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 10pt; }
-@media print { .no-print { display: none; } }
-</style></head><body>
-<div class="no-print"><button onclick="window.print()">인쇄</button></div>
-<div class="print-info"><span>회사: ${user?.companyName || user?.companyId || 'CMMS'}</span><span>출력자: ${user?.name || '-'} | 출력일시: ${stamp}</span></div>
-<h1>작업지시 현황</h1>
-<table><thead><tr>
-<th>지시번호</th><th>지시명</th><th>설비명</th><th>작업유형</th><th>담당자</th><th>계획/수행일자</th><th>결재상태</th>
-</tr></thead><tbody>${rows}</tbody></table>
-</body></html>`);
-    printWindow.document.close();
-    printWindow.focus();
+    const opened = openListPrint({
+      title: '작업지시 현황',
+      rows: printRows,
+      getRowKey: (wo) => wo.id,
+      companyName: user?.companyName || user?.companyId || 'CMMS',
+      printerName: user?.name || '-',
+      printedAt: stamp,
+      columns: [
+        { header: '지시번호', render: (wo) => wo.id, className: 'font-mono' },
+        { header: '지시명', render: (wo) => wo.title },
+        { header: '설비명', render: (wo) => equipments.find((item) => item.id === wo.equipmentId)?.name || wo.equipmentId },
+        { header: '작업유형', render: (wo) => getWoTypeLabel(wo.woTypeCode) },
+        { header: '담당자', render: (wo) => usersList.find((item) => item.id === wo.workerId)?.name || wo.workerId || '-' },
+        { header: '계획/수행일자', render: (wo) => wo.workDate || '-' },
+        { header: '결재상태', render: (wo) => getStatusLabel(wo.status) },
+      ],
+    });
+    if (!opened) toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
   };
 
   // Filter plans vs history (completed work orders)
@@ -467,13 +428,13 @@ th { background: #eee; font-weight: 600; }
             목록 인쇄
           </button>
 
-          <button
+          {canCreate && <button
             onClick={handleOpenCreate}
             className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors border-0 cursor-pointer shadow-lg shadow-blue-900/20"
           >
             <Plus size={14} />
             입력
-          </button>
+          </button>}
 
           {/* Subtab control */}
           <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg">
@@ -528,7 +489,7 @@ th { background: #eee; font-weight: 600; }
 
       {/* Main Grid View */}
       <div className={`bg-slate-900 border border-slate-800 rounded-xl p-6 print:border-0 print:bg-transparent print:p-0 print-landscape ${isFormOpen ? 'print:hidden' : ''}`}>
-        
+
         {/* Print Only Header */}
         <PrintHeader />
         <h1 className="hidden print:block text-center text-xl font-bold tracking-widest text-black border-b-2 border-black pb-2 mb-4">작 업 지 시 현 황</h1>
@@ -572,7 +533,7 @@ th { background: #eee; font-weight: 600; }
                       <ListBadge>{getStatusLabel(wo.status)}</ListBadge>
                     </td>
                     <td className="p-3 text-right space-x-2 print:hidden">
-                      {activeSubTab === 'plan' && (wo.status === 'S' || wo.status === 'C') && (
+                      {canCreate && activeSubTab === 'plan' && (wo.status === 'S' || wo.status === 'C') && (
                         <ListIconButton
                           onClick={() => openResultFromPlan(wo)}
                           label="실적 입력"
@@ -580,7 +541,7 @@ th { background: #eee; font-weight: 600; }
                           tone="success"
                         />
                       )}
-                      {['T', 'R'].includes(wo.status) && (
+                      {canUpdate && ['T', 'R'].includes(wo.status) && (
                         <ListIconButton
                           onClick={() => handleOpenEdit(wo)}
                           label="상세/수정"
@@ -588,7 +549,7 @@ th { background: #eee; font-weight: 600; }
                           tone="accent"
                         />
                       )}
-                      {wo.status === 'T' && (
+                      {canDelete && wo.status === 'T' && (
                           <ListIconButton
                             onClick={() => handleDelete(wo)}
                             label="삭제"
@@ -879,21 +840,21 @@ th { background: #eee; font-weight: 600; }
                 >
                   닫기
                 </button>
-                <button
+                {canSave && <button
                   onClick={() => handleSave('T')}
                   disabled={isLoading}
                   className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-750 rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
                 >
                   임시 저장
-                </button>
-                <button
+                </button>}
+                {canSave && <button
                   onClick={() => handleSave('P')}
                   disabled={isLoading}
                   className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer border-0 disabled:opacity-50"
                 >
                   결재 상신
-                </button>
-                {canDirectConfirm && (
+                </button>}
+                {canSave && canDirectConfirm && (
                   <button
                     onClick={() => handleSave('S')}
                     disabled={isLoading}
@@ -910,7 +871,7 @@ th { background: #eee; font-weight: 600; }
       <ApprovalDraftModal
         open={!!approvalRef}
         mode="linked"
-        refModule="WO"
+        refModule={APP_MODULE.WO}
         refNo={approvalRef?.refNo || ''}
         defaultTitle={approvalRef?.title || ''}
         defaultContent={approvalRef?.content}

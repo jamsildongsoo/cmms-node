@@ -90,7 +90,12 @@ export class MasterService {
     };
   }
 
-  async saveEquipment(companyId: string, request: EquipmentSaveRequest, operator: string): Promise<Equipment> {
+  async saveEquipment(
+    companyId: string,
+    request: EquipmentSaveRequest,
+    operator: string,
+    mode: 'create' | 'update',
+  ): Promise<Equipment> {
     const reqEq = request.equipment;
     if (!reqEq.plantId || !reqEq.id) {
       throw new BadRequestException('플랜트 ID와 설비 ID는 필수입니다.');
@@ -104,56 +109,62 @@ export class MasterService {
     reqEq.plantId = activePlantId;
     reqEq.companyId = companyId;
 
-    const exists = await this.eqRepo.findOne({
-      where: { companyId, plantId: activePlantId, id: reqEq.id },
-    });
-
-    let savedEq: Equipment;
-    if (exists) {
-      Object.assign(exists, {
-        ...reqEq,
-        deleteYn: 'N',
-        updatedBy: operator,
+    return this.dataSource.transaction(async (manager) => {
+      const equipmentRepository = manager.getRepository(Equipment);
+      const cycleRepository = manager.getRepository(EquipmentCheckCycle);
+      const exists = await equipmentRepository.findOne({
+        where: { companyId, plantId: activePlantId, id: reqEq.id },
       });
-      savedEq = await this.eqRepo.save(exists);
-    } else {
-      const eq = this.eqRepo.create({
-        ...reqEq,
-        deleteYn: 'N',
+      if (mode === 'create' && exists?.deleteYn === 'N') {
+        throw new BadRequestException('이미 존재하는 설비입니다.');
+      }
+      if (mode === 'update' && (!exists || exists.deleteYn !== 'N')) {
+        throw new BadRequestException('수정할 설비를 찾을 수 없습니다.');
+      }
+
+      const entity = exists ?? equipmentRepository.create({
+        companyId,
+        plantId: activePlantId,
+        id: reqEq.id,
         createdBy: operator,
+      });
+      Object.assign(entity, {
+        ...reqEq,
+        companyId,
+        plantId: activePlantId,
+        deleteYn: 'N',
         updatedBy: operator,
       });
-      savedEq = await this.eqRepo.save(eq);
-    }
+      const savedEquipment = await equipmentRepository.save(entity);
 
-    // 점검 항목은 예방점검 계획(PM)에서 관리한다. 설비 마스터는 점검주기만 갱신한다.
-    const oldCycles = await this.checkCycleRepo.find({
-      where: { companyId, plantId: activePlantId, equipmentId: reqEq.id, deleteYn: 'N' },
+      const oldCycles = await cycleRepository.find({
+        where: { companyId, plantId: activePlantId, equipmentId: reqEq.id, deleteYn: 'N' },
+      });
+      if (oldCycles.length > 0) {
+        oldCycles.forEach((cycle) => {
+          cycle.deleteYn = 'Y';
+          cycle.updatedBy = operator;
+        });
+        await cycleRepository.save(oldCycles);
+      }
+
+      if (request.checkCycles?.length) {
+        await cycleRepository.save(
+          request.checkCycles.map((cycle) => cycleRepository.create({
+            ...cycle,
+            lastCheckDate: cycle.lastCheckDate ? toDateOnly(cycle.lastCheckDate) : null,
+            nextCheckDate: cycle.nextCheckDate ? toDateOnly(cycle.nextCheckDate) : null,
+            companyId,
+            plantId: activePlantId,
+            equipmentId: reqEq.id,
+            deleteYn: 'N',
+            createdBy: operator,
+            updatedBy: operator,
+          })),
+        );
+      }
+      return savedEquipment;
     });
-    for (const old of oldCycles) {
-      old.deleteYn = 'Y';
-      old.updatedBy = operator;
-      await this.checkCycleRepo.save(old);
-    }
-
-    if (request.checkCycles) {
-      const newCycles = request.checkCycles.map(cycle =>
-        this.checkCycleRepo.create({
-          ...cycle,
-          lastCheckDate: cycle.lastCheckDate ? toDateOnly(cycle.lastCheckDate) : null,
-          nextCheckDate: cycle.nextCheckDate ? toDateOnly(cycle.nextCheckDate) : null,
-          companyId,
-          plantId: activePlantId,
-          equipmentId: reqEq.id,
-          deleteYn: 'N',
-          createdBy: operator,
-          updatedBy: operator,
-        }),
-      );
-      await this.checkCycleRepo.save(newCycles);
-    }
-
-    return savedEq;
   }
 
   async deleteEquipment(companyId: string, plantId: string, id: string, operator: string): Promise<void> {
@@ -182,11 +193,22 @@ export class MasterService {
     return inv;
   }
 
-  async saveInventory(companyId: string, invDto: Partial<Inventory>, operator: string): Promise<Inventory> {
+  async saveInventory(
+    companyId: string,
+    invDto: Partial<Inventory>,
+    operator: string,
+    mode: 'create' | 'update',
+  ): Promise<Inventory> {
     if (!invDto.id) throw new BadRequestException('자재 ID는 필수입니다.');
 
     invDto.companyId = companyId;
     const exists = await this.invRepo.findOne({ where: { companyId, id: invDto.id } });
+    if (mode === 'create' && exists?.deleteYn === 'N') {
+      throw new BadRequestException('이미 존재하는 자재입니다.');
+    }
+    if (mode === 'update' && (!exists || exists.deleteYn !== 'N')) {
+      throw new BadRequestException('수정할 자재를 찾을 수 없습니다.');
+    }
 
     if (exists) {
       Object.assign(exists, {

@@ -7,6 +7,9 @@ import { DataSource } from 'typeorm';
 import { Board } from '../../entities/board.entity';
 import { BoardComment } from '../../entities/board-comment.entity';
 import { User } from '../../entities/users.entity';
+import { RoleDetail } from '../../entities/role-detail.entity';
+import { AppModule } from '../../common/constants/module.constants';
+import type { PermAction } from '../../common/constants/permission.constants';
 import { BoardRepository } from './board.repository';
 import {
   BoardCommentResponseDto,
@@ -46,11 +49,13 @@ export class BoardService {
     companyId: string,
     input: SaveBoardDto,
     operator: string,
+    roleId: string,
   ): Promise<BoardResponseDto> {
     const repository = this.dataSource.getRepository(Board);
     const rawId = input.id == null ? null : Number(input.id);
     let entity: Board;
     if (rawId == null) {
+      await this.assertPermission(companyId, roleId, 'C');
       entity = repository.create({
         companyId,
         boardTypeCode: input.boardTypeCode,
@@ -70,6 +75,14 @@ export class BoardService {
       }) ?? (() => {
         throw new NotFoundException('게시글을 찾을 수 없습니다.');
       })();
+      if (
+        entity.createdBy !== operator
+        && !(await this.hasPermission(companyId, roleId, 'U'))
+      ) {
+        throw new ForbiddenException(
+          '본인 게시글이 아니거나 게시판 수정 권한이 없습니다.',
+        );
+      }
       Object.assign(entity, {
         boardTypeCode: input.boardTypeCode,
         title: input.title,
@@ -96,12 +109,21 @@ export class BoardService {
     companyId: string,
     id: number,
     operator: string,
+    roleId: string,
   ): Promise<void> {
     const repository = this.dataSource.getRepository(Board);
     const entity = await repository.findOne({
       where: { companyId, id, deleteYn: 'N' },
     });
     if (!entity) throw new NotFoundException('게시글을 찾을 수 없습니다.');
+    if (
+      entity.createdBy !== operator
+      && !(await this.hasPermission(companyId, roleId, 'D'))
+    ) {
+      throw new ForbiddenException(
+        '본인 게시글이 아니거나 게시판 삭제 권한이 없습니다.',
+      );
+    }
     entity.deleteYn = 'Y';
     entity.updatedBy = operator;
     await repository.save(entity);
@@ -159,16 +181,58 @@ export class BoardService {
     boardId: number,
     commentNo: number,
     operatorId: string,
+    roleId: string,
   ): Promise<void> {
     const repository = this.dataSource.getRepository(BoardComment);
     const comment = await repository.findOne({
       where: { companyId, boardId, commentNo },
     });
     if (!comment) throw new NotFoundException('댓글을 찾을 수 없습니다.');
-    if (comment.authorId !== operatorId) {
-      throw new ForbiddenException('본인이 작성한 댓글만 삭제할 수 있습니다.');
+    if (
+      comment.authorId !== operatorId
+      && !(await this.hasPermission(companyId, roleId, 'D'))
+    ) {
+      throw new ForbiddenException(
+        '본인 댓글이 아니거나 게시판 삭제 권한이 없습니다.',
+      );
     }
     await repository.remove(comment);
+  }
+
+  private async assertPermission(
+    companyId: string,
+    roleId: string,
+    action: PermAction,
+  ): Promise<void> {
+    if (!(await this.hasPermission(companyId, roleId, action))) {
+      throw new ForbiddenException(`게시판 ${action} 권한이 없습니다.`);
+    }
+  }
+
+  private async hasPermission(
+    companyId: string,
+    roleId: string,
+    action: PermAction,
+  ): Promise<boolean> {
+    if (companyId === 'SYSTEM' && roleId.toUpperCase() === 'SYSTEM') {
+      return true;
+    }
+    const permission = await this.dataSource.getRepository(RoleDetail).findOne({
+      where: {
+        companyId,
+        roleId,
+        moduleDetail: AppModule.BRD,
+      },
+    });
+    if (!permission) return false;
+    const property: Record<PermAction, keyof RoleDetail> = {
+      C: 'permC',
+      R: 'permR',
+      U: 'permU',
+      D: 'permD',
+      A: 'permA',
+    };
+    return permission[property[action]] === 'Y';
   }
 
   private toBoardResponse(entity: Board): BoardResponseDto {

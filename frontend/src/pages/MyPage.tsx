@@ -3,12 +3,13 @@ import { toast } from 'sonner';
 import { useAuthStore } from '../store/useAuthStore';
 import axiosInstance from '../api/axios';
 import { User, Mail, Phone, Briefcase, Lock, Save, Shield } from 'lucide-react';
+import { getApiErrorMessage } from '../utils/apiError';
 
 export default function MyPage() {
   const user = useAuthStore((s) => s.user);
   const updateUser = useAuthStore((s) => s.updateUser);
   
-  const [name, setName] = useState('');
+  const [name, setName] = useState(user?.name || '');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [position, setPosition] = useState('');
@@ -23,7 +24,6 @@ export default function MyPage() {
 
   useEffect(() => {
     if (user) {
-      setName(user.name || '');
       axiosInstance.get('/auth/me')
         .then(res => {
           const data = res.data;
@@ -52,9 +52,8 @@ export default function MyPage() {
       });
       updateUser({ name, position, title });
       toast.success('프로필 정보가 수정되었습니다.');
-    } catch (err: any) {
-      const errMsg = err.response?.data?.message || '프로필 수정에 실패했습니다.';
-      toast.error(errMsg);
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, '프로필 수정에 실패했습니다.'));
     } finally {
       setIsLoading(false);
     }
@@ -80,9 +79,8 @@ export default function MyPage() {
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-    } catch (err: any) {
-      const errMsg = err.response?.data?.message || '비밀번호 변경에 실패했습니다. 현재 비밀번호를 확인하세요.';
-      toast.error(errMsg);
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, '비밀번호 변경에 실패했습니다. 현재 비밀번호를 확인하세요.'));
     } finally {
       setPasswordLoading(false);
     }
@@ -248,6 +246,7 @@ export default function MyPage() {
                     <label className="block text-slate-400 text-xs mb-1.5 font-medium">새 비밀번호</label>
                     <input
                       type="password"
+                      minLength={8}
                       required
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
@@ -258,6 +257,7 @@ export default function MyPage() {
                     <label className="block text-slate-400 text-xs mb-1.5 font-medium">새 비밀번호 확인</label>
                     <input
                       type="password"
+                      minLength={8}
                       required
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}

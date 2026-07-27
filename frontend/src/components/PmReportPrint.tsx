@@ -1,7 +1,7 @@
 import PrintHeader from './PrintHeader';
 import { PrintSection, PrintField, PrintFieldGrid, PrintTable } from './PrintDoc';
 import { getCommonStatusLabel, getJudgeLabel } from '../constants/status';
-import ApprovalSignatureBox, { type ApprovalSignatureStep } from './ApprovalSignatureBox';
+import ApprovalSignatureBox, { type ApprovalSignatureStep } from '../features/approval/components/ApprovalSignatureBox';
 
 interface PmCheckItem {
   checkName: string;

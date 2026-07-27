@@ -1,34 +1,37 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
-import axiosInstance from '../api/axios';
-import { getApiErrorMessage } from '../utils/apiError';
-import { requestConfirmation } from '../utils/userActionDialog';
+import {
+  APPROVAL_STEP_TYPE,
+  getApprovalStepTypeLabel,
+  type ApprovalStepType,
+} from '../../../constants/approval';
+import { APP_MODULE, type LinkableModule } from '../../../constants/module';
+import { DOC_STATUS } from '../../../constants/status';
+import { approvalApi } from '../approval.api';
+import type {
+  ApprovalLine,
+  ApprovalStep,
+  ApprovalUser,
+} from '../approval.types';
+import { getApiErrorMessage } from '../../../utils/apiError';
+import { requestConfirmation } from '../../../utils/userActionDialog';
 import {
   createEmptyRichTextDocument,
   isRichTextDocument,
   isRichTextEmpty,
   type RichTextDocument,
-} from '../types/richText';
-import FileUpload from './FileUpload';
-import RichTextEditor from './RichTextEditor';
-
-export interface ApprovalDraftUser {
-  id: string;
-  name: string;
-  title?: string | null;
-  position?: string | null;
-  departmentName?: string | null;
-  useYn?: string;
-}
+} from '../../../types/richText';
+import FileUpload from '../../files/components/FileUpload';
+import RichTextEditor from '../../../components/RichTextEditor';
 
 interface ApprovalDraftModalProps {
   open: boolean;
   mode: 'standalone' | 'linked';
-  users: ApprovalDraftUser[];
+  users: ApprovalUser[];
   currentUserId?: string;
   approvalId?: string | null;
-  refModule?: 'PM' | 'WO' | 'WP' | 'PUR' | null;
+  refModule?: LinkableModule | null;
   refNo?: string | null;
   defaultTitle?: string;
   defaultContent?: RichTextDocument;
@@ -37,8 +40,11 @@ interface ApprovalDraftModalProps {
   onSubmitted?: (approvalId: string) => void;
 }
 
-type LineType = 'A' | 'G' | 'R';
-type ApprovalLine = { approverId: string; type: LineType };
+type SelectableStepType = Exclude<ApprovalStepType, 'D'>;
+type CachedApprovalLine = Partial<ApprovalLine> & {
+  approverId?: string;
+  type?: SelectableStepType;
+};
 
 export default function ApprovalDraftModal({
   open,
@@ -58,10 +64,17 @@ export default function ApprovalDraftModal({
   const [content, setContent] = useState<RichTextDocument>(createEmptyRichTextDocument);
   const [lines, setLines] = useState<ApprovalLine[]>([]);
   const [lineUserId, setLineUserId] = useState('');
-  const [lineType, setLineType] = useState<LineType>('A');
+  const [lineType, setLineType] = useState<SelectableStepType>(
+    APPROVAL_STEP_TYPE.APPROVAL,
+  );
   const [fileGroupId, setFileGroupId] = useState<number | null>(null);
   const [fileUploading, setFileUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
@@ -71,32 +84,32 @@ export default function ApprovalDraftModal({
       setContent(defaultContent ?? createEmptyRichTextDocument());
       setLines([]);
       setLineUserId('');
-      setLineType('A');
+      setLineType(APPROVAL_STEP_TYPE.APPROVAL);
       setFileGroupId(null);
 
       if (approvalId) {
         setIsLoading(true);
         try {
-          const response = await axiosInstance.get(`/approval/${approvalId}/details`);
+          const detail = await approvalApi.getDetail(approvalId);
           if (!active) return;
-          setTitle(response.data.approval.title || '');
+          setTitle(detail.approval.title || '');
           setContent(
-            isRichTextDocument(response.data.approval.content)
-              ? response.data.approval.content
+            isRichTextDocument(detail.approval.content)
+              ? detail.approval.content
               : createEmptyRichTextDocument(),
           );
-          setFileGroupId(response.data.approval.fileGroupId ?? null);
+          setFileGroupId(detail.approval.fileGroupId ?? null);
           setLines(
-            (response.data.steps || [])
-              .filter((step: any) => step.stepNo > 0)
-              .map((step: any) => ({
+            detail.steps
+              .filter((step: ApprovalStep) => step.stepNo > 0)
+              .map((step: ApprovalStep) => ({
                 approverId: step.approverId,
-                type: step.approvalType as LineType,
+                approvalType: step.approvalType as SelectableStepType,
               })),
           );
         } catch (error) {
           toast.error(getApiErrorMessage(error, '결재 문서 정보를 불러오지 못했습니다.'));
-          onClose();
+          onCloseRef.current();
         } finally {
           if (active) setIsLoading(false);
         }
@@ -125,7 +138,18 @@ export default function ApprovalDraftModal({
                   ? draft.content
                   : createEmptyRichTextDocument(),
               );
-              setLines(draft.steps || []);
+              setLines(
+                (Array.isArray(draft.steps) ? draft.steps : [])
+                  .map((line: CachedApprovalLine) => ({
+                    approverId: line.approverId || '',
+                    // 기존 자동저장본의 `type` 필드는 `approvalType`으로 이관한다.
+                    approvalType:
+                      line.approvalType
+                      ?? line.type
+                      ?? APPROVAL_STEP_TYPE.APPROVAL,
+                  }))
+                  .filter((line: ApprovalLine) => line.approverId),
+              );
               setFileGroupId(draft.fileGroupId ?? null);
             } else {
               localStorage.removeItem('approval-draft-new');
@@ -166,7 +190,10 @@ export default function ApprovalDraftModal({
 
   const addLine = () => {
     if (!lineUserId || lines.some((line) => line.approverId === lineUserId)) return;
-    setLines((current) => [...current, { approverId: lineUserId, type: lineType }]);
+    setLines((current) => [
+      ...current,
+      { approverId: lineUserId, approvalType: lineType },
+    ]);
     setLineUserId('');
   };
 
@@ -175,7 +202,12 @@ export default function ApprovalDraftModal({
       toast.error('결재 제목을 입력하세요.');
       return;
     }
-    if (!temporary && !lines.some((line) => line.type === 'A')) {
+    if (
+      !temporary
+      && !lines.some(
+        (line) => line.approvalType === APPROVAL_STEP_TYPE.APPROVAL,
+      )
+    ) {
       toast.error('최소 한 명 이상의 결재선(A)을 지정해야 합니다.');
       return;
     }
@@ -185,22 +217,19 @@ export default function ApprovalDraftModal({
     }
     setIsLoading(true);
     try {
-      const response = await axiosInstance.post('/approval/submit', {
+      const saved = await approvalApi.submit({
         approval: {
           id: approvalId || null,
           title: title.trim(),
           content,
           fileGroupId,
-          ...(temporary ? { status: 'T' } : {}),
+          ...(temporary ? { status: DOC_STATUS.TEMP } : {}),
         },
-        steps: lines.map((line) => ({
-          approverId: line.approverId,
-          approvalType: line.type,
-        })),
+        steps: lines,
         refNo: refNo || null,
         refModule: refModule || null,
       });
-      const savedId = response.data.id as string;
+      const savedId = saved.id;
       localStorage.removeItem(`approval-draft-${approvalId || 'new'}`);
       if (temporary) {
         toast.success('임시저장되었습니다.');
@@ -250,10 +279,10 @@ export default function ApprovalDraftModal({
                   </option>
                 ))}
               </select>
-              <select value={lineType} onChange={(event) => setLineType(event.target.value as LineType)} className="w-28 bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-slate-200 outline-none">
-                <option value="A">결재</option>
-                <option value="G">합의</option>
-                <option value="R">참조</option>
+              <select value={lineType} onChange={(event) => setLineType(event.target.value as SelectableStepType)} className="w-28 bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-slate-200 outline-none">
+                <option value={APPROVAL_STEP_TYPE.APPROVAL}>결재</option>
+                <option value={APPROVAL_STEP_TYPE.AGREEMENT}>합의</option>
+                <option value={APPROVAL_STEP_TYPE.REFERENCE}>참조</option>
               </select>
               <button type="button" onClick={addLine} disabled={!lineUserId} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-lg px-3 flex items-center gap-1 border-0 cursor-pointer">
                 <Plus size={14} /> 추가
@@ -264,7 +293,7 @@ export default function ApprovalDraftModal({
                 const selected = users.find((item) => item.id === line.approverId);
                 return (
                   <div key={line.approverId} className="flex justify-between items-center bg-slate-950 px-3 py-2 rounded border border-slate-800">
-                    <span className="text-slate-200">{index + 1}. [{line.type}] {selected?.name || line.approverId}</span>
+                    <span className="text-slate-200">{index + 1}. [{getApprovalStepTypeLabel(line.approvalType)}] {selected?.name || line.approverId}</span>
                     <button type="button" onClick={() => setLines((current) => current.filter((_, i) => i !== index))} className="text-slate-600 hover:text-rose-400 bg-transparent border-0 cursor-pointer">
                       <X size={14} />
                     </button>
@@ -284,7 +313,7 @@ export default function ApprovalDraftModal({
 
           <div>
             <label className="block text-slate-400 mb-1.5 font-semibold">첨부파일</label>
-            <FileUpload groupNo={fileGroupId} refModule="APR" onGroupNoChange={setFileGroupId} onUploadingChange={setFileUploading} />
+            <FileUpload groupNo={fileGroupId} refModule={APP_MODULE.APR} onGroupNoChange={setFileGroupId} onUploadingChange={setFileUploading} />
           </div>
         </div>
 

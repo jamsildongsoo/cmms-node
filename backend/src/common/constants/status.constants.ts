@@ -75,6 +75,30 @@ export enum TxReason {
   STOCKTAKING = 'STOCKTAKING',
 }
 
+export const TxReasonLabel: Record<TxReason, string> = {
+  [TxReason.GENERAL]: '일반',
+  [TxReason.PURCHASE]: '구매입고',
+  [TxReason.RETURN]: '반품',
+  [TxReason.WORK_ORDER]: '작업지시',
+  [TxReason.DISPOSAL]: '폐기',
+  [TxReason.TRANSFER]: '창고이동',
+  [TxReason.PLANT_TRANSFER]: '사업장 이동',
+  [TxReason.STOCKTAKING]: '재고실사',
+};
+
+/** 예방점검 판정 (`judge_code`) */
+export enum PmJudge {
+  OK = 'OK',
+  NG = 'NG',
+  OTHER = 'OTHER',
+}
+
+export const PmJudgeLabel: Record<PmJudge, string> = {
+  [PmJudge.OK]: '양호 (OK)',
+  [PmJudge.NG]: '불량 (NG)',
+  [PmJudge.OTHER]: '기타',
+};
+
 /** 이동 거래는 이력(tx_type_code)에 출고·입고 두 다리로 분리 기록된다 */
 export enum MoveTxType {
   MOVE_OUT = 'MOVE_OUT',

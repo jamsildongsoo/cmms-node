@@ -1,13 +1,20 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // CORS 활성화
-  app.enableCors();
+  // 개발은 '*', 운영은 쉼표로 구분한 FE Origin만 허용한다.
+  const config = app.get(ConfigService);
+  const corsOrigins = config.get<string>('CORS_ORIGINS', '*').trim();
+  app.enableCors({
+    origin: corsOrigins === '*'
+      ? true
+      : corsOrigins.split(',').map((origin) => origin.trim()).filter(Boolean),
+  });
 
   // DTO 검증 및 자동 형변환 전역 파이프 등록
   app.useGlobalPipes(

@@ -29,14 +29,14 @@ export class ProcurementController {
   }
 
   @Post('vendors')
-  @Permission(AppModule.PUR, 'A')
+  @Permission(AppModule.PUR, 'C')
   async createVendor(@Body() request: VendorRequest): Promise<any> {
     const { companyId, userId } = getTenantContext();
     return this.procurementService.createVendor(companyId, request, userId);
   }
 
   @Put('vendors/:id')
-  @Permission(AppModule.PUR, 'A')
+  @Permission(AppModule.PUR, 'U')
   async updateVendor(
     @Param('id') id: string,
     @Body() request: VendorRequest,
@@ -47,7 +47,7 @@ export class ProcurementController {
 
   @Delete('vendors/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Permission(AppModule.PUR, 'A')
+  @Permission(AppModule.PUR, 'D')
   async deleteVendor(@Param('id') id: string): Promise<void> {
     const { companyId, userId } = getTenantContext();
     await this.procurementService.deleteVendor(companyId, id, userId);
@@ -101,7 +101,18 @@ export class ProcurementController {
   @Permission(AppModule.PUR, 'C')
   async saveRequest(@Body() request: SaveRequest): Promise<any> {
     const { companyId, userId } = getTenantContext();
-    return this.procurementService.createOrUpdate(companyId, request, userId);
+    return this.procurementService.createOrUpdate(companyId, request, userId, 'create');
+  }
+
+  @Put('requests/:id')
+  @Permission(AppModule.PUR, 'U')
+  async updateRequest(
+    @Param('id') id: string,
+    @Body() request: SaveRequest,
+  ): Promise<any> {
+    const { companyId, userId } = getTenantContext();
+    request.header.id = id;
+    return this.procurementService.createOrUpdate(companyId, request, userId, 'update');
   }
 
   @Post('requests/:id/confirm')

@@ -1,21 +1,9 @@
-import axiosInstance from '../api/axios';
-import type { ApprovalSignatureStep } from '../components/ApprovalSignatureBox';
-
-interface ApprovalUser {
-  id: string;
-  name: string;
-  title?: string | null;
-  position?: string | null;
-}
-
-interface ApprovalStepResponse {
-  stepNo: number;
-  approverId: string;
-  approvalType: string;
-  approvalResult: string | null;
-  comments?: string | null;
-  actionAt?: string | null;
-}
+import { approvalApi } from './approval.api';
+import type {
+  ApprovalStep,
+  ApprovalUser,
+} from './approval.types';
+import type { ApprovalSignatureStep } from './components/ApprovalSignatureBox';
 
 export async function loadApprovalSignatureSteps(
   approvalId: string | null | undefined,
@@ -24,8 +12,8 @@ export async function loadApprovalSignatureSteps(
   if (!approvalId) return [];
 
   try {
-    const response = await axiosInstance.get(`/approval/${approvalId}/details`);
-    return (response.data.steps || []).map((step: ApprovalStepResponse) => {
+    const detail = await approvalApi.getDetail(approvalId);
+    return detail.steps.map((step: ApprovalStep) => {
       const approver = users.find((candidate) => candidate.id === step.approverId);
       return {
         ...step,

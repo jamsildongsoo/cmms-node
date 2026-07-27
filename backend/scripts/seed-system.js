@@ -12,11 +12,11 @@
    롤·권한·관리자·기본 공통코드를 자동 시드한다.
 
    실행:  cd backend && node scripts/seed-system.js [비밀번호]
-          (비밀번호 미지정 시 기본값 'system1234')
+          (비밀번호 미지정 시 개발 기본값 'init1234')
    전제:  백엔드를 한 번 기동(synchronize)해 테이블이 생성된 상태여야 함.
    재실행: ON CONFLICT DO NOTHING — 여러 번 실행해도 안전(중복 미삽입).
 
-   접속 정보는 앱(data-source.config.ts)과 동일하게 .env 의 DB_URL 을 사용한다.
+   접속 정보는 앱(data-source.config.ts)과 동일한 DB_* 환경변수를 사용한다.
    ========================================================================= */
 const fs = require('fs');
 const path = require('path');
@@ -41,7 +41,12 @@ function loadEnv() {
       if (!trimmed || trimmed.startsWith('#')) continue;
       const eq = trimmed.indexOf('=');
       if (eq === -1) continue;
-      env[trimmed.slice(0, eq)] = trimmed.slice(eq + 1);
+      const value = trimmed.slice(eq + 1).trim();
+      env[trimmed.slice(0, eq)] =
+        (value.startsWith("'") && value.endsWith("'")) ||
+        (value.startsWith('"') && value.endsWith('"'))
+          ? value.slice(1, -1)
+          : value;
     }
   }
 
@@ -53,7 +58,17 @@ function buildConnection(env) {
   let dbUrl = env.DB_URL;
   const username = env.DB_USERNAME;
   const password = env.DB_PASSWORD;
-  if (!dbUrl) throw new Error('.env 에 DB_URL 이 없습니다.');
+  if (!dbUrl) {
+    return {
+      host: env.DB_HOST || '127.0.0.1',
+      port: Number(env.DB_PORT || 5432),
+      database: env.DB_NAME || 'cmms',
+      user: username,
+      password,
+      ssl: env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+      searchPath: env.DB_SCHEMA || 'public',
+    };
+  }
 
   if (dbUrl.startsWith('jdbc:')) dbUrl = dbUrl.substring(5);
   if (dbUrl.startsWith('postgresql://') && username && password && !dbUrl.includes('@')) {
@@ -75,7 +90,7 @@ function buildConnection(env) {
       u.searchParams.delete('sslmode');
       dbUrl = u.toString();
     }
-    ssl = { rejectUnauthorized: false };
+    ssl = env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false;
   } catch {
     if (dbUrl.includes('ssl=true') || dbUrl.includes('sslmode=require')) {
       ssl = { rejectUnauthorized: false };
@@ -85,10 +100,10 @@ function buildConnection(env) {
 }
 
 async function main() {
-  const password = process.argv[2] || 'system1234';
+  const password = process.argv[2] || 'init1234';
   const env = loadEnv();
   const conn = buildConnection(env);
-  const client = new Client({ connectionString: conn.connectionString, ssl: conn.ssl });
+  const client = new Client(conn);
   await client.connect();
 
   // search_path 명시적 설정 (pg 라이브러리가 URL options 파라미터를 무시함)
@@ -132,7 +147,7 @@ async function main() {
       `INSERT INTO users (
          company_id, id, name, password_hash, use_yn, role_id,
          must_change_password, failed_login_count, created_by, updated_by, delete_yn
-       ) VALUES ('SYSTEM', 'system', '시스템관리자', $1, 'Y', 'SYSTEM', 'N', 0, $2, $2, 'N')
+       ) VALUES ('SYSTEM', 'system', '시스템관리자', $1, 'Y', 'SYSTEM', 'Y', 0, $2, $2, 'N')
        ON CONFLICT (company_id, id) DO NOTHING`,
       [hash, OP],
     );

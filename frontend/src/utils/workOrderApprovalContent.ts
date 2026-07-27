@@ -3,7 +3,7 @@ import {
   approvalHeading,
   approvalParagraph,
   approvalTable,
-} from './approvalContentBuilder';
+} from '../features/approval/approval-content';
 
 interface WorkOrderApprovalContentInput {
   woNo: string;

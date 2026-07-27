@@ -1,9 +1,16 @@
+import {
+  APPROVAL_RESULT,
+  APPROVAL_STEP_TYPE,
+  type ApprovalResult,
+  type ApprovalStepType,
+} from '../../../constants/approval';
+
 export interface ApprovalSignatureStep {
   stepNo: number;
   approverName: string;
   approverTitle: string | null;
-  approvalType: string;
-  approvalResult: string | null;
+  approvalType: ApprovalStepType;
+  approvalResult: ApprovalResult | null;
   comments?: string | null;
   actionAt?: string | null;
 }
@@ -17,8 +24,8 @@ const formatDateOnly = (value?: string | null) => {
 };
 
 const getResultSuffix = (result?: string | null) => {
-  if (result === 'Y') return '/결재';
-  if (result === 'N') return '/반려';
+  if (result === APPROVAL_RESULT.APPROVED) return '/결재';
+  if (result === APPROVAL_RESULT.REJECTED) return '/반려';
   return '';
 };
 
@@ -42,13 +49,13 @@ function SignatureGrid({
         {slots.map((step, index) => (
           <div key={step?.stepNo ?? `${label}-${index}`} className="min-w-0 border-r border-gray-400 text-center text-black last:border-r-0">
             <div className="min-h-6 border-b border-gray-300 bg-white px-1 py-1 text-[9px] font-semibold">
-              {step?.approverTitle || (step?.approvalType === 'D' ? '기안자' : '')}
+              {step?.approverTitle || (step?.approvalType === APPROVAL_STEP_TYPE.DRAFT ? '기안자' : '')}
             </div>
             <div className="min-h-8 border-b border-gray-300 px-1 py-2 text-[10px] font-bold">
               {step ? `${step.approverName}${getResultSuffix(step.approvalResult)}` : ''}
             </div>
             <div className="min-h-6 px-1 py-1 text-[9px] font-mono">
-              {step ? formatDateOnly(step.approvalType === 'D' ? (step.actionAt || drafterDate) : step.actionAt) : ''}
+              {step ? formatDateOnly(step.approvalType === APPROVAL_STEP_TYPE.DRAFT ? (step.actionAt || drafterDate) : step.actionAt) : ''}
             </div>
           </div>
         ))}
@@ -63,9 +70,17 @@ interface ApprovalSignatureBoxProps {
 }
 
 export default function ApprovalSignatureBox({ steps, drafterDate }: ApprovalSignatureBoxProps) {
-  const approvals = steps.filter((step) => step.approvalType === 'D' || step.approvalType === 'A').slice(0, 4);
-  const agreements = steps.filter((step) => step.approvalType === 'G').slice(0, 4);
-  const references = steps.filter((step) => step.approvalType === 'R');
+  const approvals = steps.filter(
+    (step) =>
+      step.approvalType === APPROVAL_STEP_TYPE.DRAFT
+      || step.approvalType === APPROVAL_STEP_TYPE.APPROVAL,
+  ).slice(0, 4);
+  const agreements = steps
+    .filter((step) => step.approvalType === APPROVAL_STEP_TYPE.AGREEMENT)
+    .slice(0, 4);
+  const references = steps.filter(
+    (step) => step.approvalType === APPROVAL_STEP_TYPE.REFERENCE,
+  );
 
   return (
     <div>

@@ -8,9 +8,9 @@
    - SHA-256 체크섬, path traversal 차단, MIME 화이트리스트 검증
    - 테넌트 격리: companyId 기준
    
-   Object Storage: Supabase Storage (S3 호환)
-   - endpoint override + forcePathStyle(true) → storage.config.ts 참조
-   - 환경변수 STORAGE_* 그대로 재활용 (cmms-agy와 동일)
+   Object Storage: S3 호환 공통 구현
+   - 개발 MinIO / 운영 Lightsail Object Storage
+   - 공급자별 연결 차이는 STORAGE_* 환경변수로 관리
    ========================================================================= */
 import {
   Injectable, Inject, BadRequestException, NotFoundException, ForbiddenException,
@@ -131,7 +131,7 @@ export class FileStorageService {
         const key = `${companyId}/${moduleSeg}/${gno}/${stored}`;
         const sha = createHash('sha256').update(file.buffer).digest('hex');
 
-        // 3. S3 업로드 (Supabase Storage S3 호환)
+        // 3. S3 호환 Object Storage 업로드
         // ChecksumAlgorithm 명시적 지정으로 SDK가 payload SHA256을 계산하여 서명
         await this.s3.send(new PutObjectCommand({
           Bucket: this.settings.bucket,

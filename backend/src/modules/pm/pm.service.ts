@@ -105,6 +105,7 @@ export class PmService {
     companyId: string,
     request: SavePmRecordDto,
     operator: string,
+    mode: 'create' | 'update',
   ): Promise<PmRecordResponseDto> {
     const { pmRecord, checkItems } = request;
     const plantId = this.requirePlantId(
@@ -115,6 +116,12 @@ export class PmService {
     await queryRunner.startTransaction();
 
     let pmId = pmRecord.id?.trim() || '';
+    if (mode === 'create' && pmId) {
+      throw new BadRequestException('신규 예방점검에는 문서번호를 지정할 수 없습니다.');
+    }
+    if (mode === 'update' && !pmId) {
+      throw new BadRequestException('수정할 예방점검 문서번호가 필요합니다.');
+    }
     try {
       const isNew = !pmId;
       const stage = (pmRecord.stepStage || 'R').toUpperCase();

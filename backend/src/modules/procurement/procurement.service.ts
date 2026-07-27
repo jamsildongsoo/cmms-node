@@ -233,6 +233,7 @@ export class ProcurementService {
     companyId: string,
     req: SaveRequest,
     operator: string,
+    mode: 'create' | 'update',
   ): Promise<PurchaseRequestResponse> {
     const { header, items = [] } = req;
     const user = await this.dataSource.getRepository(User).findOne({
@@ -249,6 +250,12 @@ export class ProcurementService {
     await runner.connect();
     await runner.startTransaction();
     let id = header.id?.trim() || '';
+    if (mode === 'create' && id) {
+      throw new BadRequestException('신규 구매요청에는 문서번호를 지정할 수 없습니다.');
+    }
+    if (mode === 'update' && !id) {
+      throw new BadRequestException('수정할 구매요청 문서번호가 필요합니다.');
+    }
     try {
       const repository = runner.manager.getRepository(PurchaseRequest);
       let entity: PurchaseRequest;
@@ -496,7 +503,7 @@ export class ProcurementService {
         throw new BadRequestException('동일 전표 내 거래 타입이 일관되지 않습니다.');
       }
       if (!requestId && history.refModule === AppModule.PUR) requestId = history.refNo;
-      const subsequent = await historyRepository.exist({
+      const subsequent = await historyRepository.exists({
         where: {
           companyId,
           warehouseId: history.warehouseId,

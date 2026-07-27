@@ -18,26 +18,6 @@ export interface JwtPayload {
   exp?: number;
 }
 
-/** 로그인 요청 */
-export interface LoginRequest {
-  companyId: string;
-  id: string;
-  password: string;
-}
-
-/** 회원가입 요청 */
-export interface SignUpRequest {
-  companyId: string;
-  id: string;
-  name: string;
-  password: string;
-  departmentId?: string;
-  email?: string;
-  phone?: string;
-  position?: string;
-  title?: string;
-}
-
 /**
  * 로그인 응답 — FE useAuthStore가 기대하는 정확한 구조
  * useAuthStore.ts:58-71 참조
@@ -58,21 +38,6 @@ export interface LoginResponse {
   mustChangePassword: boolean;
   passwordExpired: boolean;
   permissions: Record<string, { C: string; R: string; U: string; D: string; A: string }>;
-}
-
-/** 비밀번호 변경 요청 */
-export interface PasswordChangeRequest {
-  currentPassword: string;
-  newPassword: string;
-}
-
-/** 사용자 프로필 수정 요청 */
-export interface UserUpdateRequest {
-  name?: string;
-  email?: string;
-  phone?: string;
-  position?: string;
-  title?: string;
 }
 
 /** 사용자 프로필 응답 */

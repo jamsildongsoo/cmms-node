@@ -5,15 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# 1) .env 로드 (npm/vite은 .env 자동 로드 안 함; DB_URL의 '&' 안전 위해 source 대신 line-read)
-if [ -f .env ]; then
-  set -a
-  while IFS='=' read -r key val; do
-    case "$key" in ''|\#*) continue ;; esac
-    export "$key=$val"
-  done < .env
-  set +a
-fi
+# NestJS와 Docker Compose가 루트 .env를 직접 읽는다.
 export NODE_ENV="${NODE_ENV:-development}"
 
 # 2) 백엔드 의존성 보장
@@ -22,8 +14,8 @@ export NODE_ENV="${NODE_ENV:-development}"
 # 3) 프론트 의존성 보장
 [ -d frontend/node_modules ] || ( echo "▶ npm install (frontend)"; cd frontend && npm install )
 
-# 4) nginx 프록시(컨테이너) 기동
-echo "▶ nginx 프록시 (docker compose dev)"
+# 4) PostgreSQL·MinIO·nginx 개발 인프라 기동
+echo "▶ PostgreSQL·MinIO·nginx (docker compose dev)"
 docker compose -f docker-compose.dev.yml up -d
 
 # 5) BE/FE를 각자 프로세스그룹으로 백그라운드 기동 (그룹 단위로 깔끔히 종료하기 위함)

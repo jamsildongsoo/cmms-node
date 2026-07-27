@@ -2,11 +2,23 @@ import {
   Wrench, Package, ClipboardList, FileSignature,
   Layers, Bell, User, LayoutDashboard, ShieldCheck, ShoppingCart, PackageCheck
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
+}
+
+interface SidebarItem {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+interface SidebarSection {
+  category: string;
+  items: SidebarItem[];
 }
 
 export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
@@ -15,7 +27,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const canManagePurchase = user?.permissions?.PUR?.A === 'Y';
   const canReceivePurchase = user?.permissions?.STK?.C === 'Y';
 
-  const menuItems: any[] = [
+  const menuItems: SidebarSection[] = [
     { 
       category: '기준 정보', 
       items: [
@@ -61,14 +73,12 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   return (
     <aside className="w-56 bg-slate-900 border-r border-slate-800 text-slate-300 flex flex-col shrink-0 print:hidden">
       <nav className="flex-1 overflow-y-auto p-3 space-y-5 pt-4">
-        {menuItems.map((item, idx) => {
-          if ('category' in item) {
-            return (
-              <div key={idx} className="space-y-0.5">
+        {menuItems.map((item) => (
+              <div key={item.category} className="space-y-0.5">
                 <span className="px-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">
                   {item.category}
                 </span>
-                {item.items?.map((subItem: any) => {
+                {item.items.map((subItem) => {
                   const Icon = subItem.icon;
                   const isActive = activeTab === subItem.id;
                   return (
@@ -87,26 +97,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
                   );
                 })}
               </div>
-            );
-          } else {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer outline-none border-0 ${
-                  isActive 
-                    ? 'bg-blue-600/10 text-blue-400 border-l-2 border-blue-500 pl-2.5' 
-                    : 'hover:bg-slate-800 hover:text-slate-200'
-                }`}
-              >
-                <Icon size={15} />
-                {item.label}
-              </button>
-            );
-          }
-        })}
+        ))}
       </nav>
     </aside>
   );

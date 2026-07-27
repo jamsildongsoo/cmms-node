@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { toast } from 'sonner';
 import axiosInstance from '../api/axios';
+import { getApiErrorMessage } from '../utils/apiError';
 
 interface User {
   companyId: string;
@@ -38,7 +39,7 @@ interface AuthState {
   token: string | null;
   expiresAt: number | null; // 절대 만료시각(ms). 새로고침 후 남은시간 재계산 기준
   timeRemaining: number;
-  timerId: any | null;
+  timerId: ReturnType<typeof setInterval> | null;
   error: string | null;
   activePlantId: string | null;  // 멀티 사용자가 선택한 활성 플랜트(null=전체)
   login: (companyId: string, id: string, password: string) => Promise<boolean>;
@@ -89,9 +90,8 @@ export const useAuthStore = create<AuthState>()(
 
           axiosInstance.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 
-          if (get().timerId) {
-            clearInterval(get().timerId);
-          }
+          const existingTimer = get().timerId;
+          if (existingTimer !== null) clearInterval(existingTimer);
 
           const timerId = setInterval(() => {
             get().decrementTimer();
@@ -107,17 +107,16 @@ export const useAuthStore = create<AuthState>()(
           });
 
           return true;
-        } catch (err: any) {
-          const errMsg = err.response?.data?.message || '로그인에 실패했습니다. 입력 정보를 확인하세요.';
+        } catch (err: unknown) {
+          const errMsg = getApiErrorMessage(err, '로그인에 실패했습니다. 입력 정보를 확인하세요.');
           set({ error: errMsg });
           return false;
         }
       },
 
       logout: () => {
-        if (get().timerId) {
-          clearInterval(get().timerId);
-        }
+        const existingTimer = get().timerId;
+        if (existingTimer !== null) clearInterval(existingTimer);
         delete axiosInstance.defaults.headers.common['Authorization'];
         set({
           user: null,
@@ -134,10 +133,10 @@ export const useAuthStore = create<AuthState>()(
         try {
           set({ error: null });
           await axiosInstance.post('/auth/signup', signUpData);
-        } catch (err: any) {
-          const errMsg = err.response?.data?.message || '회원가입에 실패했습니다.';
+        } catch (err: unknown) {
+          const errMsg = getApiErrorMessage(err, '회원가입에 실패했습니다.');
           set({ error: errMsg });
-          throw new Error(errMsg);
+          throw new Error(errMsg, { cause: err });
         }
       },
 
@@ -161,7 +160,7 @@ export const useAuthStore = create<AuthState>()(
             expiresAt: Date.now() + SESSION_MS,
             timeRemaining: 1800,
           });
-        } catch (err: any) {
+        } catch (err: unknown) {
           console.error('Session extension failed', err);
           get().logout();
         }
@@ -206,7 +205,8 @@ export const useAuthStore = create<AuthState>()(
           return;
         }
         axiosInstance.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-        if (get().timerId) clearInterval(get().timerId);
+        const existingTimer = get().timerId;
+        if (existingTimer !== null) clearInterval(existingTimer);
         const timerId = setInterval(() => get().decrementTimer(), 1000);
         set({ timeRemaining: Math.floor((expiresAt - Date.now()) / 1000), timerId });
       },

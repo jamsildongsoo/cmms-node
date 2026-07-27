@@ -9,11 +9,11 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
 import {
-  LoginRequest,
-  SignUpRequest,
-  PasswordChangeRequest,
-  UserUpdateRequest,
-} from './auth.interfaces';
+  LoginRequestDto,
+  PasswordChangeRequestDto,
+  SignUpRequestDto,
+  UserUpdateRequestDto,
+} from './dto/auth-request.dto';
 import { JwtPayload } from './auth.interfaces';
 
 @Controller('api/auth')
@@ -22,13 +22,13 @@ export class AuthController {
 
   /** POST /api/auth/login */
   @Post('login')
-  async login(@Body() body: LoginRequest, @Ip() ip: string) {
+  async login(@Body() body: LoginRequestDto, @Ip() ip: string) {
     return this.authService.login(body, ip);
   }
 
   /** POST /api/auth/signup */
   @Post('signup')
-  async signUp(@Body() body: SignUpRequest) {
+  async signUp(@Body() body: SignUpRequestDto) {
     await this.authService.signUp(body);
     return '회원가입 신청이 완료되었습니다. 관리자 승인 후 로그인할 수 있습니다.';
   }
@@ -57,7 +57,7 @@ export class AuthController {
   @Put('me')
   async updateMe(
     @Request() req: { user: JwtPayload },
-    @Body() body: UserUpdateRequest,
+    @Body() body: UserUpdateRequestDto,
   ) {
     await this.authService.updateMyProfile(req.user.companyId, req.user.userId, body);
     return '사용자 정보가 수정되었습니다.';
@@ -68,7 +68,7 @@ export class AuthController {
   @Put('me/password')
   async changePassword(
     @Request() req: { user: JwtPayload },
-    @Body() body: PasswordChangeRequest,
+    @Body() body: PasswordChangeRequestDto,
   ) {
     await this.authService.changePassword(req.user.companyId, req.user.userId, body);
     return '비밀번호가 수정되었습니다.';

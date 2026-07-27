@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import { useThemeStore } from '../store/useThemeStore';
-import axiosInstance from '../api/axios';
+import { referenceApi } from '../features/mdm/reference.api';
 import { LogOut, Clock, RefreshCw, UserCheck, Sun, Moon, Building2 } from 'lucide-react';
+import SessionExpiryNotice from '../features/auth/components/SessionExpiryNotice';
 
 interface PlantOption { id: string; name: string }
 
@@ -15,8 +16,8 @@ export default function Header() {
   const [plants, setPlants] = useState<PlantOption[]>([]);
   useEffect(() => {
     if (user?.multiPlant === 'Y') {
-      axiosInstance.get('/mdm/plants')
-        .then(res => setPlants(res.data || []))
+      referenceApi.getPlants()
+        .then(setPlants)
         .catch(() => setPlants([]));
     }
   }, [user?.multiPlant]);
@@ -106,6 +107,14 @@ export default function Header() {
           로그아웃
         </button>
       </div>
+
+      {timeRemaining > 0 && timeRemaining <= 180 && (
+        <SessionExpiryNotice
+          remainingSeconds={timeRemaining}
+          onExtend={extendSession}
+          onLogout={logout}
+        />
+      )}
     </header>
   );
 }

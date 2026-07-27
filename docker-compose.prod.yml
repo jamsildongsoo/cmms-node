@@ -1,20 +1,37 @@
-# 운영 배포 (B안: 레지스트리 pull). 이미지는 CI에서 빌드/푸시하고, 서버는 pull만 한다.
-#   배포: docker compose -f docker-compose.prod.yml pull \
-#         && docker compose -f docker-compose.prod.yml up -d
-#   필요한 운영 키: IMAGE_REGISTRY, IMAGE_TAG(선택), DB_*, JWT_SECRET (+ 첨부 쓰면 STORAGE_*)
-#   DB·Object Storage는 외부(Supabase). 루트 .env로 주입 — 이미지엔 굽지 않는다.
-#   키 목록은 .env.template 참고. 운영 서버의 .env는 별도로 관리하고 커밋하지 않는다.
-#   (소스에서 직접 빌드하려면 docker-compose.prod.build.yml 같은 별도 파일로 분리 권장)
+# Lightsail 운영 구성. API/Web 이미지는 GHCR에서 받고 PostgreSQL은 같은 인스턴스에서 실행한다.
+# DB 데이터는 /var/lib/cmms/postgres에, 첨부파일은 외부 Object Storage에 둔다.
 services:
+  db:
+    image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+    container_name: cmms-node-db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-cmms}
+      POSTGRES_USER: ${DB_USERNAME:-cmms}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
+    volumes:
+      - "${CMMS_DATA_ROOT:-/var/lib/cmms}/postgres:/var/lib/postgresql/data"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-cmms} -d ${DB_NAME:-cmms}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
   api:
-    image: "${IMAGE_REGISTRY:?IMAGE_REGISTRY must be set, e.g. ghcr.io/your-org}/cmms-node-api:${IMAGE_TAG:-latest}"
+    image: "${IMAGE_REGISTRY:?IMAGE_REGISTRY must be set}/cmms-node-api:${IMAGE_TAG:-latest}"
     container_name: cmms-node-api
     env_file: .env
     environment:
       NODE_ENV: production
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_SSL: "false"
       DB_SYNCHRONIZE: "false"
     expose:
-      - "8080"          # 외부 노출 없이 web(nginx)만 접근
+      - "8080"
+    depends_on:
+      db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "require('net').connect(8080, '127.0.0.1')"]
       interval: 10s
@@ -24,7 +41,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: "${IMAGE_REGISTRY:?IMAGE_REGISTRY must be set, e.g. ghcr.io/your-org}/cmms-node-web:${IMAGE_TAG:-latest}"
+    image: "${IMAGE_REGISTRY:?IMAGE_REGISTRY must be set}/cmms-node-web:${IMAGE_TAG:-latest}"
     container_name: cmms-node-web
     ports:
       - "80:8080"

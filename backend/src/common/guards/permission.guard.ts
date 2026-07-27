@@ -20,9 +20,12 @@ export const PERMISSION_KEY = 'permission';
 export const Permission = (module: AppModule, action: PermAction) =>
   SetMetadata(PERMISSION_KEY, { module, action });
 
-/** checkSave: C 권한 필수, status='S'면 A 권한도 필수 (결재 우회 확정) */
-export const PermissionSave = (module: AppModule, statusParam?: string) =>
-  SetMetadata(PERMISSION_KEY, { module, action: 'C', saveMode: true, statusParam });
+/** 저장 권한(C/U)을 검사하고 status='S'면 직접확정 A 권한도 추가로 검사한다. */
+export const PermissionSave = (
+  module: AppModule,
+  statusParam?: string,
+  action: Extract<PermAction, 'C' | 'U'> = 'C',
+) => SetMetadata(PERMISSION_KEY, { module, action, saveMode: true, statusParam });
 
 const ACTION_LABEL: Record<PermAction, string> = {
   C: '등록',

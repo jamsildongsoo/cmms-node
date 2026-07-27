@@ -2,117 +2,42 @@ import { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
-import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import { getCommonStatusLabel as getStatusLabel } from '../constants/status';
+import { APP_MODULE } from '../constants/module';
 import { formatDateTime, nowLocalInput, utcToInput, inputToUtc } from '../utils/datetime';
 import { getApiErrorMessage } from '../utils/apiError';
 import PrintHeader from '../components/PrintHeader';
 import WorkPermitPrint from '../components/WorkPermitPrint';
 import PrintWindowLayout from '../components/PrintWindowLayout';
 import { openPrintWindow } from '../utils/printWindow';
-import ApprovalDraftModal from '../components/ApprovalDraftModal';
+import { openListPrint } from '../utils/listPrint';
+import ApprovalDraftModal from '../features/approval/components/ApprovalDraftModal';
 import ListIconButton from '../components/ListIconButton';
 import type { RichTextDocument } from '../types/richText';
 import { createWorkPermitApprovalContent } from '../utils/workPermitApprovalContent';
-import { loadApprovalSignatureSteps } from '../utils/approvalSignature';
-import { 
-  ClipboardList, Edit2, Trash2, Printer, X, Plus, CheckSquare, Square, ChevronDown, ChevronUp 
+import { loadApprovalSignatureSteps } from '../features/approval/approval-signature';
+import type {
+  WorkPermit as WorkPermitModel,
+  WorkPermitCheckItem as CheckItem,
+} from '../features/work-permit/work-permit.types';
+import { workPermitApi } from '../features/work-permit/work-permit.api';
+import { workOrderApi } from '../features/work-order/work-order.api';
+import { referenceApi } from '../features/mdm/reference.api';
+import { masterReferenceApi } from '../features/master/master-reference.api';
+import {
+  INITIAL_CONFINED,
+  INITIAL_ELECTRIC,
+  INITIAL_EXCAVATION,
+  INITIAL_FIRE,
+  INITIAL_GENERAL,
+  INITIAL_HEAVY_LOAD,
+  INITIAL_HIGH_PLACE,
+  parseCheckItems,
+} from '../features/work-permit/work-permit.defaults';
+import {
+  ClipboardList, Edit2, Trash2, Printer, X, Plus, CheckSquare, Square, ChevronDown, ChevronUp
 } from 'lucide-react';
-
-interface WorkPermitModel {
-  id: string;
-  plantId: string;
-  equipmentId: string;
-  workOrderId: string | null;
-  title: string;
-  stepStage: string; // P: 계획, R: 실적
-  permitTypeCodes: string; // GENERAL, FIRE 등 쉼표 구분
-  startAt: string | null;
-  endAt: string | null;
-  departmentId: string;
-  supervisorId: string;
-  workSummary: string | null;
-  riskFactors: string | null;
-  safetyMeasures: string | null;
-  jsonGeneral: string | CheckItem[] | null;
-  jsonFire: string | CheckItem[] | null;
-  jsonConfined: string | CheckItem[] | null;
-  jsonElectric: string | CheckItem[] | null;
-  jsonHighPlace: string | CheckItem[] | null;
-  jsonExcavation: string | CheckItem[] | null;
-  jsonHeavyLoad: string | CheckItem[] | null;
-  remarks: string | null;
-  fileGroupId: number | null;
-  refNo: string | null;
-  refModule: string | null;
-  approvalId: string | null;
-  status: string; // T, S, P, C, R, X
-  createdAt?: string | null;
-  createdBy?: string | null;
-}
-
-interface CheckItem {
-  question: string;
-  checked: boolean;
-  remarks: string;
-}
-
-const INITIAL_GENERAL: CheckItem[] = [
-  { question: '안전모, 안전화, 안전장갑 등 작업자 보호구 착용이 완료되었는가?', checked: false, remarks: '' },
-  { question: '작업 구역 주변 안전 표지판 및 바리케이드를 설치하였는가?', checked: false, remarks: '' },
-  { question: '작업 전 위험성 평가 및 현장 TBM(Tool Box Meeting)을 통해 안전 교육을 실시하였는가?', checked: false, remarks: '' }
-];
-
-const INITIAL_FIRE: CheckItem[] = [
-  { question: '작업 장소 반경 11m 이내 가연성/인화성 물질을 제거 또는 방화막으로 격리하였는가?', checked: false, remarks: '' },
-  { question: '현장 내 소화기를 적정 수량 비치하고 즉시 사용 가능 상태인가?', checked: false, remarks: '' },
-  { question: '작업 중 불꽃 비산 방지포 설치 및 화재감시자를 별도 지정 배치하였는가?', checked: false, remarks: '' }
-];
-
-const INITIAL_CONFINED: CheckItem[] = [
-  { question: '진입 전 밀폐공간 내 산소 및 유해가스 농도를 측정 완료하였는가?', checked: false, remarks: '' },
-  { question: '작업 중 공기 배출 및 급기를 위해 송풍기를 지속 운전 중인가?', checked: false, remarks: '' },
-  { question: '외부 감시인을 배치하고 비상 통신 장비 및 인명 구조용 장비를 갖추었는가?', checked: false, remarks: '' }
-];
-
-const INITIAL_ELECTRIC: CheckItem[] = [
-  { question: '해당 선로의 전원 차단 후 LOTO(Lock-Out, Tag-Out) 잠금장치 및 꼬리표를 부착했는가?', checked: false, remarks: '' },
-  { question: '검전기를 사용하여 무전압 상태임을 확인하였는가?', checked: false, remarks: '' },
-  { question: '절연 보호구 및 절연 공구류를 점검 후 사용 중인가?', checked: false, remarks: '' }
-];
-
-const INITIAL_HIGH_PLACE: CheckItem[] = [
-  { question: '높이 2m 이상 고소 작업으로 안전대 부착 설비에 안전줄을 견고히 체결했는가?', checked: false, remarks: '' },
-  { question: '비계, 사다리, 고소작업대 등 발판의 안전성(아웃트리거 고정 등)을 점검했는가?', checked: false, remarks: '' },
-  { question: '하부 낙하물 방지망 설치 또는 안전 통제 구역을 설정하여 신호수를 배치했는가?', checked: false, remarks: '' }
-];
-
-const INITIAL_EXCAVATION: CheckItem[] = [
-  { question: '굴착 지역 내 지하 매설물(가스관, 전기선, 배관 등) 여부를 현장 조사 및 확인했는가?', checked: false, remarks: '' },
-  { question: '굴착 사면의 붕괴 방지를 위해 흙막이 지보공을 설치하고 안전 구배를 준수하는가?', checked: false, remarks: '' },
-  { question: '굴착 주변에 장비 진입 차단 펜스 및 안내 표지를 배치했는가?', checked: false, remarks: '' }
-];
-
-const INITIAL_HEAVY_LOAD: CheckItem[] = [
-  { question: '크레인/이동식 크레인 등 양중 장비의 정격 하중 및 안전 장치 정상 여부를 확인했는가?', checked: false, remarks: '' },
-  { question: '인양용 줄걸이 와이어 로프, 슬링 벨트의 소선 단선 또는 균열이 없는지 점검했는가?', checked: false, remarks: '' },
-  { question: '양중 작업 반경 내 일반인의 진입을 철저히 차단하고 신호수를 배치했는가?', checked: false, remarks: '' }
-];
-
-const parseCheckItems = (
-  value: string | CheckItem[] | null | undefined,
-  fallback: CheckItem[],
-): CheckItem[] => {
-  if (Array.isArray(value)) return value;
-  if (!value) return fallback;
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed as CheckItem[] : fallback;
-  } catch {
-    return fallback;
-  }
-};
 
 export default function WorkPermit() {
   const user = useAuthStore((s) => s.user);
@@ -129,7 +54,7 @@ export default function WorkPermit() {
 
   // Form states
   const [isFormOpen, setIsFormOpen] = useState(false);
-  
+
   // Fields for WorkPermit
   const [wpNo, setWpNo] = useState('');
   const [plantId, setPlantId] = useState('');
@@ -180,7 +105,12 @@ export default function WorkPermit() {
     content: RichTextDocument;
   } | null>(null);
 
-  const canDirectConfirm = user?.permissions?.WP?.A === 'Y';
+  const permission = user?.permissions?.[APP_MODULE.WP];
+  const canCreate = permission?.C === 'Y';
+  const canUpdate = permission?.U === 'Y';
+  const canDelete = permission?.D === 'Y';
+  const canDirectConfirm = permission?.A === 'Y';
+  const canSave = wpNo ? canUpdate : canCreate;
   const currentPermits = permits.filter((permit) =>
     activeTab === 'plans' ? permit.stepStage === 'P' : permit.stepStage === 'R',
   );
@@ -192,27 +122,32 @@ export default function WorkPermit() {
         params.set('searchType', searchType);
         params.set('searchValue', searchValue);
       }
-      const [wpRes, eqRes, deptRes, userRes, woRes] = await Promise.all([
-        axiosInstance.get(`/work-permit?${params.toString()}`),
-        axiosInstance.get('/master/equipments'),
-        axiosInstance.get('/mdm/departments'),
-        axiosInstance.get('/mdm/users'),
-        axiosInstance.get('/work-order')
+      const [loadedPermits, loadedEquipments, loadedDepartments, loadedUsers, loadedWorkOrders] = await Promise.all([
+        workPermitApi.getAll(params),
+        masterReferenceApi.getEquipments(),
+        referenceApi.getDepartments(),
+        referenceApi.getUsers(),
+        workOrderApi.getAll(),
       ]);
-      setPermits((wpRes.data || []).map((permit: WorkPermitModel & { step_stage?: string }) => ({
+      setPermits((loadedPermits || []).map((permit: WorkPermitModel & { step_stage?: string }) => ({
         ...permit,
         stepStage: permit.stepStage || permit.step_stage || 'P',
       })));
-      setEquipments(eqRes.data);
-      setDepts(deptRes.data);
-      setUsersList(userRes.data);
-      setWorkOrders(woRes.data);
+      setEquipments(loadedEquipments);
+      setDepts(loadedDepartments);
+      setUsersList(loadedUsers);
+      setWorkOrders(loadedWorkOrders);
     } catch (err) {
       toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  // 검색 실행은 버튼이 담당하므로 최초 진입 시에만 자동 조회한다.
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void fetchData(); }, 0);
+    return () => window.clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const toggleAccordion = (type: string) => {
     setAccordionOpen(prev => ({ ...prev, [type]: !prev[type] }));
@@ -220,7 +155,7 @@ export default function WorkPermit() {
 
   const handleTypeToggle = (type: string) => {
     if (type === 'GENERAL') return; // GENERAL cannot be toggled off
-    
+
     let updated;
     if (selectedTypes.includes(type)) {
       updated = selectedTypes.filter(t => t !== type);
@@ -232,7 +167,12 @@ export default function WorkPermit() {
     setSelectedTypes(updated);
   };
 
-  const handleCheckChange = (type: string, idx: number, field: 'checked' | 'remarks', val: any) => {
+  const handleCheckChange = (
+    type: string,
+    idx: number,
+    field: 'checked' | 'remarks',
+    val: boolean | string,
+  ) => {
     const updater = (prev: CheckItem[]) => prev.map((item, i) => i === idx ? { ...item, [field]: val } : item);
     switch (type) {
       case 'GENERAL': setGenChecks(updater); break;
@@ -287,9 +227,8 @@ export default function WorkPermit() {
   const handleOpenEdit = async (wp: WorkPermitModel) => {
     setIsLoading(true);
     try {
-      const res = await axiosInstance.get(`/work-permit/details?plantId=${wp.plantId}&id=${wp.id}`);
-      const w = res.data;
-      
+      const w = await workPermitApi.getDetail(wp.plantId, wp.id);
+
       const matchedEq = equipments.find(e => e.id === w.equipmentId);
       setEquipmentName(matchedEq ? matchedEq.name : w.equipmentId);
 
@@ -346,7 +285,7 @@ export default function WorkPermit() {
   const handleDelete = async (wp: WorkPermitModel) => {
     if (!(await requestConfirmation('정말 이 작업허가서를 삭제하시겠습니까?'))) return;
     try {
-      await axiosInstance.delete(`/work-permit?plantId=${wp.plantId}&id=${wp.id}`);
+      await workPermitApi.delete(wp.plantId, wp.id);
       toast.success('작업허가서가 삭제되었습니다.');
       fetchData();
     } catch (err) {
@@ -391,9 +330,11 @@ export default function WorkPermit() {
         status: saveStatus
       };
 
-      const response = await axiosInstance.post('/work-permit', payload);
+      const saved = wpNo
+        ? await workPermitApi.update(payload)
+        : await workPermitApi.create(payload);
       if (submitStatus === 'P') {
-        const savedId = response.data.id;
+        const savedId = saved.id;
         setWpNo(savedId);
         const checksheetMap = [
           { id: 'GENERAL', name: '일반위험작업 체크시트', items: genChecks },
@@ -410,13 +351,13 @@ export default function WorkPermit() {
           content: createWorkPermitApprovalContent({
             wpNo: savedId,
             statusLabel: getStatusLabel('P'),
-            createdAt: response.data.createdAt
-              ? formatDateTime(response.data.createdAt).slice(0, 10)
+            createdAt: saved.createdAt
+              ? formatDateTime(saved.createdAt).slice(0, 10)
               : '-',
             departmentName: depts.find((dept) => dept.id === departmentId)?.name || departmentId,
             authorName:
-              usersList.find((candidate) => candidate.id === response.data.createdBy)?.name
-              || response.data.createdBy
+              usersList.find((candidate) => candidate.id === saved.createdBy)?.name
+              || saved.createdBy
               || user?.name
               || '-',
             equipmentName: `${equipmentId} / ${equipmentName || equipmentId}`,
@@ -477,7 +418,7 @@ export default function WorkPermit() {
     }
     const { printWindow, container } = printTarget;
     try {
-      const { data } = await axiosInstance.get(`/work-permit/details?plantId=${wp.plantId}&id=${wp.id}`);
+      const data = await workPermitApi.getDetail(wp.plantId, wp.id);
       const detail = { ...wp, ...data } as WorkPermitModel;
       const types = detail.permitTypeCodes.split(',');
       const approvalSteps = await loadApprovalSignatureSteps(detail.approvalId, usersList);
@@ -526,51 +467,26 @@ export default function WorkPermit() {
 
   const handlePrint = () => {
     if (currentPermits.length === 0) { toast.error('인쇄할 목록이 없습니다.'); return; }
-    const user = useAuthStore.getState().user;
     const now = new Date();
     const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
-
-    const printWindow = window.open('', '_blank', 'width=1200,height=800');
-    if (!printWindow) { toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.'); return; }
-
-    const rows = currentPermits.map(wp => `
-      <tr>
-        <td class="mono">${wp.id}</td>
-        <td>${wp.title}</td>
-        <td>${equipments.find(e => e.id === wp.equipmentId)?.name || wp.equipmentId}</td>
-        <td>${usersList.find(u => u.id === wp.createdBy)?.name || wp.createdBy || '-'}</td>
-        <td>${usersList.find(u => u.id === wp.supervisorId)?.name || wp.supervisorId}</td>
-        <td>${formatDateTime(wp.startAt)}</td>
-        <td>${formatDateTime(wp.endAt)}</td>
-      </tr>
-    `).join('');
-
-    printWindow.document.title = '안전작업허가서 목록 - 인쇄';
-    printWindow.document.write(`<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>안전작업허가서 목록 - 인쇄</title>
-<style>
-@page { size: A4 landscape; margin: 10mm 10mm 14mm 10mm; }
-* { margin:0; padding:0; box-sizing:border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #000; padding: 10mm; }
-h1 { text-align: center; font-size: 14pt; margin-bottom: 4mm; border-bottom: 2px solid #000; padding-bottom: 3mm; }
-.print-info { display: flex; justify-content: space-between; font-size: 8pt; color: #666; border-bottom: 1px solid #ccc; padding-bottom: 2mm; margin-bottom: 4mm; }
-table { width: 100%; border-collapse: collapse; font-size: 8pt; }
-th, td { border: 1px solid #333; padding: 4px 6px; text-align: center; }
-th { background: #eee; font-weight: 600; }
-.mono { font-family: monospace; }
-.no-print { text-align: right; margin-bottom: 12px; }
-.no-print button { padding: 8px 20px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 10pt; }
-@media print { .no-print { display: none; } }
-</style></head><body>
-<div class="no-print"><button onclick="window.print()">인쇄</button></div>
-<div class="print-info"><span>회사: ${user?.companyName || user?.companyId || 'CMMS'}</span><span>출력자: ${user?.name || '-'} | 출력일시: ${stamp}</span></div>
-<h1>안전작업허가서 현황</h1>
-<table><thead><tr>
-<th>허가번호</th><th>허가명</th><th>설비명</th><th>담당자</th><th>감독자</th><th>시작 시간</th><th>종료 시간</th>
-</tr></thead><tbody>${rows}</tbody></table>
-</body></html>`);
-    printWindow.document.close();
-    printWindow.focus();
+    const opened = openListPrint({
+      title: '안전작업허가서 현황',
+      rows: currentPermits,
+      getRowKey: (permit) => permit.id,
+      companyName: user?.companyName || user?.companyId || 'CMMS',
+      printerName: user?.name || '-',
+      printedAt: stamp,
+      columns: [
+        { header: '허가번호', render: (permit) => permit.id, className: 'font-mono' },
+        { header: '허가명', render: (permit) => permit.title },
+        { header: '설비명', render: (permit) => equipments.find((item) => item.id === permit.equipmentId)?.name || permit.equipmentId },
+        { header: '담당자', render: (permit) => usersList.find((item) => item.id === permit.createdBy)?.name || permit.createdBy || '-' },
+        { header: '감독자', render: (permit) => usersList.find((item) => item.id === permit.supervisorId)?.name || permit.supervisorId },
+        { header: '시작 시간', render: (permit) => formatDateTime(permit.startAt) },
+        { header: '종료 시간', render: (permit) => formatDateTime(permit.endAt) },
+      ],
+    });
+    if (!opened) toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
   };
 
   const checksheets = [
@@ -604,13 +520,13 @@ th { background: #eee; font-weight: 600; }
             목록 인쇄
           </button>
 
-          <button
+          {canCreate && <button
             onClick={handleOpenCreate}
             className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors border-0 cursor-pointer shadow-lg shadow-blue-900/20"
           >
             <Plus size={14} />
             입력
-          </button>
+          </button>}
           <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg">
             <button
               onClick={() => setActiveTab('plans')}
@@ -697,7 +613,7 @@ th { background: #eee; font-weight: 600; }
                     <td className="p-3 font-mono text-slate-400">{formatDateTime(wp.startAt)}</td>
                     <td className="p-3 font-mono text-slate-400">{formatDateTime(wp.endAt)}</td>
                     <td className="p-3 text-right space-x-2 print:hidden">
-                      {['T', 'R'].includes(wp.status) && (
+                      {canUpdate && ['T', 'R'].includes(wp.status) && (
                         <ListIconButton
                           onClick={() => handleOpenEdit(wp)}
                           label="상세/수정"
@@ -705,7 +621,7 @@ th { background: #eee; font-weight: 600; }
                           tone="accent"
                         />
                       )}
-                      {wp.status === 'T' && (
+                      {canDelete && wp.status === 'T' && (
                           <ListIconButton
                             onClick={() => handleDelete(wp)}
                             label="삭제"
@@ -882,8 +798,8 @@ th { background: #eee; font-weight: 600; }
                                   disabled={isGeneral}
                                   onClick={() => handleTypeToggle(type)}
                                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-                                    isSelected 
-                                      ? 'bg-blue-600/10 text-blue-400 border-blue-600/30' 
+                                    isSelected
+                                      ? 'bg-blue-600/10 text-blue-400 border-blue-600/30'
                                       : 'bg-slate-900 text-slate-500 border-slate-800 hover:text-slate-300 hover:border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed print:border-slate-300 print:text-slate-700'
                                   }`}
                                 >
@@ -950,15 +866,15 @@ th { background: #eee; font-weight: 600; }
                 {checksheets.map(({ id: typeId, name: sheetName, state: checkState }) => {
                   const isSelected = selectedTypes.includes(typeId);
                   const isExpanded = accordionOpen[typeId];
-                  
+
                   if (!isSelected && !isFormOpen) return null; // Only show active sheets in print/display
 
                   return (
-                    <div 
-                      key={typeId} 
+                    <div
+                      key={typeId}
                       className={`border rounded-xl overflow-hidden transition-all duration-200 ${
-                        isSelected 
-                          ? 'border-slate-800 bg-slate-950/10' 
+                        isSelected
+                          ? 'border-slate-800 bg-slate-950/10'
                           : 'border-slate-900 bg-slate-950/5 opacity-40 print:hidden'
                       } print:border-slate-300 print:bg-white print:rounded-none print:opacity-100 print:break-before-page`}
                     >
@@ -1035,21 +951,21 @@ th { background: #eee; font-weight: 600; }
                 >
                   닫기
                 </button>
-                <button
+                {canSave && <button
                   onClick={() => handleSave('T')}
                   disabled={isLoading}
                   className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-750 rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
                 >
                   임시 저장
-                </button>
-                <button
+                </button>}
+                {canSave && <button
                   onClick={() => handleSave('P')}
                   disabled={isLoading}
                   className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer border-0 disabled:opacity-50"
                 >
                   결재 상신
-                </button>
-                {canDirectConfirm && (
+                </button>}
+                {canSave && canDirectConfirm && (
                   <button
                     onClick={() => handleSave('S')}
                     disabled={isLoading}
@@ -1066,7 +982,7 @@ th { background: #eee; font-weight: 600; }
       <ApprovalDraftModal
         open={!!approvalRef}
         mode="linked"
-        refModule="WP"
+        refModule={APP_MODULE.WP}
         refNo={approvalRef?.refNo || ''}
         defaultTitle={approvalRef?.title || ''}
         defaultContent={approvalRef?.content}

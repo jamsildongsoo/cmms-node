@@ -1,6 +1,6 @@
 # 빌드 컨텍스트 = 레포 루트 (docker/nginx/prod.conf 접근 위해). docker-compose.prod.yml 참조.
 # ===== build =====
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 COPY frontend/package*.json ./
 RUN npm ci
@@ -12,7 +12,7 @@ RUN find dist -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -nam
     -exec sh -c 'gzip -9 -c "$1" > "$1.gz"' _ {} \;
 
 # ===== serve (nginx + 정적 React) =====
-FROM nginxinc/nginx-unprivileged:1.25-alpine
+FROM nginxinc/nginx-unprivileged:1.29-alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY docker/nginx/prod.conf /etc/nginx/conf.d/default.conf
 EXPOSE 8080

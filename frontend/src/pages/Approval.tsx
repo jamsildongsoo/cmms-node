@@ -3,70 +3,47 @@ import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
 import axiosInstance from '../api/axios';
 import { formatDateTime } from '../utils/datetime';
-import RichTextViewer from '../components/RichTextViewer';
-import FileUpload from '../components/FileUpload';
 import { getApiErrorMessage } from '../utils/apiError';
 import { useAuthStore } from '../store/useAuthStore';
-import ApprovalDraftModal from '../components/ApprovalDraftModal';
+import ApprovalDraftModal from '../features/approval/components/ApprovalDraftModal';
 import ApprovalDocPrint, {
-  type ApprovalDocumentAttachment,
   type ApprovalDocumentStep,
-} from '../components/ApprovalDocPrint';
+} from '../features/approval/components/ApprovalDocPrint';
 import PrintWindowLayout from '../components/PrintWindowLayout';
 import { openPrintWindow } from '../utils/printWindow';
 import {
-  isRichTextEmpty,
-  type RichTextDocument,
-} from '../types/richText';
-import {
-  getCommonStatusLabel as getStatusLabel,
-  getStepTypeLabel,
-} from '../constants/status';
+  ACTIONABLE_APPROVAL_STEP_TYPES,
+  APPROVAL_ACTION,
+} from '../constants/approval';
+import { DOC_STATUS, getCommonStatusLabel as getStatusLabel } from '../constants/status';
+import { approvalApi } from '../features/approval/approval.api';
+import type {
+  ApprovalDocument,
+  ApprovalInbox,
+  ApprovalStep,
+  ApprovalUser,
+} from '../features/approval/approval.types';
+import { fileApi } from '../features/files/file.api';
+import type { FileItem } from '../features/files/file.types';
+import { downloadBlob } from '../features/files/file.utils';
 import {
   FileSignature, Check, X, Printer, Pencil, Plus
 } from 'lucide-react';
 import ListBadge from '../components/ListBadge';
 import ListIconButton from '../components/ListIconButton';
 
-interface ApprovalModel {
-  id: string;
-  title: string;
-  content: RichTextDocument | null;
-  drafterId: string;
-  fileGroupId: number | null;
-  status: string; // T: 임시, P: 진행, C: 완결승인, R: 반려, X: 취소
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface User {
-  id: string;
-  name: string;
-  title: string | null;
-  position: string | null;
-  departmentName: string | null;
-  departmentId: string | null;
-  useYn?: string;
-}
-
-interface ApprovalStepModel {
-  approvalId: string;
-  stepNo: number;
-  approverId: string;
-  approvalType: string; // D: 기안, A: 결재, G: 합의, R: 참조
-  approvalResult: string | null; // null: 대기, Y: 승인, N: 반려
-  actionAt: string | null;
-  comments: string | null;
-}
-
-const SHOW_LEGACY_APPROVAL_DETAIL: boolean = false;
+const loadApprovalPageData = (inbox: ApprovalInbox) =>
+  Promise.all([
+    approvalApi.getInbox(inbox),
+    axiosInstance.get<ApprovalUser[]>('/mdm/refs/users'),
+  ]);
 
 export default function Approval() {
   const user = useAuthStore((s) => s.user);
-  const [activeTab, setActiveTab] = useState<'pending' | 'sent' | 'referenced' | 'processed'>('pending');
+  const [activeTab, setActiveTab] = useState<ApprovalInbox>('pending');
 
-  const [approvals, setApprovals] = useState<ApprovalModel[]>([]);
-  const [usersList, setUsersList] = useState<User[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalDocument[]>([]);
+  const [usersList, setUsersList] = useState<ApprovalUser[]>([]);
   const [searchType, setSearchType] = useState<'id' | 'title' | 'owner'>('id');
   const [searchValue, setSearchValue] = useState('');
   const filteredApprovals = useMemo(() => {
@@ -82,9 +59,9 @@ export default function Approval() {
 
   // Modal / Detail states
   const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [selectedApproval, setSelectedApproval] = useState<ApprovalModel | null>(null);
-  const [approvalSteps, setApprovalSteps] = useState<ApprovalStepModel[]>([]);
-  const [approvalAttachments, setApprovalAttachments] = useState<ApprovalDocumentAttachment[]>([]);
+  const [selectedApproval, setSelectedApproval] = useState<ApprovalDocument | null>(null);
+  const [approvalSteps, setApprovalSteps] = useState<ApprovalStep[]>([]);
+  const [approvalAttachments, setApprovalAttachments] = useState<FileItem[]>([]);
 
   // Action input states
   const [comments, setComments] = useState('');
@@ -97,11 +74,8 @@ export default function Approval() {
 
   const fetchData = async () => {
     try {
-      const [appRes, userRes] = await Promise.all([
-        axiosInstance.get(`/approval/${activeTab}`),
-        axiosInstance.get('/mdm/users')
-      ]);
-      setApprovals(appRes.data);
+      const [appRes, userRes] = await loadApprovalPageData(activeTab);
+      setApprovals(appRes);
       setUsersList(userRes.data);
     } catch (err) {
       console.error(err);
@@ -109,18 +83,33 @@ export default function Approval() {
     }
   };
 
-  useEffect(() => { fetchData(); }, [activeTab]);
+  useEffect(() => {
+    let active = true;
+    void loadApprovalPageData(activeTab)
+      .then(([loadedApprovals, usersResponse]) => {
+        if (!active) return;
+        setApprovals(loadedApprovals);
+        setUsersList(usersResponse.data);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        console.error(error);
+        toast.error(getApiErrorMessage(error, '목록을 불러오지 못했습니다.'));
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeTab]);
 
-  const handleOpenDetail = async (app: ApprovalModel) => {
+  const handleOpenDetail = async (app: ApprovalDocument) => {
     setIsLoading(true);
     try {
-      const res = await axiosInstance.get(`/approval/${app.id}/details`);
-      setSelectedApproval(res.data.approval);
-      setApprovalSteps(res.data.steps || []);
-      const fileGroupId = res.data.approval.fileGroupId;
+      const detail = await approvalApi.getDetail(app.id);
+      setSelectedApproval(detail.approval);
+      setApprovalSteps(detail.steps);
+      const fileGroupId = detail.approval.fileGroupId;
       if (fileGroupId) {
-        const fileRes = await axiosInstance.get(`/files/${fileGroupId}`);
-        setApprovalAttachments(fileRes.data || []);
+        setApprovalAttachments(await fileApi.getItems(fileGroupId));
       } else {
         setApprovalAttachments([]);
       }
@@ -133,15 +122,12 @@ export default function Approval() {
     }
   };
 
-  const handleAction = async (action: 'APPROVE' | 'REJECT') => {
+  const handleAction = async (action: Parameters<typeof approvalApi.action>[1]) => {
     if (!selectedApproval) return;
     setIsLoading(true);
     try {
-      await axiosInstance.post(`/approval/${selectedApproval.id}/action`, {
-        comments,
-        action
-      });
-      toast.success(action === 'APPROVE' ? '승인 처리되었습니다.' : '반려 처리되었습니다.');
+      await approvalApi.action(selectedApproval.id, action, comments);
+      toast.success(action === APPROVAL_ACTION.APPROVE ? '승인 처리되었습니다.' : '반려 처리되었습니다.');
       setIsDetailOpen(false);
       fetchData();
     } catch (err) {
@@ -156,22 +142,20 @@ export default function Approval() {
     setIsDraftModalOpen(true);
   };
 
-  const handleEditDraft = (app: ApprovalModel) => {
+  const handleEditDraft = (app: ApprovalDocument) => {
     setEditingApprovalId(app.id);
     setIsDraftModalOpen(true);
   };
 
-  // Filter steps for signature box
-  const draftersAndApprovers = approvalSteps.filter(s => s.approvalType === 'D' || s.approvalType === 'A');
-  const agreements = approvalSteps.filter(s => s.approvalType === 'G');
-  const references = approvalSteps.filter(s => s.approvalType === 'R');
-
-  // Check if I am the active approver for this document
-  const isMyTurn = selectedApproval?.status === 'P' && approvalSteps.some(
-    step => step.approverId === user?.id
-      && (step.approvalType === 'A' || step.approvalType === 'G')
-      && !step.approvalResult
+  const currentApprovalStep = approvalSteps.find(
+    (step) =>
+      ACTIONABLE_APPROVAL_STEP_TYPES.some(
+        (type) => type === step.approvalType,
+      ) && step.approvalResult === null,
   );
+  const isMyTurn =
+    selectedApproval?.status === DOC_STATUS.IN_PROGRESS
+    && currentApprovalStep?.approverId === user?.id;
 
   const getApprovalDocumentSteps = (): ApprovalDocumentStep[] => approvalSteps.map((step) => {
     const approver = usersList.find((item) => item.id === step.approverId);
@@ -186,21 +170,14 @@ export default function Approval() {
     };
   });
 
-  const handleDownloadApprovalAttachment = async (attachment: ApprovalDocumentAttachment) => {
+  const handleDownloadApprovalAttachment = async (attachment: FileItem) => {
     if (!selectedApproval?.fileGroupId) return;
     try {
-      const response = await axiosInstance.get(
-        `/files/${selectedApproval.fileGroupId}/${attachment.itemNo}/download`,
-        { responseType: 'blob' },
+      const blob = await fileApi.download(
+        selectedApproval.fileGroupId,
+        attachment.itemNo,
       );
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = attachment.originalFileName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      downloadBlob(blob, attachment.originalFileName);
     } catch {
       toast.error('첨부파일 다운로드에 실패했습니다.');
     }
@@ -224,7 +201,6 @@ export default function Approval() {
         <ApprovalDocPrint
           mode="print"
           id={selectedApproval.id}
-          status={selectedApproval.status}
           title={selectedApproval.title}
           content={selectedApproval.content}
           createdAt={selectedApproval.createdAt}
@@ -238,51 +214,7 @@ export default function Approval() {
     printWindow.focus();
   };
 
-  const renderSignatureBox = (step: ApprovalStepModel) => {
-    const matchedUser = usersList.find(u => u.id === step.approverId);
-    return (
-      <div key={step.stepNo} className="border border-slate-700 w-24 text-center text-[10px] bg-slate-950/40 shrink-0 print:border-slate-450 print:bg-white print:text-black">
-        <div className="bg-slate-850 p-1 border-b border-slate-800 text-[9px] font-semibold text-slate-400 print:bg-slate-100 print:text-black print:border-slate-400">
-          {matchedUser?.title || (step.approvalType === 'D' ? '기안자' : '결재자')}
-        </div>
-        <div className="p-2 font-bold text-slate-100 min-h-[30px] flex items-center justify-center print:text-black">
-          {matchedUser?.name || step.approverId}
-        </div>
-        <div className="p-1 border-t border-slate-850 text-[8px] print:border-slate-300">
-          {step.approvalResult === 'Y' ? (
-            <span className="text-emerald-400 font-extrabold print:text-emerald-700">● 승인</span>
-          ) : step.approvalResult === 'N' ? (
-            <span className="text-rose-400 font-extrabold print:text-rose-700">● 반려</span>
-          ) : (
-            <span className="text-blue-400 font-semibold">[대기]</span>
-          )}
-          {step.actionAt && (
-            <div className="text-slate-500 font-mono text-[7px] mt-0.5 print:text-slate-600">
-              {formatDateTime(step.actionAt)}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
   return (
-    <>
-      <style>{`
-        .approval-content table { border-collapse: collapse; width: 100%; margin-bottom: 1rem; }
-        .approval-content td, .approval-content th { border: 1px solid #334155; padding: 6px 8px; }
-        .approval-content th { background-color: #334155; color: #e2e8f0; font-weight: 600; }
-        .approval-content tr:nth-child(even) td { background-color: #1e293b33; }
-        .approval-content table, .approval-content td, .approval-content th { font-size: 0.75rem; }
-        html.light .approval-content td, html.light .approval-content th { border-color: #94a3b8; color: #0f172a; }
-        html.light .approval-content th { background-color: #e2e8f0; }
-        html.light .approval-content tr:nth-child(even) td { background-color: #f8fafc; }
-        @media print {
-          .approval-content td, .approval-content th { border-color: #94a3b8; }
-          .approval-content th { background-color: #f1f5f9; color: #0f172a; }
-          .approval-content tr:nth-child(even) td { background-color: #f8fafc; }
-        }
-      `}</style>
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 print:hidden">
@@ -420,7 +352,6 @@ export default function Approval() {
               <ApprovalDocPrint
                 mode="detail"
                 id={selectedApproval.id}
-                status={selectedApproval.status}
                 title={selectedApproval.title}
                 content={selectedApproval.content}
                 createdAt={selectedApproval.createdAt}
@@ -434,109 +365,6 @@ export default function Approval() {
                 attachments={approvalAttachments}
                 onDownloadAttachment={handleDownloadApprovalAttachment}
               />
-
-              {SHOW_LEGACY_APPROVAL_DETAIL && <div>
-              {/* Signature Block (4x2 layout) */}
-              <div className="flex flex-col sm:flex-row justify-end items-end gap-6 border border-slate-800/60 p-4 rounded-xl bg-slate-950/20 print:border-0 print:p-0 print:bg-transparent">
-                
-                {/* 1열: 기안/결재자 (최대 4칸) */}
-                <div className="space-y-1 text-right">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1 tracking-wider print:text-black">1열 [기안/결재선]</span>
-                  <div className="flex gap-1.5 justify-end">
-                    {draftersAndApprovers.map(renderSignatureBox)}
-                  </div>
-                </div>
-
-                {/* 2열: 합의자 (최대 4칸) */}
-                {agreements.length > 0 && (
-                  <div className="space-y-1 text-right">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1 tracking-wider print:text-black">2열 [합의선]</span>
-                    <div className="flex gap-1.5 justify-end">
-                      {agreements.map(renderSignatureBox)}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* References list */}
-              {references.length > 0 && (
-                <div className="bg-slate-950 p-3 rounded-lg border border-slate-850 text-[10px] flex gap-2 items-center print:bg-slate-50 print:border-slate-300">
-                  <span className="text-slate-500 font-bold block shrink-0">참조자 명단:</span>
-                  <div className="flex flex-wrap gap-1.5 text-slate-300 print:text-black font-semibold">
-                    {references.map((r, i) => (
-                      <span key={i} className="bg-slate-900 px-2 py-0.5 rounded print:bg-slate-100">
-                        {usersList.find(u => u.id === r.approverId)?.name || r.approverId}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Title & Content */}
-              <div className="space-y-4">
-                <div className="border-b border-slate-800 pb-3 print:border-slate-350">
-                  <span className="text-[10px] font-bold text-slate-500 block mb-1">품의 제목</span>
-                  <h3 className="text-base font-extrabold text-slate-100 print:text-black">{selectedApproval.title}</h3>
-                </div>
-
-                <div>
-                  <span className="text-[10px] font-bold text-slate-500 block mb-1.5">품의 내용 및 상세 본문</span>
-                  {selectedApproval.content && !isRichTextEmpty(selectedApproval.content) ? (
-                    <RichTextViewer
-                      content={selectedApproval.content}
-                      className="bg-slate-950/40 border border-slate-800 p-4 rounded-xl text-slate-300 font-sans text-xs min-h-[150px] leading-relaxed print:bg-white print:border-slate-350 print:text-black print:p-2 approval-content"
-                    />
-                  ) : (
-                    <div className="bg-slate-950/40 border border-slate-800 p-4 rounded-xl text-slate-500 text-xs min-h-[150px]">
-                      (본문 내용 없음)
-                    </div>
-                  )}
-                </div>
-
-                <div className="print:hidden">
-                  <span className="text-[10px] font-bold text-slate-500 block mb-1.5">첨부파일</span>
-                  <FileUpload groupNo={selectedApproval.fileGroupId} refModule="APR" readOnly />
-                </div>
-              </div>
-
-              {/* Comments and Steps History */}
-              <div className="space-y-3">
-                <span className="text-[10px] font-bold text-slate-500 block">결재 처리 단계별 의견 이력</span>
-                <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/20 print:border-slate-300">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-slate-900/60 text-slate-400 border-b border-slate-800 select-none print:bg-slate-100 print:text-black">
-                        <th className="p-2 font-semibold">단계</th>
-                        <th className="p-2 font-semibold">결재자</th>
-                        <th className="p-2 font-semibold">유형</th>
-                        <th className="p-2 font-semibold">결과</th>
-                        <th className="p-2 font-semibold">의견 (의사 결정 내용)</th>
-                        <th className="p-2 font-semibold">처리 시간</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {approvalSteps.map((step) => {
-                        const approverUser = usersList.find(u => u.id === step.approverId);
-                        return (
-                          <tr key={step.stepNo} className="border-b border-slate-900 text-slate-300 print:border-slate-200 print:text-black">
-                            <td className="p-2 font-semibold text-slate-500">순번 {step.stepNo}</td>
-                            <td className="p-2">{approverUser?.name || step.approverId}</td>
-                            <td className="p-2 text-slate-400">{getStepTypeLabel(step.approvalType)}</td>
-                            <td className="p-2">
-                              <span className={step.approvalResult === 'Y' ? 'text-emerald-400 font-semibold' : step.approvalResult === 'N' ? 'text-rose-400 font-semibold' : 'text-slate-500'}>
-                                {step.approvalResult === 'Y' ? '승인' : step.approvalResult === 'N' ? '반려' : '대기'}
-                              </span>
-                            </td>
-                            <td className="p-2 text-slate-400 font-sans italic">{step.comments || '-'}</td>
-                            <td className="p-2 font-mono text-slate-500">{step.actionAt ? formatDateTime(step.actionAt) : '-'}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              </div>}
 
               {/* Approval Active Action Area */}
               {isMyTurn && (
@@ -557,7 +385,7 @@ export default function Approval() {
                   </div>
                   <div className="flex gap-2 justify-end">
                     <button
-                      onClick={() => handleAction('REJECT')}
+                      onClick={() => handleAction(APPROVAL_ACTION.REJECT)}
                       disabled={isLoading}
                       className="bg-rose-950 hover:bg-rose-900 text-rose-400 border border-rose-900 rounded-lg px-4 py-2 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1"
                     >
@@ -565,7 +393,7 @@ export default function Approval() {
                       <span>반려 처리</span>
                     </button>
                     <button
-                      onClick={() => handleAction('APPROVE')}
+                      onClick={() => handleAction(APPROVAL_ACTION.APPROVE)}
                       disabled={isLoading}
                       className="bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg px-5 py-2 text-xs font-bold transition-all cursor-pointer border-0 disabled:opacity-50 flex items-center gap-1 shadow-md shadow-emerald-900/20"
                     >
@@ -580,7 +408,7 @@ export default function Approval() {
 
             {/* Footer */}
             <div className="p-6 border-t border-slate-800 flex justify-end gap-2 shrink-0 print:hidden">
-              {selectedApproval.status !== 'T' && selectedApproval.status !== 'P' && (
+              {selectedApproval.status !== DOC_STATUS.TEMP && selectedApproval.status !== DOC_STATUS.IN_PROGRESS && (
                 <button
                   type="button"
                   onClick={handleOpenPrintPreview}
@@ -623,6 +451,5 @@ export default function Approval() {
       />
 
     </div>
-    </>
   );
 }

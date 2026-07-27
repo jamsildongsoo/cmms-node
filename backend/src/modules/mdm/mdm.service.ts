@@ -132,6 +132,27 @@ export class MdmService {
     return this.plantRepo.find({ where: { companyId, deleteYn: 'N' } });
   }
 
+  async getPlantsForUse(
+    companyId: string,
+    userId: string,
+    requestedPlantId?: string,
+  ): Promise<Plant[]> {
+    const [plants, user] = await Promise.all([
+      this.getPlantsByCompany(companyId),
+      this.userRepo.findOne({ where: { companyId, id: userId, deleteYn: 'N' } }),
+    ]);
+    if (!user) return [];
+    const role = user.roleId
+      ? await this.roleRepo.findOne({ where: { companyId, id: user.roleId, deleteYn: 'N' } })
+      : null;
+    if (role?.multiPlant !== 'Y') {
+      return plants.filter((plant) => plant.id === user.lastLoginPlantId);
+    }
+    return requestedPlantId
+      ? plants.filter((plant) => plant.id === requestedPlantId)
+      : plants;
+  }
+
   async savePlant(companyId: string, plantDto: Partial<Plant>, operator: string): Promise<Plant> {
     const id = CodeUtil.normalize(plantDto.id);
     if (!id) throw new BadRequestException('플랜트 ID는 필수입니다.');
@@ -244,11 +265,10 @@ export class MdmService {
   async getRoleDetails(companyId: string, roleId: string): Promise<RoleDetail[]> {
     const existing = await this.roleDetailRepo.find({ where: { companyId, roleId } });
     const byModule = new Map(existing.map((detail) => [detail.moduleDetail, detail]));
-    const missing: RoleDetail[] = [];
 
-    for (const moduleDetail of Object.values(AppModule)) {
-      if (byModule.has(moduleDetail)) continue;
-      missing.push(this.roleDetailRepo.create({
+    // 조회 시 DB를 변경하지 않고, 저장되지 않은 모듈 권한은 화면에만 N으로 표시한다.
+    return Object.values(AppModule).map((moduleDetail) =>
+      byModule.get(moduleDetail) ?? this.roleDetailRepo.create({
         companyId,
         roleId,
         moduleDetail,
@@ -257,18 +277,8 @@ export class MdmService {
         permU: 'N',
         permD: 'N',
         permA: 'N',
-      }));
-    }
-
-    if (missing.length > 0) {
-      const saved = await this.roleDetailRepo.save(missing);
-      existing.push(...saved);
-    }
-
-    const moduleOrder = new Map(Object.values(AppModule).map((moduleDetail, idx) => [moduleDetail, idx]));
-    return existing
-      .filter((detail) => moduleOrder.has(detail.moduleDetail as AppModule))
-      .sort((a, b) => moduleOrder.get(a.moduleDetail as AppModule)! - moduleOrder.get(b.moduleDetail as AppModule)!);
+      }),
+    );
   }
 
   async saveRole(companyId: string, roleDto: Partial<Role>, operator: string): Promise<Role> {
@@ -322,45 +332,65 @@ export class MdmService {
     return savedRole;
   }
 
+  async updateRole(
+    companyId: string,
+    id: string,
+    roleDto: Partial<Role>,
+    operator: string,
+  ): Promise<Role> {
+    const role = await this.roleRepo.findOne({
+      where: { companyId, id, deleteYn: 'N' },
+    });
+    if (!role) throw new BadRequestException('권한 그룹을 찾을 수 없습니다.');
+
+    role.roleName = roleDto.roleName || role.roleName;
+    role.multiPlant = roleDto.multiPlant === 'Y' ? 'Y' : 'N';
+    role.updatedBy = operator;
+    return this.roleRepo.save(role);
+  }
+
   async saveRoleDetails(companyId: string, roleId: string, details: Partial<RoleDetail>[]): Promise<void> {
     const validModules = new Set<string>(Object.values(AppModule));
-    const normalizePerm = (value?: string) => {
-      const normalized = value === 'Y' ? 'Y' : 'N';
-      return normalized;
-    };
-
-    for (const detail of details) {
+    const normalizePerm = (value?: string) => value === 'Y' ? 'Y' : 'N';
+    const normalized = details.map((detail) => {
       const moduleDetail = detail.moduleDetail;
-      if (!moduleDetail) continue;
+      if (!moduleDetail) {
+        throw new BadRequestException('모듈 코드는 필수입니다.');
+      }
       if (!validModules.has(moduleDetail)) {
         throw new BadRequestException(`유효하지 않은 모듈 코드입니다: ${moduleDetail}`);
       }
+      return {
+        moduleDetail,
+        permC: normalizePerm(detail.permC),
+        permR: normalizePerm(detail.permR),
+        permU: normalizePerm(detail.permU),
+        permD: normalizePerm(detail.permD),
+        permA: normalizePerm(detail.permA),
+      };
+    });
 
-      const existing = await this.roleDetailRepo.findOne({
-        where: { companyId, roleId, moduleDetail },
+    await this.dataSource.transaction(async (manager) => {
+      const role = await manager.getRepository(Role).findOne({
+        where: { companyId, id: roleId, deleteYn: 'N' },
       });
+      if (!role) throw new BadRequestException('권한 그룹을 찾을 수 없습니다.');
 
-      if (existing) {
-        existing.permC = normalizePerm(detail.permC);
-        existing.permR = normalizePerm(detail.permR);
-        existing.permU = normalizePerm(detail.permU);
-        existing.permD = normalizePerm(detail.permD);
-        existing.permA = normalizePerm(detail.permA);
-        await this.roleDetailRepo.save(existing);
-      } else {
-        const newDetail = this.roleDetailRepo.create({
+      const repository = manager.getRepository(RoleDetail);
+      const existing = await repository.find({ where: { companyId, roleId } });
+      const byModule = new Map(existing.map((detail) => [detail.moduleDetail, detail]));
+      const entities = normalized.map((detail) => {
+        const entity = byModule.get(detail.moduleDetail)
+          ?? repository.create({
           companyId,
           roleId,
-          moduleDetail,
-          permC: normalizePerm(detail.permC),
-          permR: normalizePerm(detail.permR),
-          permU: normalizePerm(detail.permU),
-          permD: normalizePerm(detail.permD),
-          permA: normalizePerm(detail.permA),
+          moduleDetail: detail.moduleDetail,
         });
-        await this.roleDetailRepo.save(newDetail);
-      }
-    }
+        Object.assign(entity, detail);
+        return entity;
+      });
+      await repository.save(entities);
+    });
   }
 
   async deleteRole(companyId: string, id: string, operator: string): Promise<void> {
@@ -379,7 +409,7 @@ export class MdmService {
     const users = await this.userRepo.find({
       where: { companyId, deleteYn: 'N' },
       order: { id: 'ASC' },
-      relations: ['department'],
+      relations: { department: true },
       select: {
         id: true,
         name: true,
@@ -401,6 +431,20 @@ export class MdmService {
       ...u,
       departmentName: u.department?.name ?? null,
     })) as (User & { departmentName: string | null })[];
+  }
+
+  async getUsersForUse(companyId: string): Promise<Partial<User>[]> {
+    return this.userRepo.find({
+      select: {
+        id: true,
+        name: true,
+        departmentId: true,
+        position: true,
+        title: true,
+      },
+      where: { companyId, useYn: 'Y', deleteYn: 'N' },
+      order: { id: 'ASC' },
+    });
   }
 
   async saveUser(companyId: string, userDto: Partial<User>, operator: string): Promise<User> {
@@ -427,7 +471,7 @@ export class MdmService {
         exists.position = userDto.position || null;
         exists.title = userDto.title || null;
         exists.lastLoginPlantId = CodeUtil.normalizeOrNull(userDto.lastLoginPlantId);
-        exists.passwordHash = await bcrypt.hash('1234', 12); // 복구 시에도 임시 비번 리셋
+        exists.passwordHash = await bcrypt.hash('init1234', 12); // 복구 시에도 8자 이상 임시 비번으로 리셋
         exists.useYn = 'Y';
         exists.deleteYn = 'N';
         exists.updatedBy = operator;
@@ -435,7 +479,7 @@ export class MdmService {
       }
     }
 
-    const hash = await bcrypt.hash('1234', 12);
+    const hash = await bcrypt.hash('init1234', 12);
     const user = this.userRepo.create({
       companyId,
       id,
@@ -511,6 +555,21 @@ export class MdmService {
   // =========================================================================
   async getWarehousesByCompany(companyId: string): Promise<Warehouse[]> {
     return this.warehouseRepo.find({ where: { companyId, deleteYn: 'N' } });
+  }
+
+  async getWarehousesForUse(
+    companyId: string,
+    userId: string,
+    requestedPlantId?: string,
+  ): Promise<Warehouse[]> {
+    const [warehouses, plants] = await Promise.all([
+      this.getWarehousesByCompany(companyId),
+      this.getPlantsForUse(companyId, userId, requestedPlantId),
+    ]);
+    const plantIds = new Set(plants.map((plant) => plant.id));
+    return warehouses.filter(
+      (warehouse) => warehouse.plantId === null || plantIds.has(warehouse.plantId),
+    );
   }
 
   async saveWarehouse(companyId: string, whDto: Partial<Warehouse>, operator: string): Promise<Warehouse> {
@@ -673,6 +732,7 @@ export class MdmService {
     });
     if (!item) throw new BadRequestException('코드아이템을 찾을 수 없습니다.');
 
+    // 코드 항목은 이력 보존 대상이 아닌 관리 데이터이므로 정책상 물리 삭제한다.
     await this.codeItemRepo.remove(item);
   }
 
@@ -774,8 +834,14 @@ export class MdmService {
               moduleDetail,
               permC: 'Y',
               permR: 'Y',
-              permU: 'Y',
-              permD: 'Y',
+              permU:
+                moduleDetail === AppModule.BRD && role.id !== 'ADMIN'
+                  ? 'N'
+                  : 'Y',
+              permD:
+                moduleDetail === AppModule.BRD && role.id !== 'ADMIN'
+                  ? 'N'
+                  : 'Y',
               permA: 'Y',
             }),
           ),

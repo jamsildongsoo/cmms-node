@@ -5,6 +5,7 @@ import axiosInstance from '../api/axios';
 import { formatDateTime } from '../utils/datetime';
 import { ShieldCheck, Users, History, Building2, Plus } from 'lucide-react';
 import ListBadge from '../components/ListBadge';
+import { getApiErrorMessage } from '../utils/apiError';
 
 interface SysUser {
   companyId: string;
@@ -62,7 +63,11 @@ export default function SystemAdmin() {
     }
   };
 
-  useEffect(() => { fetchCompanies(); }, []);
+  useEffect(() => {
+    void axiosInstance.get<Company[]>('/mdm/companies')
+      .then((response) => setCompanies(response.data))
+      .catch(() => toast.error('회사 목록을 불러오지 못했습니다.'));
+  }, []);
 
   const createCompany = async () => {
     if (!coId.trim() || !coName.trim()) {
@@ -88,8 +93,8 @@ export default function SystemAdmin() {
       setCoId(''); setCoName(''); setCoBizNo(''); setCoEmail('');
       setCoAdminId(''); setCoAdminName(''); setCoAdminPw('');
       fetchCompanies();
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || '회사 생성 실패');
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, '회사 생성 실패'));
     } finally {
       setCoSaving(false);
     }
@@ -126,8 +131,8 @@ export default function SystemAdmin() {
       await axiosInstance.put(`/system/users/${u.companyId}/${u.id}/use-yn`, { useYn: next });
       toast.success('사용여부를 변경했습니다.');
       fetchUsers();
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || '변경 실패');
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, '변경 실패'));
     }
   };
 
@@ -173,7 +178,7 @@ export default function SystemAdmin() {
                 className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200" />
               <input value={coAdminName} onChange={e => setCoAdminName(e.target.value)} placeholder="관리자 이름 *"
                 className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200" />
-              <input type="password" value={coAdminPw} onChange={e => setCoAdminPw(e.target.value)} placeholder="초기 비밀번호 *"
+              <input type="password" minLength={8} value={coAdminPw} onChange={e => setCoAdminPw(e.target.value)} placeholder="초기 비밀번호(8자 이상) *"
                 className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200" />
             </div>
             <button onClick={createCompany} disabled={coSaving}

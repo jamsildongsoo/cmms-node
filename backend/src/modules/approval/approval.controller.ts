@@ -66,7 +66,7 @@ export class ApprovalController {
   }
 
   @Post(':id/action')
-  @Permission(AppModule.APR, 'A')
+  // 결재 권한은 역할의 A(직접확정)가 아니라 현재 결재선의 담당자 여부로 판단한다.
   async processApprovalAction(
     @Param('id') id: string,
     @Body() request: ApprovalActionDto,

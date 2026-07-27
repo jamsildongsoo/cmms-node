@@ -1,21 +1,30 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
 import PasswordChangeNotice from '../components/PasswordChangeNotice';
-import MyPage from './MyPage';
-import MdmLayout from './MdmLayout';
-import Equipment from './Equipment';
-import Inventory from './Inventory';
-import PmRecord from './PmRecord';
-import WorkOrder from './WorkOrder';
-import WorkPermit from './WorkPermit';
-import InventoryTransaction from './InventoryTransaction';
-import Procurement from './Procurement';
-import PurchaseReceipt from './PurchaseReceipt';
-import Approval from './Approval';
-import Board from './Board';
-import SystemAdmin from './SystemAdmin';
+
+const Board = lazy(() => import('./Board'));
+const MyPage = lazy(() => import('./MyPage'));
+const MdmLayout = lazy(() => import('./MdmLayout'));
+const Equipment = lazy(() => import('./Equipment'));
+const Inventory = lazy(() => import('./Inventory'));
+const PmRecord = lazy(() => import('./PmRecord'));
+const WorkOrder = lazy(() => import('./WorkOrder'));
+const WorkPermit = lazy(() => import('./WorkPermit'));
+const InventoryTransaction = lazy(() => import('./InventoryTransaction'));
+const Procurement = lazy(() => import('./Procurement'));
+const PurchaseReceipt = lazy(() => import('./PurchaseReceipt'));
+const Approval = lazy(() => import('./Approval'));
+const SystemAdmin = lazy(() => import('./SystemAdmin'));
+
+function PageLoading() {
+  return (
+    <div className="flex min-h-64 items-center justify-center text-sm text-slate-400">
+      화면을 불러오는 중입니다.
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('board');
@@ -68,7 +77,9 @@ export default function Dashboard() {
         <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
 
         <main className="flex-1 overflow-y-auto p-6 md:p-8">
-          {renderContent()}
+          <Suspense fallback={<PageLoading />}>
+            {renderContent()}
+          </Suspense>
         </main>
       </div>
 

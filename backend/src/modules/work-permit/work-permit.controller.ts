@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Delete,
   Body,
   Query,
@@ -50,7 +51,16 @@ export class WorkPermitController {
     @Body() permit: SaveWorkPermitDto,
   ): Promise<WorkPermitResponseDto> {
     const { companyId, userId } = getTenantContext();
-    return this.workPermitService.saveWorkPermit(companyId, permit, userId);
+    return this.workPermitService.saveWorkPermit(companyId, permit, userId, 'create');
+  }
+
+  @Put()
+  @PermissionSave(AppModule.WP, 'status', 'U')
+  async updateWorkPermit(
+    @Body() permit: SaveWorkPermitDto,
+  ): Promise<WorkPermitResponseDto> {
+    const { companyId, userId } = getTenantContext();
+    return this.workPermitService.saveWorkPermit(companyId, permit, userId, 'update');
   }
 
   @Delete()

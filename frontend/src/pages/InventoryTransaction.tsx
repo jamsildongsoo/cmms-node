@@ -1,61 +1,29 @@
 import { useState, useEffect, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
-import axiosInstance from '../api/axios';
 import { useAuthStore } from '../store/useAuthStore';
 import PrintHeader from '../components/PrintHeader';
 import SlipPrint from '../components/SlipPrint';
 import { formatDateOnly, todayLocal, thisMonthLocal } from '../utils/datetime';
 import { getApiErrorMessage } from '../utils/apiError';
+import { APP_MODULE } from '../constants/module';
+import { getTxTypeLabel } from '../constants/status';
 import PrintWindowLayout from '../components/PrintWindowLayout';
 import { openPrintWindow } from '../utils/printWindow';
+import { openListPrint } from '../utils/listPrint';
 import {
   Plus, Trash, Download, Printer, X, Layers, Settings
 } from 'lucide-react';
-
-interface InventoryStatusModel {
-  warehouseId: string;
-  inventoryId: string;
-  qty: number;
-  amount: number;
-}
-
-interface InventoryHistoryModel {
-  companyId: string;
-  warehouseId: string;
-  inventoryId: string;
-  historyNo: number;
-  txTypeCode: string;
-  txReasonCode: string;
-  qty: number;
-  unitPrice: number;
-  amount: number;
-  txDate: string;
-  userId: string;
-  refNo: string | null;
-  refModule: string | null;
-  docNo: string | null;  // STK 전표번호
-  refLineNo: string | null;  // 연계 문서 라인 번호 (PUR 등)
-}
-
-interface TxGridItem {
-  warehouseId: string;
-  inventoryId: string;
-  qty: number;
-  unitPrice: number;
-  targetWarehouseId: string;
-}
-
-const DEFAULT_TX_REASONS = [
-  { id: 'GENERAL', name: '일반' },
-  { id: 'PURCHASE', name: '구매요청' },
-  { id: 'RETURN', name: '반품/회수' },
-  { id: 'WORK_ORDER', name: '작업지시' },
-  { id: 'DISPOSAL', name: '폐기' },
-  { id: 'TRANSFER', name: '창고이동' },
-  { id: 'PLANT_TRANSFER', name: '플랜트이동' },
-  { id: 'STOCKTAKING', name: '재고실사' },
-];
+import type {
+  InventoryHistory as InventoryHistoryModel,
+  InventoryStatus as InventoryStatusModel,
+  InventoryTransactionItem as TxGridItem,
+} from '../features/inventory-transaction/inventory-transaction.types';
+import { inventoryTransactionApi } from '../features/inventory-transaction/inventory-transaction.api';
+import { referenceApi } from '../features/mdm/reference.api';
+import { masterReferenceApi } from '../features/master/master-reference.api';
+import type { InventoryReference } from '../features/master/master-reference.types';
+import type { CodeItem, ReferenceUser, Warehouse } from '../features/mdm/mdm.types';
 
 export default function InventoryTransaction() {
   const user = useAuthStore((s) => s.user);
@@ -64,15 +32,10 @@ export default function InventoryTransaction() {
   // Master lists
   const [statusList, setStatusList] = useState<InventoryStatusModel[]>([]);
   const [historyList, setHistoryList] = useState<InventoryHistoryModel[]>([]);
-  const [warehouses, setWarehouses] = useState<{ id: string; name: string; plantId?: string | null }[]>([]);
-  const [inventories, setInventories] = useState<{ id: string; name: string; unit: string }[]>([]);
-  const [usersList, setUsersList] = useState<{
-    id: string;
-    name: string;
-    departmentId?: string | null;
-    departmentName?: string | null;
-  }[]>([]);
-  const [txReasons, setTxReasons] = useState<{ id: string; name: string }[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [inventories, setInventories] = useState<InventoryReference[]>([]);
+  const [usersList, setUsersList] = useState<ReferenceUser[]>([]);
+  const [txReasons, setTxReasons] = useState<CodeItem[]>([]);
 
   // Modals & UI states
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
@@ -90,6 +53,7 @@ export default function InventoryTransaction() {
   const [txReasonCode, setTxReasonCode] = useState('GENERAL');
 
   const [isLoading, setIsLoading] = useState(false);
+  const canCreate = user?.permissions?.[APP_MODULE.STK]?.C === 'Y';
   const [searchType, setSearchType] = useState<'id' | 'title' | 'owner'>('id');
   const [searchValue, setSearchValue] = useState('');
   const filteredStatusList = useMemo(() => {
@@ -119,41 +83,34 @@ export default function InventoryTransaction() {
 
   const fetchData = async () => {
     try {
-      const [statusRes, historyRes, whRes, invRes, userRes, reasonRes] = await Promise.all([
-        axiosInstance.get('/inventory-tx/status'),
-        axiosInstance.get('/inventory-tx/history'),
-        axiosInstance.get('/mdm/refs/warehouses'),
-        axiosInstance.get('/master/refs/inventories'),
-        axiosInstance.get('/mdm/refs/users'),
-        axiosInstance
-          .get('/mdm/codes/items/TX_REASON')
-          .catch((error) => {
-            console.warn('TX_REASON 코드그룹을 찾을 수 없어 기본 거래 사유를 사용합니다.', error);
-            return { data: DEFAULT_TX_REASONS };
-          }),
+      const [loadedStatus, loadedHistory, loadedWarehouses, loadedInventories, loadedUsers, loadedReasons] = await Promise.all([
+        inventoryTransactionApi.getStatus(),
+        inventoryTransactionApi.getHistory(),
+        referenceApi.getWarehouses(),
+        masterReferenceApi.getInventories(),
+        referenceApi.getUsers(),
+        referenceApi.getCodes('TX_REASON'),
       ]);
-      setStatusList(statusRes.data);
-      setHistoryList((historyRes.data || []).map((history: InventoryHistoryModel) => ({
+      setStatusList(loadedStatus);
+      setHistoryList((loadedHistory || []).map((history: InventoryHistoryModel) => ({
         ...history,
         txDate: formatDateOnly(history.txDate),
       })));
-      setWarehouses(whRes.data);
-      setInventories(invRes.data);
-      setUsersList(userRes.data || []);
-      const loadedReasons = reasonRes.data?.length ? reasonRes.data : [];
-      setTxReasons([
-        ...loadedReasons,
-        ...DEFAULT_TX_REASONS.filter(
-          (fallback) => !loadedReasons.some((reason: { id: string }) => reason.id === fallback.id),
-        ),
-      ]);
+      setWarehouses(loadedWarehouses);
+      setInventories(loadedInventories);
+      setUsersList(loadedUsers);
+      setTxReasons(loadedReasons);
     } catch (err) {
       console.error(err);
       toast.error(getApiErrorMessage(err, '재고 데이터를 불러오지 못했습니다.'));
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  // 초기 조회는 이벤트 루프 다음 틱에 실행해 effect의 동기 상태 변경을 피한다.
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void fetchData(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const handleOpenTxModal = () => {
     setTxGrid([
@@ -188,7 +145,11 @@ export default function InventoryTransaction() {
     setTxGrid(txGrid.filter((_, i) => i !== idx));
   };
 
-  const handleGridChange = (idx: number, field: keyof TxGridItem, val: any) => {
+  const handleGridChange = <K extends keyof TxGridItem>(
+    idx: number,
+    field: K,
+    val: TxGridItem[K],
+  ) => {
     setTxGrid(txGrid.map((row, i) => {
       if (i === idx) {
         return { ...row, [field]: val };
@@ -205,7 +166,7 @@ export default function InventoryTransaction() {
     }
     setIsLoading(true);
     try {
-      await axiosInstance.post('/inventory-tx', {
+      await inventoryTransactionApi.process({
         items: txGrid.map((item) => ({ ...item, txTypeCode, txReasonCode, txDate })),
       });
       toast.success('재고 처리가 완료되었습니다.');
@@ -225,7 +186,7 @@ export default function InventoryTransaction() {
     }
     setIsLoading(true);
     try {
-      await axiosInstance.post(`/inventory-tx/close?closingYm=${closingYm}`);
+      await inventoryTransactionApi.closeMonth(closingYm);
       toast.success(`${closingYm.substring(0, 4)}년 ${closingYm.substring(4, 6)}월 재고 마감이 처리되었습니다.`);
       setIsClosingModalOpen(false);
       fetchData();
@@ -295,27 +256,8 @@ export default function InventoryTransaction() {
         : txTypeCode === 'ADJ' ? 'ADJ'
           : 'MOVE';
 
-  const getTxTypeLabel = (code: string) => {
-    return {
-      IN: '입고',
-      OUT: '출고',
-      MOVE_IN: '이동입고',
-      MOVE_OUT: '이동출고',
-      ADJ: '조정'
-    }[code] || code;
-  };
-
   const getTxReasonLabel = (code?: string) =>
-    txReasons.find((reason) => reason.id === code)?.name || ({
-      GENERAL: '일반',
-      PURCHASE: '구매요청',
-      RETURN: '반품/회수',
-      WORK_ORDER: '작업지시',
-      DISPOSAL: '폐기',
-      TRANSFER: '창고이동',
-      PLANT_TRANSFER: '플랜트이동',
-      STOCKTAKING: '재고실사',
-    }[code || 'GENERAL'] || code || '일반');
+    txReasons.find((reason) => reason.id === code)?.name || code || '-';
 
   const getTxDisplayLabel = (type: string, reason?: string) =>
     `${getTxTypeLabel(type)}-${getTxReasonLabel(reason)}`;
@@ -324,8 +266,7 @@ export default function InventoryTransaction() {
     const ids = type === 'IN' ? ['GENERAL', 'RETURN', 'PLANT_TRANSFER']
       : type === 'OUT' ? ['GENERAL', 'WORK_ORDER', 'DISPOSAL', 'PLANT_TRANSFER']
       : type === 'MOVE' ? ['TRANSFER'] : ['STOCKTAKING'];
-    const reasons = txReasons.length ? txReasons : DEFAULT_TX_REASONS;
-    return reasons.filter((reason) => ids.includes(reason.id));
+    return txReasons.filter((reason) => ids.includes(reason.id));
   };
 
   const getTxTypeClass = (code: string) => {
@@ -403,81 +344,48 @@ export default function InventoryTransaction() {
   };
 
   const handleListPrint = () => {
-    const isStatus = activeSubTab === 'status';
-    const list = isStatus ? filteredStatusList : filteredHistoryList;
-    if (list.length === 0) {
-      toast.error('인쇄할 목록이 없습니다.');
-      return;
-    }
     const now = new Date();
-    const pad = (value: number) => String(value).padStart(2, '0');
-    const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-    const title = isStatus ? '재고현황' : '재고수불대장';
-    const headers = isStatus
-      ? '<th>보관 창고</th><th>자재코드</th><th>자재명</th><th>단위</th><th>수량</th><th>평균단가</th><th>평가금액</th>'
-      : '<th>전표번호</th><th>창고</th><th>자재코드</th><th>자재명</th><th>유형/사유</th><th>수량</th><th>단가</th><th>금액</th><th>처리일자</th><th>담당자</th><th>참조번호</th>';
-    const rows = isStatus
-      ? filteredStatusList.map((status) => {
-        const inventory = inventories.find((candidate) => candidate.id === status.inventoryId);
-        const warehouse = warehouses.find((candidate) => candidate.id === status.warehouseId);
-        const average = status.qty > 0 ? status.amount / status.qty : 0;
-        return `<tr>
-          <td>${warehouse?.name || status.warehouseId}</td>
-          <td class="mono">${status.inventoryId}</td>
-          <td>${inventory?.name || '-'}</td>
-          <td>${inventory?.unit || '-'}</td>
-          <td class="number">${Number(status.qty).toLocaleString()}</td>
-          <td class="number">${Math.round(average).toLocaleString()}</td>
-          <td class="number">${Math.round(Number(status.amount)).toLocaleString()}</td>
-        </tr>`;
-      }).join('')
-      : filteredHistoryList.map((history) => {
-        const inventory = inventories.find((candidate) => candidate.id === history.inventoryId);
-        const warehouse = warehouses.find((candidate) => candidate.id === history.warehouseId);
-        const owner = usersList.find((candidate) => candidate.id === history.userId);
-        return `<tr>
-          <td class="mono">${history.docNo || history.historyNo}</td>
-          <td>${warehouse?.name || history.warehouseId}</td>
-          <td class="mono">${history.inventoryId}</td>
-          <td>${inventory?.name || '-'}</td>
-          <td>${getTxDisplayLabel(history.txTypeCode, history.txReasonCode)}</td>
-          <td class="number">${Number(history.qty).toLocaleString()}</td>
-          <td class="number">${Math.round(Number(history.unitPrice)).toLocaleString()}</td>
-          <td class="number">${Math.round(Number(history.amount)).toLocaleString()}</td>
-          <td>${history.txDate || '-'}</td>
-          <td>${owner?.name || history.userId}</td>
-          <td class="mono">${history.refNo || '-'}</td>
-        </tr>`;
-      }).join('');
-    const printWindow = window.open('', '_blank', 'width=1200,height=800');
-    if (!printWindow) {
-      toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
-      return;
-    }
-    printWindow.document.write(`<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>${title} 목록 - 인쇄</title>
-<style>
-@page { size: A4 landscape; margin: 10mm 10mm 14mm 10mm; }
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #000; padding: 10mm; }
-.no-print { text-align: right; margin-bottom: 12px; }
-.no-print button { padding: 8px 20px; background: #2563eb; color: #fff; border: 0; border-radius: 6px; cursor: pointer; font-size: 10pt; }
-.print-info { display: flex; justify-content: space-between; font-size: 8pt; color: #666; border-bottom: 1px solid #ccc; padding-bottom: 2mm; margin-bottom: 4mm; }
-h1 { text-align: center; font-size: 14pt; margin-bottom: 4mm; border-bottom: 2px solid #000; padding-bottom: 3mm; }
-table { width: 100%; border-collapse: collapse; font-size: 8pt; }
-th, td { border: 1px solid #333; padding: 4px 6px; text-align: center; }
-th { background: #eee; font-weight: 600; }
-.mono { font-family: monospace; }
-.number { text-align: right; font-family: monospace; }
-@media print { .no-print { display: none; } }
-</style></head><body>
-<div class="no-print"><button onclick="window.print()">인쇄</button></div>
-<div class="print-info"><span>회사: ${user?.companyName || user?.companyId || 'CMMS'}</span><span>출력자: ${user?.name || '-'} | 출력일시: ${stamp}</span></div>
-<h1>${title}</h1>
-<table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table>
-</body></html>`);
-    printWindow.document.close();
-    printWindow.focus();
+    const common = {
+      companyName: user?.companyName || user?.companyId || 'CMMS',
+      printerName: user?.name || '-',
+      printedAt: now.toLocaleString('sv-SE'),
+    };
+    const opened = activeSubTab === 'status'
+      ? openListPrint({
+          ...common,
+          title: '재고현황',
+          rows: filteredStatusList,
+          getRowKey: (status) => `${status.warehouseId}:${status.inventoryId}`,
+          columns: [
+            { header: '보관 창고', render: (status) => warehouses.find((item) => item.id === status.warehouseId)?.name || status.warehouseId },
+            { header: '자재코드', render: (status) => status.inventoryId, className: 'font-mono' },
+            { header: '자재명', render: (status) => inventories.find((item) => item.id === status.inventoryId)?.name || '-' },
+            { header: '단위', render: (status) => inventories.find((item) => item.id === status.inventoryId)?.unit || '-' },
+            { header: '수량', render: (status) => Number(status.qty).toLocaleString(), className: 'text-right font-mono' },
+            { header: '평균단가', render: (status) => Math.round(status.qty > 0 ? status.amount / status.qty : 0).toLocaleString(), className: 'text-right font-mono' },
+            { header: '평가금액', render: (status) => Math.round(Number(status.amount)).toLocaleString(), className: 'text-right font-mono' },
+          ],
+        })
+      : openListPrint({
+          ...common,
+          title: '재고수불대장',
+          rows: filteredHistoryList,
+          getRowKey: (history) => `${history.warehouseId}:${history.historyNo}`,
+          columns: [
+            { header: '전표번호', render: (history) => history.docNo || history.historyNo, className: 'font-mono' },
+            { header: '창고', render: (history) => warehouses.find((item) => item.id === history.warehouseId)?.name || history.warehouseId },
+            { header: '자재코드', render: (history) => history.inventoryId, className: 'font-mono' },
+            { header: '자재명', render: (history) => inventories.find((item) => item.id === history.inventoryId)?.name || '-' },
+            { header: '유형/사유', render: (history) => getTxDisplayLabel(history.txTypeCode, history.txReasonCode) },
+            { header: '수량', render: (history) => Number(history.qty).toLocaleString(), className: 'text-right font-mono' },
+            { header: '단가', render: (history) => Math.round(Number(history.unitPrice)).toLocaleString(), className: 'text-right font-mono' },
+            { header: '금액', render: (history) => Math.round(Number(history.amount)).toLocaleString(), className: 'text-right font-mono' },
+            { header: '처리일자', render: (history) => history.txDate || '-' },
+            { header: '담당자', render: (history) => usersList.find((item) => item.id === history.userId)?.name || history.userId },
+            { header: '참조번호', render: (history) => history.refNo || '-', className: 'font-mono' },
+          ],
+        });
+    if (!opened) toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
   };
 
   return (
@@ -508,21 +416,21 @@ th { background: #eee; font-weight: 600; }
             목록 인쇄
           </button>
 
-          <button
+          {canCreate && <button
             onClick={() => setIsClosingModalOpen(true)}
             className="bg-slate-900 hover:bg-slate-800 text-slate-400 border border-slate-800 rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Settings size={14} className="text-slate-500" />
             월 재고 마감
-          </button>
+          </button>}
 
-          <button
+          {canCreate && <button
             onClick={handleOpenTxModal}
             className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors border-0 cursor-pointer shadow-lg shadow-blue-900/20"
           >
             <Plus size={14} />
             입력
-          </button>
+          </button>}
 
           {/* Subtab control */}
           <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg">
@@ -556,7 +464,7 @@ th { background: #eee; font-weight: 600; }
           </select>
           <input value={searchValue} onChange={(event) => setSearchValue(event.target.value)} placeholder="검색어를 입력하세요" className="flex-1 min-w-[200px] bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300 outline-none" />
         </div>
-        
+
         {/* Print Only Header */}
         <PrintHeader />
         <h1 className="hidden print:block text-center text-xl font-bold tracking-widest text-black border-b-2 border-black pb-2 mb-4">
@@ -564,7 +472,7 @@ th { background: #eee; font-weight: 600; }
         </h1>
 
         <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/40 print:border-slate-300 print:bg-white print:rounded-none">
-          
+
           {/* TAB 1: STATUS */}
           {activeSubTab === 'status' && (
             <table className="w-full text-left text-xs border-collapse">
@@ -981,7 +889,7 @@ th { background: #eee; font-weight: 600; }
 
                 {selectedSlip.refNo && (
                   <div className="bg-slate-950 p-2.5 rounded font-mono text-[10px] text-slate-500 border border-slate-900 print:bg-slate-50 print:border-slate-200">
-                    {selectedSlip.refModule === 'PUR'
+                    {selectedSlip.refModule === APP_MODULE.PUR
                       ? <>* 구매요청 출처: <strong className="text-slate-300 print:text-slate-800">{selectedSlip.refNo}</strong></>
                       : <>* 연계 이동 참조: {selectedSlip.refNo} ({selectedSlip.refModule})</>}
                   </div>

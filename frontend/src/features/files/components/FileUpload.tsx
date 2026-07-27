@@ -1,45 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
-import { requestConfirmation } from '../utils/userActionDialog';
-import axiosInstance from '../api/axios';
+import { requestConfirmation } from '../../../utils/userActionDialog';
+import type { AppModule } from '../../../constants/module';
+import { fileApi } from '../file.api';
+import type { FileItem, FileUploadPolicy } from '../file.types';
+import { downloadBlob, formatFileSize, isMimeAllowed } from '../file.utils';
 import { Paperclip, UploadCloud, Trash2, Download, Loader2 } from 'lucide-react';
 import type { AxiosError } from 'axios';
-
-interface FileItem {
-  itemNo: number;
-  originalFileName: string;
-  fileExtension: string | null;
-  mimeType: string | null;
-  fileSize: number;
-}
-
-interface FileUploadPolicy {
-  maxFileSizeBytes: number;
-  maxFileCount: number;
-  allowedMimeTypes: string[];
-}
-
-// 여러 화면에서 FileUpload를 사용해도 정책 API는 한 번만 호출한다.
-// 실패 시 캐시를 비워 다음 마운트에서 다시 조회할 수 있게 한다.
-let policyRequest: Promise<FileUploadPolicy> | null = null;
-
-const loadUploadPolicy = (): Promise<FileUploadPolicy> => {
-  if (!policyRequest) {
-    policyRequest = axiosInstance
-      .get<FileUploadPolicy>('/files/policy')
-      .then((response) => response.data)
-      .catch((error) => {
-        policyRequest = null;
-        throw error;
-      });
-  }
-  return policyRequest;
-};
 
 interface Props {
   /** 첨부 그룹 번호. 신규(미업로드)면 null. */
   groupNo: number | null;
   /** 업로드 시 서버에 전달할 AppModule 코드(예: BRD, APR) */
-  refModule: string;
+  refModule: AppModule;
   /** 첫 업로드로 그룹이 생성되면 상위 폼에 groupNo를 전달한다. */
   onGroupNoChange?: (groupNo: number) => void;
   /** 업로드 진행 상태를 상위 폼에 전달한다(업로드 중 저장 클릭 방지용). */
@@ -67,8 +39,7 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
 
   const loadItems = async (gno: number) => {
     try {
-      const res = await axiosInstance.get(`/files/${gno}`);
-      setItems(res.data);
+      setItems(await fileApi.getItems(gno));
     } catch {
       setItems([]);
     }
@@ -77,7 +48,7 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
   useEffect(() => {
     let active = true;
     const request = groupNo
-      ? axiosInstance.get<FileItem[]>(`/files/${groupNo}`).then((response) => response.data)
+      ? fileApi.getItems(groupNo)
       : Promise.resolve([]);
 
     request
@@ -97,7 +68,7 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
     if (readOnly) return;
 
     let active = true;
-    loadUploadPolicy()
+    fileApi.getPolicy()
       .then((loadedPolicy) => {
         if (active) setPolicy(loadedPolicy);
       })
@@ -135,7 +106,7 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
       const oversizedFile = selectedFiles.find((file) => file.size > policy.maxFileSizeBytes);
       if (oversizedFile) {
         reportError(
-          `'${oversizedFile.name}' 파일은 최대 크기(${fmtSize(policy.maxFileSizeBytes)})를 초과합니다.`,
+          `'${oversizedFile.name}' 파일은 최대 크기(${formatFileSize(policy.maxFileSizeBytes)})를 초과합니다.`,
         );
         return;
       }
@@ -150,23 +121,16 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
     }
 
     setLocalError(null);
-    const form = new FormData();
-    selectedFiles.forEach((f) => form.append('files', f));
-    if (groupNo) form.append('groupNo', String(groupNo));
-
     setUploading(true);
     setProgress(0);
     try {
-      const params = new URLSearchParams();
-      params.set('refModule', refModule);
-      if (groupNo) params.set('groupNo', String(groupNo));
-
-      const res = await axiosInstance.post(`/files?${params.toString()}`, form, {
-        onUploadProgress: (e) => {
+      const result = await fileApi.upload(
+        { files: selectedFiles, refModule, groupNo },
+        (e) => {
           if (e.total) setProgress(Math.round((e.loaded * 100) / e.total));
         },
-      });
-      const newGroupNo = Number(res.data.groupNo);
+      );
+      const newGroupNo = Number(result.groupNo);
       if (!Number.isSafeInteger(newGroupNo) || newGroupNo <= 0) {
         throw new Error('서버가 유효한 첨부 그룹 번호를 반환하지 않았습니다.');
       }
@@ -189,17 +153,8 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
   const handleDownload = async (item: FileItem) => {
     if (!groupNo) return;
     try {
-      const res = await axiosInstance.get(`/files/${groupNo}/${item.itemNo}/download`, {
-        responseType: 'blob',
-      });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = item.originalFileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
+      const blob = await fileApi.download(groupNo, item.itemNo);
+      downloadBlob(blob, item.originalFileName);
     } catch {
       reportError('다운로드에 실패했습니다.');
     }
@@ -209,24 +164,11 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
     if (!groupNo) return;
     if (!(await requestConfirmation(`'${item.originalFileName}' 첨부를 삭제하시겠습니까?`))) return;
     try {
-      await axiosInstance.delete(`/files/${groupNo}/${item.itemNo}`);
-      loadItems(groupNo);
+      await fileApi.remove(groupNo, item.itemNo);
+      await loadItems(groupNo);
     } catch {
       reportError('삭제에 실패했습니다.');
     }
-  };
-
-  const fmtSize = (n: number) =>
-    n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
-
-  const isMimeAllowed = (mime: string, allowedMimeTypes: string[]) => {
-    const normalized = mime.toLowerCase();
-    return allowedMimeTypes.some((pattern) => {
-      const normalizedPattern = pattern.toLowerCase();
-      return normalizedPattern.endsWith('/*')
-        ? normalized.startsWith(normalizedPattern.slice(0, -1))
-        : normalized === normalizedPattern;
-    });
   };
 
   return (
@@ -280,7 +222,7 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
 
       {!readOnly && policy && (
         <p className="text-[11px] text-slate-500">
-          파일당 최대 {fmtSize(policy.maxFileSizeBytes)} · 한 번에 최대 {policy.maxFileCount}개
+          파일당 최대 {formatFileSize(policy.maxFileSizeBytes)} · 한 번에 최대 {policy.maxFileCount}개
         </p>
       )}
 
@@ -309,7 +251,7 @@ export default function FileUpload({ groupNo, refModule, onGroupNoChange, onUplo
               >
                 <Paperclip size={12} className="shrink-0 text-slate-500" />
                 <span className="truncate">{item.originalFileName}</span>
-                <span className="text-slate-500 shrink-0">({fmtSize(item.fileSize)})</span>
+                <span className="text-slate-500 shrink-0">({formatFileSize(item.fileSize)})</span>
               </button>
               <div className="flex items-center gap-1 shrink-0">
                 <button

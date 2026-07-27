@@ -22,6 +22,8 @@ build/
 
 # 로그 / 임시
 *.log
+.data/
+backup-temp/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

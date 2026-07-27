@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
-import axiosInstance from '../api/axios';
 import ProcurementRequestPrint from '../components/ProcurementRequestPrint';
 import PurchaseOrderPrint from '../components/PurchaseOrderPrint';
 import { useAuthStore } from '../store/useAuthStore';
@@ -11,29 +10,34 @@ import {
   getCommonStatusLabel,
   getProcStatusLabel,
 } from '../constants/status';
+import { APP_MODULE } from '../constants/module';
 import { formatDateOnly, todayLocal } from '../utils/datetime';
 import ListBadge from '../components/ListBadge';
 import ListIconButton from '../components/ListIconButton';
-import ApprovalDraftModal from '../components/ApprovalDraftModal';
-import { loadApprovalSignatureSteps } from '../utils/approvalSignature';
+import ApprovalDraftModal from '../features/approval/components/ApprovalDraftModal';
+import { loadApprovalSignatureSteps } from '../features/approval/approval-signature';
 import PrintWindowLayout from '../components/PrintWindowLayout';
 import { openPrintWindow } from '../utils/printWindow';
+import { openListPrint } from '../utils/listPrint';
 import { createProcurementApprovalContent } from '../utils/procurementApprovalContent';
-
-interface Vendor { id: string; name: string; bizNo?: string; contact?: string; manager?: string; remarks?: string; deleteYn?: string }
-interface Warehouse { id: string; name: string; plantId?: string | null }
-interface Plant { id: string; name: string }
-interface CodeItem { id: string; name: string; sortOrder?: number }
-interface InventoryRef { id: string; name: string; unit?: string }
-interface PurchaseRequest {
-  id: string; plantId: string; warehouseId: string; requesterId: string; requestDate: string;
-  requestType?: string; vendorId?: string | null; orderDate?: string | null; etaDate?: string | null;
-  shipStartDate?: string | null; status: string; procStatus?: string | null; remarks?: string;
-  title?: string; approvalId?: string | null; createdAt?: string | null;
-  purchaseManager?: string | null; purchaseManagerContact?: string | null;
-}
-interface ItemLine { lineNo?: number; inventoryId: string; qty: number; unit?: string; remarks?: string }
-interface ReceiveLine { lineNo: number; qty: number; unitPrice?: number | null }
+import { getApiErrorMessage } from '../utils/apiError';
+import type { CodeItem, Plant, Warehouse } from '../features/mdm/mdm.types';
+import type { InventoryReference as InventoryRef } from '../features/master/master-reference.types';
+import type {
+  PurchaseReceiveLine as ReceiveLine,
+  PurchaseReceiveModalLine as ReceiveModalLine,
+  PurchaseRequest,
+  PurchaseRequestItem,
+  Vendor,
+} from '../features/procurement/procurement.types';
+import { procurementApi } from '../features/procurement/procurement.api';
+import { referenceApi } from '../features/mdm/reference.api';
+import { masterReferenceApi } from '../features/master/master-reference.api';
+import type { ReferenceUser } from '../features/mdm/mdm.types';
+import {
+  ProcurementField as Field,
+  ProcurementModal as Modal,
+} from '../features/procurement/components/ProcurementModal';
 
 
 export default function Procurement({ mode = 'request' }: { mode?: 'request' | 'management' }) {
@@ -47,43 +51,34 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
   const [plants, setPlants] = useState<Plant[]>([]);
   const [prTypes, setPrTypes] = useState<CodeItem[]>([]);
   const [inventories, setInventories] = useState<InventoryRef[]>([]);
-  const [usersList, setUsersList] = useState<{
-    id: string;
-    name: string;
-    title?: string | null;
-    position?: string | null;
-    departmentId?: string | null;
-    departmentName?: string | null;
-  }[]>([]);
+  const [usersList, setUsersList] = useState<ReferenceUser[]>([]);
 
   const loadRefs = async () => {
-    const load = async <T,>(
-      path: string,
-      setter: (items: T[]) => void,
-      label: string,
-    ) => {
-      try {
-        const response = await axiosInstance.get(path);
-        setter(response.data || []);
-      } catch (error: any) {
-        console.error(`${label} 조회 실패`, error);
-        toast.error(error.response?.data?.message || `${label}을 불러오지 못했습니다.`);
-        setter([]);
-      }
-    };
-    await Promise.all([
-      load<Vendor>('/procurement/vendors', setVendors, '공급업체'),
-      load<Warehouse>('/mdm/refs/warehouses', setWarehouses, '창고'),
-      load<Plant>('/mdm/refs/plants', setPlants, '플랜트'),
-      load<CodeItem>('/mdm/codes/items/PR_TYPE', setPrTypes, '구매요청 유형'),
-      load<InventoryRef>('/master/refs/inventories', setInventories, '자재'),
-      load<{
-        id: string; name: string; title?: string | null; position?: string | null;
-        departmentId?: string | null; departmentName?: string | null;
-      }>('/mdm/refs/users', setUsersList, '사용자'),
-    ]);
+    try {
+      const [vendorItems, warehouseItems, plantItems, typeItems, inventoryItems, userItems] =
+        await Promise.all([
+          procurementApi.getVendors(),
+          referenceApi.getWarehouses(),
+          referenceApi.getPlants(),
+          referenceApi.getCodes('PR_TYPE'),
+          masterReferenceApi.getInventories(),
+          referenceApi.getUsers(),
+        ]);
+      setVendors(vendorItems);
+      setWarehouses(warehouseItems);
+      setPlants(plantItems);
+      setPrTypes(typeItems);
+      setInventories(inventoryItems);
+      setUsersList(userItems);
+    } catch (error: unknown) {
+      console.error('구매 기준정보 조회 실패', error);
+      toast.error(getApiErrorMessage(error, '구매 기준정보를 불러오지 못했습니다.'));
+    }
   };
-  useEffect(() => { loadRefs(); }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadRefs(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   // ============ 구매요청 ============
   const [requests, setRequests] = useState<PurchaseRequest[]>([]);
@@ -100,13 +95,11 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       const requester = usersList.find((candidate) => candidate.id === request.requesterId);
       return `${request.requesterId} ${requester?.name || ''}`.toLowerCase().includes(keyword);
     });
-  }, [prTypes, requests, searchType, searchValue, usersList]);
+  }, [requests, searchType, searchValue, usersList]);
   const loadRequests = async () => {
     try {
-      const res = await axiosInstance.get(
-        mode === 'management' ? '/procurement/management/requests' : '/procurement/requests',
-      );
-      setRequests((res.data || []).map((request: PurchaseRequest) => ({
+      const response = await procurementApi.getRequests(mode === 'management');
+      setRequests(response.map((request) => ({
         ...request,
         requestDate: formatDateOnly(request.requestDate),
         orderDate: formatDateOnly(request.orderDate) || null,
@@ -115,12 +108,18 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       })));
     } catch (e) { console.error(e); }
   };
-  useEffect(() => { if (tab === 'requests') loadRequests(); }, [tab, mode]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (tab === 'requests') void loadRequests();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, mode]);
 
   // 신규/수정 모달
   const [formOpen, setFormOpen] = useState(false);
   const [formHeader, setFormHeader] = useState<Partial<PurchaseRequest>>({ requestDate: todayLocal() });
-  const [formItems, setFormItems] = useState<ItemLine[]>([{ inventoryId: '', qty: 0, unit: '' }]);
+  const [formItems, setFormItems] = useState<PurchaseRequestItem[]>([{ inventoryId: '', qty: 0, unit: '' }]);
   const [approvalRef, setApprovalRef] = useState<PurchaseRequest | null>(null);
 
   const openNewForm = () => {
@@ -134,22 +133,18 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
 
   const openEditForm = async (request: PurchaseRequest) => {
     try {
-      const response = await axiosInstance.get(
-        mode === 'management'
-          ? `/procurement/management/requests/${request.id}`
-          : `/procurement/requests/${request.id}`,
-      );
+      const response = await procurementApi.getRequest(request.id, mode === 'management');
       setFormHeader({
-        ...response.data.header,
-        requestDate: formatDateOnly(response.data.header.requestDate),
+        ...response.header,
+        requestDate: formatDateOnly(response.header.requestDate),
       });
-      setFormItems((response.data.items || []).map((item: any) => ({
+      setFormItems(response.items.map((item) => ({
         ...item,
         qty: Number(item.qty),
       })));
       setFormOpen(true);
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || '구매요청을 불러오지 못했습니다.');
+    } catch (error: unknown) {
+      toast.error(getApiErrorMessage(error, '구매요청을 불러오지 못했습니다.'));
     }
   };
 
@@ -159,26 +154,25 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
     if (formItems.length === 0 || !formItems[0].inventoryId) { toast.error('자재 라인을 1개 이상 입력하세요.'); return; }
     if (action === 'S' && !(await requestConfirmation('이 구매요청을 직접확정하시겠습니까?'))) return;
     try {
-      const response = await axiosInstance.post('/procurement/requests', {
-        header: { ...formHeader, status: 'T' },
-        items: formItems,
-      });
-      const saved = response.data as PurchaseRequest;
+      const header = { ...formHeader, status: 'T' };
+      const saved = formHeader.id
+        ? await procurementApi.update(formHeader.id, header, formItems)
+        : await procurementApi.create(header, formItems);
       setFormHeader(saved);
       if (action === 'P') {
         setApprovalRef(saved);
         return;
       }
       if (action === 'S') {
-        await axiosInstance.post(`/procurement/requests/${saved.id}/confirm`);
+        await procurementApi.confirm(saved.id);
         toast.success('구매요청이 직접확정되었습니다.');
       } else {
         toast.success('구매요청이 임시저장되었습니다.');
       }
       setFormOpen(false);
       await loadRequests();
-    } catch (e: any) {
-      toast.error(e.response?.data?.message || '구매요청 처리에 실패했습니다.');
+    } catch (error: unknown) {
+      toast.error(getApiErrorMessage(error, '구매요청 처리에 실패했습니다.'));
     }
   };
 
@@ -197,7 +191,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
     if (!orderModal.vendorId.trim()) { toast.error('벤더를 입력하세요.'); return; }
     if (!orderModal.purchaseManager.trim()) { toast.error('구매담당자를 입력하세요.'); return; }
     try {
-      await axiosInstance.post('/procurement/orders', {
+      await procurementApi.placeOrder({
         requestId: orderModal.id,
         vendorId: orderModal.vendorId,
         purchaseManager: orderModal.purchaseManager,
@@ -207,7 +201,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       });
       setOrderModal(null);
       await loadRequests();
-    } catch (e: any) { toast.error(e.response?.data?.message || '발주 실패'); }
+    } catch (error: unknown) { toast.error(getApiErrorMessage(error, '발주 실패')); }
   };
 
   // 배송 시작 모달
@@ -215,31 +209,27 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
   const submitShip = async () => {
     if (!shipModal) return;
     try {
-      await axiosInstance.post('/procurement/shipments', { requestId: shipModal.id, shipStartDate: shipModal.shipStartDate });
+      await procurementApi.startShipping(shipModal.id, shipModal.shipStartDate);
       setShipModal(null);
       await loadRequests();
-    } catch (e: any) { toast.error(e.response?.data?.message || '배송 실패'); }
+    } catch (error: unknown) { toast.error(getApiErrorMessage(error, '배송 실패')); }
   };
 
   // 입고 모달
   const [receiveModal, setReceiveModal] = useState<{
-    pr: PurchaseRequest; lines: any[]; close: boolean; txDate: string; warehouseId: string;
+    pr: PurchaseRequest; lines: ReceiveModalLine[]; close: boolean; txDate: string; warehouseId: string;
   } | null>(null);
   const openReceiveModal = async (pr: PurchaseRequest) => {
     try {
-      const detail = await axiosInstance.get(
-        mode === 'management'
-          ? `/procurement/management/requests/${pr.id}`
-          : `/procurement/requests/${pr.id}`,
-      );
-      const items: ItemLine[] = detail.data?.items || [];
+      const detail = await procurementApi.getRequest(pr.id, mode === 'management');
+      const items = detail.items;
       // 잔여 계산: detail.items[].qty - 누적 receivedQty (BE에서 항목별로 받아야 하나 여기선 데모용으로 단순화)
-      const lines = items.map((it: any) => ({
-        lineNo: it.lineNo,
+      const lines = items.map((it, index) => ({
+        lineNo: it.lineNo ?? index + 1,
         inventoryId: it.inventoryId,
         qty: it.qty,
         unit: it.unit,
-        receivedQty: it.receivedQty ?? 0,
+        receivedQty: Number(it.receivedQty ?? 0),
         remaining: Math.max(0, Number(it.qty) - Number(it.receivedQty ?? 0)),
         inputQty: Math.max(0, Number(it.qty) - Number(it.receivedQty ?? 0)),  // 프리필=잔여
         unitPrice: '',
@@ -247,13 +237,13 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       setReceiveModal({
         pr, lines, close: false, txDate: todayLocal(), warehouseId: pr.warehouseId,
       });
-    } catch (e: any) { toast.error(e.response?.data?.message || '상세 조회 실패'); }
+    } catch (error: unknown) { toast.error(getApiErrorMessage(error, '상세 조회 실패')); }
   };
   const submitReceive = async () => {
     if (!receiveModal) return;
     const lines: ReceiveLine[] = receiveModal.lines
-      .filter((l: any) => Number(l.inputQty) > 0)
-      .map((l: any) => ({ lineNo: l.lineNo, qty: Number(l.inputQty), unitPrice: l.unitPrice ? Number(l.unitPrice) : 0 }));
+      .filter((line) => Number(line.inputQty) > 0)
+      .map((line) => ({ lineNo: line.lineNo, qty: Number(line.inputQty), unitPrice: line.unitPrice ? Number(line.unitPrice) : 0 }));
     if (lines.length === 0) { toast.error('입고 수량을 1개 이상 입력하세요.'); return; }
     if (
       mode === 'management'
@@ -265,7 +255,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       ))
     ) return;
     try {
-      await axiosInstance.post('/procurement/receipts', {
+      await procurementApi.receive({
         requestId: receiveModal.pr.id,
         warehouseId: receiveModal.warehouseId,
         txDate: receiveModal.txDate,
@@ -274,7 +264,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       });
       setReceiveModal(null);
       await loadRequests();
-    } catch (e: any) { toast.error(e.response?.data?.message || '입고 실패'); }
+    } catch (error: unknown) { toast.error(getApiErrorMessage(error, '입고 실패')); }
   };
 
   const closeRequest = async (id: string) => {
@@ -282,77 +272,66 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       ? '총괄 관리자 권한으로 요청부서·창고담당자를 대신해 구매요청을 종료합니다.\n미입고 잔여 수량은 더 이상 입고할 수 없습니다.\n정말 종료하시겠습니까?'
       : '이 요청을 종료(E)하시겠습니까? (미입고 잔여는 닫힙니다)';
     if (!(await requestConfirmation(message, '종료 처리'))) return;
-    try { await axiosInstance.post(`/procurement/requests/${id}/close`); await loadRequests(); }
-    catch (e: any) { toast.error(e.response?.data?.message || '종료 실패'); }
+    try { await procurementApi.closeRequest(id); await loadRequests(); }
+    catch (error: unknown) { toast.error(getApiErrorMessage(error, '종료 실패')); }
   };
 
   const deleteRequest = async (id: string) => {
     if (!(await requestConfirmation('이 저장중인 요청을 삭제하시겠습니까?'))) return;
-    try { await axiosInstance.delete(`/procurement/requests/${id}`); await loadRequests(); }
-    catch (e: any) { toast.error(e.response?.data?.message || '삭제 실패'); }
+    try { await procurementApi.deleteRequest(id); await loadRequests(); }
+    catch (error: unknown) { toast.error(getApiErrorMessage(error, '삭제 실패')); }
   };
 
   // 목록 인쇄
+  // 목록 인쇄
   const handlePrint = () => {
-    const list = tab === 'requests' ? filteredRequests : vendors;
-    if (list.length === 0) { toast.error('인쇄할 목록이 없습니다.'); return; }
-    const user = useAuthStore.getState().user;
     const now = new Date();
-    const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
-
-    const printWindow = window.open('', '_blank', 'width=1200,height=800');
-    if (!printWindow) { toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.'); return; }
-
-    const tabLabel = tab === 'requests' ? '구매요청' : '벤더';
-    const rows = tab === 'requests'
-      ? (list as PurchaseRequest[]).map(pr => `
-          <tr>
-            <td class="mono">${pr.id}</td>
-            <td>${pr.requestDate || '-'}</td>
-            <td>${pr.plantId || '-'} / ${pr.warehouseId || '-'}</td>
-            <td>${prTypes.find((type) => type.id === pr.requestType)?.name || pr.requestType || '-'}</td>
-            <td>${pr.status === 'T' ? '저장' : pr.status === 'C' ? '확정' : pr.status === 'O' ? '발주' : pr.status === 'S' ? '배송' : pr.status}</td>
-            <td>${pr.approvalId || '-'}</td>
-          </tr>
-        `).join('')
-      : (list as Vendor[]).map(v => `
-          <tr>
-            <td class="mono">${v.id}</td>
-            <td>${v.name}</td>
-            <td>${v.bizNo || '-'}</td>
-            <td>${v.contact || '-'}</td>
-            <td>${v.manager || '-'}</td>
-          </tr>
-        `).join('');
-
-    const thCells = tab === 'requests'
-      ? '<th>요청번호</th><th>요청일</th><th>플랜트/창고</th><th>유형</th><th>구매상태</th><th>결재번호</th>'
-      : '<th>코드</th><th>이름</th><th>사업자번호</th><th>연락처</th><th>담당자</th>';
-
-    printWindow.document.title = `${tabLabel} 목록 - 인쇄`;
-    printWindow.document.write(`<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>${tabLabel} 목록 - 인쇄</title>
-<style>
-@page { size: A4 landscape; margin: 10mm 10mm 14mm 10mm; }
-* { margin:0; padding:0; box-sizing:border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #000; padding: 10mm; }
-h1 { text-align: center; font-size: 14pt; margin-bottom: 4mm; border-bottom: 2px solid #000; padding-bottom: 3mm; }
-.print-info { display: flex; justify-content: space-between; font-size: 8pt; color: #666; border-bottom: 1px solid #ccc; padding-bottom: 2mm; margin-bottom: 4mm; }
-table { width: 100%; border-collapse: collapse; font-size: 8pt; }
-th, td { border: 1px solid #333; padding: 4px 6px; text-align: center; }
-th { background: #eee; font-weight: 600; }
-.mono { font-family: monospace; }
-.no-print { text-align: right; margin-bottom: 12px; }
-.no-print button { padding: 8px 20px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 10pt; }
-@media print { .no-print { display: none; } }
-</style></head><body>
-<div class="no-print"><button onclick="window.print()">인쇄</button></div>
-<div class="print-info"><span>회사: ${user?.companyName || user?.companyId || 'CMMS'}</span><span>출력자: ${user?.name || '-'} | 출력일시: ${stamp}</span></div>
-<h1>${tabLabel} 현황</h1>
-<table><thead><tr>${thCells}</tr></thead><tbody>${rows}</tbody></table>
-</body></html>`);
-    printWindow.document.close();
-    printWindow.focus();
+    const stamp = now.toLocaleString('sv-SE');
+    const common = {
+      companyName: user?.companyName || user?.companyId || 'CMMS',
+      printerName: user?.name || '-',
+      printedAt: stamp,
+    };
+    const opened = tab === 'requests'
+      ? openListPrint({
+          ...common,
+          title: '구매요청 현황',
+          rows: filteredRequests,
+          getRowKey: (request) => request.id,
+          columns: [
+            { header: '요청번호', render: (request) => request.id, className: 'font-mono' },
+            { header: '요청일', render: (request) => request.requestDate || '-' },
+            { header: '플랜트/창고', render: (request) => `${request.plantId || '-'} / ${request.warehouseId || '-'}` },
+            { header: '유형', render: (request) => prTypes.find((type) => type.id === request.requestType)?.name || request.requestType || '-' },
+            {
+              header: '구매상태',
+              render: (request) => request.status === 'T'
+                ? '저장'
+                : request.status === 'C'
+                  ? '확정'
+                  : request.status === 'O'
+                    ? '발주'
+                    : request.status === 'S'
+                      ? '배송'
+                      : request.status,
+            },
+            { header: '결재번호', render: (request) => request.approvalId || '-' },
+          ],
+        })
+      : openListPrint({
+          ...common,
+          title: '벤더 현황',
+          rows: vendors,
+          getRowKey: (vendor) => vendor.id,
+          columns: [
+            { header: '코드', render: (vendor) => vendor.id, className: 'font-mono' },
+            { header: '이름', render: (vendor) => vendor.name },
+            { header: '사업자번호', render: (vendor) => vendor.bizNo || '-' },
+            { header: '연락처', render: (vendor) => vendor.contact || '-' },
+            { header: '담당자', render: (vendor) => vendor.manager || '-' },
+          ],
+        });
+    if (!opened) toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
   };
 
   // 인쇄(구매요청: 구매요청서 / 구매관리: 발주서)
@@ -367,12 +346,8 @@ th { background: #eee; font-weight: 600; }
     }
     const { printWindow, container } = printTarget;
     try {
-      const detail = await axiosInstance.get(
-        mode === 'management'
-          ? `/procurement/management/requests/${id}`
-          : `/procurement/requests/${id}`,
-      );
-      const header = detail.data.header as PurchaseRequest;
+      const detail = await procurementApi.getRequest(id, mode === 'management');
+      const header = detail.header;
       const requester = usersList.find((candidate) => candidate.id === header.requesterId);
       createRoot(container).render(
         <PrintWindowLayout printWindow={printWindow} contentClassName="max-w-[180mm]">
@@ -399,7 +374,7 @@ th { background: #eee; font-weight: 600; }
                 purchaseManager={header.purchaseManager || '-'}
                 purchaseManagerContact={header.purchaseManagerContact}
                 remarks={header.remarks}
-                items={(detail.data.items || []).map((item: ItemLine) => ({
+                items={detail.items.map((item) => ({
                   ...item,
                   inventoryName: inventories.find((candidate) => candidate.id === item.inventoryId)?.name,
                 }))}
@@ -419,15 +394,15 @@ th { background: #eee; font-weight: 600; }
               authorName={requester?.name || header.requesterId}
               approvalId={header.approvalId}
               approvalSteps={await loadApprovalSignatureSteps(header.approvalId, usersList)}
-              items={detail.data.items || []}
+              items={detail.items}
             />
           )}
         </PrintWindowLayout>,
       );
       printWindow.focus();
-    } catch (e: any) {
+    } catch (error: unknown) {
       printWindow.close();
-      toast.error(e.response?.data?.message || '인쇄 실패');
+      toast.error(getApiErrorMessage(error, '인쇄 실패'));
     }
   };
 
@@ -480,9 +455,14 @@ th { background: #eee; font-weight: 600; }
     usersList,
     warehouses,
   ]);
-  const canDirectConfirm = user?.permissions?.PUR?.A === 'Y';
+  const permission = user?.permissions?.[APP_MODULE.PUR];
+  const canCreate = permission?.C === 'Y';
+  const canUpdate = permission?.U === 'Y';
+  const canDelete = permission?.D === 'Y';
+  const canDirectConfirm = permission?.A === 'Y';
   const canReceive = user?.permissions?.STK?.C === 'Y';
   const formEditable = !formHeader.id || ['T', 'R'].includes(formHeader.status || '');
+  const canSaveRequest = formHeader.id ? canUpdate : canCreate;
 
   // ============ 벤더 관리 ============
   const [vendorForm, setVendorForm] = useState<{ id: string; name: string; bizNo: string; contact: string; manager: string; remarks: string; editing?: boolean } | null>(null);
@@ -491,18 +471,18 @@ th { background: #eee; font-weight: 600; }
     if (!vendorForm.id || !vendorForm.name) { toast.error('아이디·이름은 필수입니다.'); return; }
     try {
       if (vendorForm.editing) {
-        await axiosInstance.put(`/procurement/vendors/${vendorForm.id}`, vendorForm);
+        await procurementApi.updateVendor(vendorForm);
       } else {
-        await axiosInstance.post('/procurement/vendors', vendorForm);
+        await procurementApi.createVendor(vendorForm);
       }
       setVendorForm(null);
       await loadRefs();
-    } catch (e: any) { toast.error(e.response?.data?.message || '저장 실패'); }
+    } catch (error: unknown) { toast.error(getApiErrorMessage(error, '저장 실패')); }
   };
   const deleteVendor = async (id: string) => {
     if (!(await requestConfirmation('이 벤더를 삭제하시겠습니까?'))) return;
-    try { await axiosInstance.delete(`/procurement/vendors/${id}`); await loadRefs(); }
-    catch (e: any) { toast.error(e.response?.data?.message || '삭제 실패'); }
+    try { await procurementApi.deleteVendor(id); await loadRefs(); }
+    catch (error: unknown) { toast.error(getApiErrorMessage(error, '삭제 실패')); }
   };
 
   return (
@@ -524,7 +504,7 @@ th { background: #eee; font-weight: 600; }
           <button onClick={handlePrint} className="bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 cursor-pointer">
             <Printer size={14} /> 목록 인쇄
           </button>
-          {(mode === 'request' || tab === 'vendors') && (
+          {canCreate && (mode === 'request' || tab === 'vendors') && (
             <button onClick={tab === 'requests' ? openNewForm : () => setVendorForm({ id: '', name: '', bizNo: '', contact: '', manager: '', remarks: '' })} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 cursor-pointer border-0">
               <Plus size={14} /> 입력
             </button>
@@ -605,10 +585,10 @@ th { background: #eee; font-weight: 600; }
                     <span className="block">배송 {formatDateOnly(pr.shipStartDate) || '-'}</span>
                   </td>
                   <td className="p-3 text-right space-x-1">
-                    {mode === 'request' && ['T', 'R'].includes(pr.status) && (
+                    {canUpdate && mode === 'request' && ['T', 'R'].includes(pr.status) && (
                       <ListIconButton onClick={() => openEditForm(pr)} label="수정" icon={Pencil} />
                     )}
-                    {mode === 'request' && pr.status === 'T' && (
+                    {canDelete && mode === 'request' && pr.status === 'T' && (
                         <ListIconButton onClick={() => deleteRequest(pr.id)} label="삭제" icon={Trash2} tone="danger" />
                     )}
                     {mode === 'management' && ['S', 'C'].includes(pr.status) && !pr.procStatus && (
@@ -665,13 +645,13 @@ th { background: #eee; font-weight: 600; }
                   <td className="p-3 text-slate-300">{v.contact || '-'}</td>
                   <td className="p-3 text-slate-300">{v.manager || '-'}</td>
                   <td className="p-3 text-right space-x-1">
-                    <ListIconButton
+                    {canUpdate && <ListIconButton
                       onClick={() => setVendorForm({ id: v.id, name: v.name, bizNo: v.bizNo || '', contact: v.contact || '', manager: v.manager || '', remarks: v.remarks || '', editing: true })}
                       label={`${v.name} 수정`}
                       icon={Pencil}
                       tone="accent"
-                    />
-                    <ListIconButton onClick={() => deleteVendor(v.id)} label={`${v.name} 삭제`} icon={Trash2} tone="danger" />
+                    />}
+                    {canDelete && <ListIconButton onClick={() => deleteVendor(v.id)} label={`${v.name} 삭제`} icon={Trash2} tone="danger" />}
                   </td>
                 </tr>
               ))}
@@ -691,21 +671,21 @@ th { background: #eee; font-weight: 600; }
             <div><span className="text-slate-500 block mb-0.5">작성자</span><span className="text-slate-300">{user?.id || '-'} / {user?.name || '-'}</span></div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-            <Field label="제목" className="sm:col-span-2 lg:col-span-4"><input value={formHeader.title || ''} onChange={e => setFormHeader({ ...formHeader, title: e.target.value })} className="input" disabled={!formEditable} /></Field>
-            <Field label="요청일"><input type="date" value={formHeader.requestDate || ''} onChange={e => setFormHeader({ ...formHeader, requestDate: e.target.value })} className="input" disabled={!formEditable} /></Field>
-            <Field label="요청유형"><select value={formHeader.requestType || ''} onChange={e => setFormHeader({ ...formHeader, requestType: e.target.value })} className="input" disabled={!formEditable}>
+            <Field label="제목" className="sm:col-span-2 lg:col-span-4"><input value={formHeader.title || ''} onChange={e => setFormHeader({ ...formHeader, title: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" disabled={!formEditable} /></Field>
+            <Field label="요청일"><input type="date" value={formHeader.requestDate || ''} onChange={e => setFormHeader({ ...formHeader, requestDate: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" disabled={!formEditable} /></Field>
+            <Field label="요청유형"><select value={formHeader.requestType || ''} onChange={e => setFormHeader({ ...formHeader, requestType: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" disabled={!formEditable}>
               <option value="">선택</option>
               {prTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select></Field>
-            <Field label="플랜트"><select value={formHeader.plantId || ''} onChange={e => setFormHeader({ ...formHeader, plantId: e.target.value, warehouseId: '' })} className="input" disabled={!formEditable || user?.multiPlant !== 'Y'}>
+            <Field label="플랜트"><select value={formHeader.plantId || ''} onChange={e => setFormHeader({ ...formHeader, plantId: e.target.value, warehouseId: '' })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" disabled={!formEditable || user?.multiPlant !== 'Y'}>
               <option value="">선택</option>
               {plants.map(p => <option key={p.id} value={p.id}>{p.id} — {p.name}</option>)}
             </select></Field>
-            <Field label="예정 창고"><select value={formHeader.warehouseId || ''} onChange={e => setFormHeader({ ...formHeader, warehouseId: e.target.value })} className="input" disabled={!formEditable}>
+            <Field label="예정 창고"><select value={formHeader.warehouseId || ''} onChange={e => setFormHeader({ ...formHeader, warehouseId: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" disabled={!formEditable}>
               <option value="">선택</option>
               {filteredWarehouses.map(w => <option key={w.id} value={w.id}>{w.id} — {w.name}{!w.plantId ? ' (공통)' : ''}</option>)}
             </select></Field>
-            <Field label="비고" className="sm:col-span-2 lg:col-span-4"><input value={formHeader.remarks || ''} onChange={e => setFormHeader({ ...formHeader, remarks: e.target.value })} className="input" disabled={!formEditable} /></Field>
+            <Field label="비고" className="sm:col-span-2 lg:col-span-4"><input value={formHeader.remarks || ''} onChange={e => setFormHeader({ ...formHeader, remarks: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" disabled={!formEditable} /></Field>
           </div>
           <div className="mt-6">
             <div className="flex justify-between items-center mb-3">
@@ -720,12 +700,12 @@ th { background: #eee; font-weight: 600; }
               <tbody>
                 {formItems.map((it, i) => (
                   <tr key={i}>
-                    <td className="p-1"><select value={it.inventoryId} onChange={e => setFormItems(formItems.map((x, j) => j === i ? { ...x, inventoryId: e.target.value, unit: inventories.find(inv => inv.id === e.target.value)?.unit || x.unit } : x))} className="input" disabled={!formEditable}>
+                    <td className="p-1"><select value={it.inventoryId} onChange={e => setFormItems(formItems.map((x, j) => j === i ? { ...x, inventoryId: e.target.value, unit: inventories.find(inv => inv.id === e.target.value)?.unit || x.unit } : x))} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" disabled={!formEditable}>
                       <option value="">선택</option>
                       {inventories.map(inv => <option key={inv.id} value={inv.id}>{inv.id} — {inv.name}</option>)}
                     </select></td>
-                    <td className="p-1"><input type="number" value={it.qty || ''} onChange={e => setFormItems(formItems.map((x, j) => j === i ? { ...x, qty: Number(e.target.value) } : x))} className="input text-right" disabled={!formEditable} /></td>
-                    <td className="p-1"><input value={it.unit || ''} onChange={e => setFormItems(formItems.map((x, j) => j === i ? { ...x, unit: e.target.value } : x))} className="input" disabled={!formEditable} /></td>
+                    <td className="p-1"><input type="number" value={it.qty || ''} onChange={e => setFormItems(formItems.map((x, j) => j === i ? { ...x, qty: Number(e.target.value) } : x))} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-right text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" disabled={!formEditable} /></td>
+                    <td className="p-1"><input value={it.unit || ''} onChange={e => setFormItems(formItems.map((x, j) => j === i ? { ...x, unit: e.target.value } : x))} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" disabled={!formEditable} /></td>
                     <td className="p-1 text-center">{formEditable && <button onClick={() => setFormItems(formItems.filter((_, j) => j !== i))} className="text-rose-400 bg-transparent border-0 cursor-pointer"><X size={12} /></button>}</td>
                   </tr>
                 ))}
@@ -735,9 +715,9 @@ th { background: #eee; font-weight: 600; }
           </div>
           <div className="flex justify-end gap-2 mt-6 pt-6 border-t border-slate-800">
             <button onClick={() => setFormOpen(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg py-2 px-4 text-xs font-semibold transition-colors border-0 cursor-pointer">닫기</button>
-            {formEditable && <button onClick={() => submitForm('T')} className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer">임시 저장</button>}
-            {formEditable && <button onClick={() => submitForm('P')} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-4 text-xs font-semibold transition-colors border-0 cursor-pointer">결재 상신</button>}
-            {formEditable && canDirectConfirm && (
+            {formEditable && canSaveRequest && <button onClick={() => submitForm('T')} className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer">임시 저장</button>}
+            {formEditable && canSaveRequest && <button onClick={() => submitForm('P')} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-4 text-xs font-semibold transition-colors border-0 cursor-pointer">결재 상신</button>}
+            {formEditable && canSaveRequest && canDirectConfirm && (
               <button onClick={() => submitForm('S')} className="bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg py-2 px-5 text-xs font-semibold transition-colors border-0 cursor-pointer">직접 확정</button>
             )}
           </div>
@@ -748,15 +728,15 @@ th { background: #eee; font-weight: 600; }
       {orderModal && (
         <Modal title="발주 등록" onClose={() => setOrderModal(null)}>
           <div className="space-y-3 text-xs">
-            <Field label="벤더"><input value={orderModal.vendorId} onChange={e => setOrderModal({ ...orderModal, vendorId: e.target.value })} className="input" list="purchase-vendor-options" placeholder="벤더명 또는 코드를 직접 입력" />
+            <Field label="벤더"><input value={orderModal.vendorId} onChange={e => setOrderModal({ ...orderModal, vendorId: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" list="purchase-vendor-options" placeholder="벤더명 또는 코드를 직접 입력" />
               <datalist id="purchase-vendor-options">
                 {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
               </datalist>
             </Field>
-            <Field label="구매담당자"><input value={orderModal.purchaseManager} onChange={e => setOrderModal({ ...orderModal, purchaseManager: e.target.value })} className="input" placeholder="예: 홍길동, 구매팀 대표, 익명" /></Field>
-            <Field label="담당자 연락처"><input value={orderModal.purchaseManagerContact} onChange={e => setOrderModal({ ...orderModal, purchaseManagerContact: e.target.value })} className="input" placeholder="전화번호 또는 이메일" /></Field>
-            <Field label="발주일"><input type="date" value={orderModal.orderDate} onChange={e => setOrderModal({ ...orderModal, orderDate: e.target.value })} className="input" /></Field>
-            <Field label="예정도착일"><input type="date" value={orderModal.etaDate} onChange={e => setOrderModal({ ...orderModal, etaDate: e.target.value })} className="input" /></Field>
+            <Field label="구매담당자"><input value={orderModal.purchaseManager} onChange={e => setOrderModal({ ...orderModal, purchaseManager: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" placeholder="예: 홍길동, 구매팀 대표, 익명" /></Field>
+            <Field label="담당자 연락처"><input value={orderModal.purchaseManagerContact} onChange={e => setOrderModal({ ...orderModal, purchaseManagerContact: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" placeholder="전화번호 또는 이메일" /></Field>
+            <Field label="발주일"><input type="date" value={orderModal.orderDate} onChange={e => setOrderModal({ ...orderModal, orderDate: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
+            <Field label="예정도착일"><input type="date" value={orderModal.etaDate} onChange={e => setOrderModal({ ...orderModal, etaDate: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
             <div className="flex justify-end gap-2 mt-4">
               <button onClick={() => setOrderModal(null)} className="bg-slate-700 text-white rounded px-3 py-1.5 border-0 cursor-pointer">취소</button>
               <button onClick={submitOrder} className="bg-amber-700 hover:bg-amber-600 text-white rounded px-3 py-1.5 font-semibold border-0 cursor-pointer">발주</button>
@@ -769,7 +749,7 @@ th { background: #eee; font-weight: 600; }
       {shipModal && (
         <Modal title="배송 시작" onClose={() => setShipModal(null)}>
           <div className="space-y-3 text-xs">
-            <Field label="배송시작일"><input type="date" value={shipModal.shipStartDate} onChange={e => setShipModal({ ...shipModal, shipStartDate: e.target.value })} className="input" /></Field>
+            <Field label="배송시작일"><input type="date" value={shipModal.shipStartDate} onChange={e => setShipModal({ ...shipModal, shipStartDate: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
             <div className="flex justify-end gap-2 mt-4">
               <button onClick={() => setShipModal(null)} className="bg-slate-700 text-white rounded px-3 py-1.5 border-0 cursor-pointer">취소</button>
               <button onClick={submitShip} className="bg-amber-700 hover:bg-amber-600 text-white rounded px-3 py-1.5 font-semibold border-0 cursor-pointer">배송시작</button>
@@ -782,15 +762,15 @@ th { background: #eee; font-weight: 600; }
       {receiveModal && (
         <Modal title={`입고 — ${receiveModal.pr.id}`} onClose={() => setReceiveModal(null)}>
           <div className="space-y-3 text-xs">
-            <Field label="입고일"><input type="date" value={receiveModal.txDate} onChange={e => setReceiveModal({ ...receiveModal, txDate: e.target.value })} className="input" /></Field>
-            <Field label="입고 창고"><select value={receiveModal.warehouseId} onChange={e => setReceiveModal({ ...receiveModal, warehouseId: e.target.value })} className="input">
+            <Field label="입고일"><input type="date" value={receiveModal.txDate} onChange={e => setReceiveModal({ ...receiveModal, txDate: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
+            <Field label="입고 창고"><select value={receiveModal.warehouseId} onChange={e => setReceiveModal({ ...receiveModal, warehouseId: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50">
               <option value="">선택</option>
               {warehouses.map(w => <option key={w.id} value={w.id}>{w.id} — {w.name}{!w.plantId ? ' (공통)' : ''}</option>)}
             </select></Field>
             <table className="w-full text-xs">
               <thead><tr className="text-slate-500"><th className="text-left p-1">자재</th><th className="text-right p-1">요청</th><th className="text-right p-1">기입고</th><th className="text-right p-1">잔여</th><th className="text-right p-1 w-24">입고수량</th><th className="text-right p-1 w-24">단가</th></tr></thead>
               <tbody>
-                {receiveModal.lines.map((l: any, i: number) => (
+                {receiveModal.lines.map((l, i) => (
                   <tr key={i} className="border-t border-slate-800">
                     <td className="p-1 text-slate-200">{l.inventoryId}</td>
                     <td className="p-1 text-right text-slate-300">{l.qty}</td>
@@ -798,10 +778,10 @@ th { background: #eee; font-weight: 600; }
                     <td className="p-1 text-right text-slate-300">{l.remaining}</td>
                     <td className="p-1"><input type="number" value={l.inputQty} onChange={e => {
                       const v = Number(e.target.value);
-                      setReceiveModal({ ...receiveModal, lines: receiveModal.lines.map((x: any, j: number) => j === i ? { ...x, inputQty: v } : x) });
+                      setReceiveModal({ ...receiveModal, lines: receiveModal.lines.map((line, lineIndex) => lineIndex === i ? { ...line, inputQty: v } : line) });
                       if (v > l.remaining) console.warn('초과 입고 — 경고만');
-                    }} className={`input text-right ${l.inputQty > l.remaining ? 'border-amber-500' : ''}`} /></td>
-                    <td className="p-1"><input type="number" value={l.unitPrice || ''} onChange={e => setReceiveModal({ ...receiveModal, lines: receiveModal.lines.map((x: any, j: number) => j === i ? { ...x, unitPrice: e.target.value } : x) })} className="input text-right" placeholder="미입력 허용" /></td>
+                    }} className={`w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-right text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50 ${l.inputQty > l.remaining ? 'border-amber-500' : ''}`} /></td>
+                    <td className="p-1"><input type="number" value={l.unitPrice || ''} onChange={e => setReceiveModal({ ...receiveModal, lines: receiveModal.lines.map((line, lineIndex) => lineIndex === i ? { ...line, unitPrice: e.target.value } : line) })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-right text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" placeholder="미입력 허용" /></td>
                   </tr>
                 ))}
               </tbody>
@@ -823,16 +803,16 @@ th { background: #eee; font-weight: 600; }
       {vendorForm && (
         <Modal title={vendorForm.editing ? '벤더 수정' : '신규 벤더'} onClose={() => setVendorForm(null)}>
           <div className="grid grid-cols-2 gap-3 text-xs">
-            <Field label="코드"><input value={vendorForm.id} onChange={e => setVendorForm({ ...vendorForm, id: e.target.value })} className="input" disabled={vendorForm.editing} /></Field>
-            <Field label="이름"><input value={vendorForm.name} onChange={e => setVendorForm({ ...vendorForm, name: e.target.value })} className="input" /></Field>
-            <Field label="사업자번호"><input value={vendorForm.bizNo} onChange={e => setVendorForm({ ...vendorForm, bizNo: e.target.value })} className="input" /></Field>
-            <Field label="연락처"><input value={vendorForm.contact} onChange={e => setVendorForm({ ...vendorForm, contact: e.target.value })} className="input" /></Field>
-            <Field label="담당자"><input value={vendorForm.manager} onChange={e => setVendorForm({ ...vendorForm, manager: e.target.value })} className="input" /></Field>
-            <Field label="비고" className="col-span-2"><input value={vendorForm.remarks} onChange={e => setVendorForm({ ...vendorForm, remarks: e.target.value })} className="input" /></Field>
+            <Field label="코드"><input value={vendorForm.id} onChange={e => setVendorForm({ ...vendorForm, id: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" disabled={vendorForm.editing} /></Field>
+            <Field label="이름"><input value={vendorForm.name} onChange={e => setVendorForm({ ...vendorForm, name: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
+            <Field label="사업자번호"><input value={vendorForm.bizNo} onChange={e => setVendorForm({ ...vendorForm, bizNo: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
+            <Field label="연락처"><input value={vendorForm.contact} onChange={e => setVendorForm({ ...vendorForm, contact: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
+            <Field label="담당자"><input value={vendorForm.manager} onChange={e => setVendorForm({ ...vendorForm, manager: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
+            <Field label="비고" className="col-span-2"><input value={vendorForm.remarks} onChange={e => setVendorForm({ ...vendorForm, remarks: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
           </div>
           <div className="flex justify-end gap-2 mt-4">
             <button onClick={() => setVendorForm(null)} className="bg-slate-700 text-white rounded px-3 py-1.5 text-xs border-0 cursor-pointer">취소</button>
-            <button onClick={submitVendor} className="bg-blue-600 hover:bg-blue-500 text-white rounded px-3 py-1.5 text-xs font-semibold border-0 cursor-pointer">저장</button>
+            {(vendorForm.editing ? canUpdate : canCreate) && <button onClick={submitVendor} className="bg-blue-600 hover:bg-blue-500 text-white rounded px-3 py-1.5 text-xs font-semibold border-0 cursor-pointer">저장</button>}
           </div>
         </Modal>
       )}
@@ -840,7 +820,7 @@ th { background: #eee; font-weight: 600; }
       <ApprovalDraftModal
         open={!!approvalRef}
         mode="linked"
-        refModule="PUR"
+        refModule={APP_MODULE.PUR}
         refNo={approvalRef?.id || ''}
         defaultTitle={approvalRef ? `[구매요청] ${approvalRef.title || approvalRef.id}` : ''}
         defaultContent={approvalContent}
@@ -856,48 +836,6 @@ th { background: #eee; font-weight: 600; }
         }}
       />
 
-      {/* 입력 공통 클래스 — Tailwind CSS 변수 사용으로 라이트/다크 모드 자동 반전 */}
-      <style>{`
-        .input {
-          width: 100%;
-          background-color: var(--color-slate-950);
-          border: 1px solid var(--color-slate-800);
-          color: var(--color-slate-200);
-          font-size: 0.75rem;
-          line-height: 1rem;
-          border-radius: 0.5rem;
-          padding: 0.5rem 0.75rem;
-          outline: none;
-          transition: border-color 0.15s ease;
-        }
-        .input:focus { border-color: var(--color-blue-500); }
-        .input:disabled { opacity: 0.5; }
-      `}</style>
     </div>
-  );
-}
-
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto print:hidden">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl">
-        <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0">
-          <h2 className="text-lg font-bold text-slate-200">{title}</h2>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 p-1 hover:bg-slate-800 rounded transition-colors border-0 cursor-pointer bg-transparent">
-            <X size={20} />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-6">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
-  return (
-    <label className={`flex flex-col ${className || ''}`}>
-      <span className="block text-slate-400 text-xs mb-1.5">{label}</span>
-      {children}
-    </label>
   );
 }

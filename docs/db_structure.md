@@ -9,11 +9,12 @@
 | 환경 | 방식 | 설정 | 주의사항 |
 |------|------|------|----------|
 | 개발 | TypeORM `synchronize` | `.env`의 `NODE_ENV=development`, `DB_SYNCHRONIZE=true` | 엔티티 기준으로 DDL 자동 반영. 변경 이력은 남지 않음. |
-| 운영 | 마이그레이션 | `NODE_ENV=production` | 코드상 synchronize 강제 비활성. 운영 DDL은 별도 마이그레이션 절차로 적용. |
+| 운영 | 검토된 SQL 직접 적용 | `NODE_ENV=production`, `DB_SYNCHRONIZE=false` | 변경 전 덤프 후 운영 담당자가 DDL 적용. |
 
 주의사항:
 - 스키마의 단일 소스는 TypeORM 엔티티입니다.
 - 운영 DB에서 `synchronize`를 사용하지 않습니다. 컬럼 삭제 등 데이터 유실 위험이 있습니다.
+- 애플리케이션 migration 명령은 운영하지 않으며 엔티티 변경에 맞춘 SQL을 검토 후 직접 적용합니다.
 - raw SQL로 접근하는 테이블도 반드시 엔티티로 선언되어야 합니다.
 - 실제 테이블명은 엔티티의 `@Entity(...)` 값을 기준으로 합니다.
 

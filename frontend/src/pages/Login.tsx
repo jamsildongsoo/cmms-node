@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 import { useAuthStore } from '../store/useAuthStore';
 import { useThemeStore } from '../store/useThemeStore';
@@ -14,23 +14,20 @@ export default function Login() {
   const toggleTheme = useThemeStore((s) => s.toggle);
 
   // Login form state
-  const [loginCompanyId, setLoginCompanyId] = useState('');
-  const [loginUserId, setLoginUserId] = useState('');
+  const [loginCompanyId, setLoginCompanyId] = useState(() =>
+    localStorage.getItem('remember_login') === 'true'
+      ? localStorage.getItem('saved_company_id') || ''
+      : '',
+  );
+  const [loginUserId, setLoginUserId] = useState(() =>
+    localStorage.getItem('remember_login') === 'true'
+      ? localStorage.getItem('saved_user_id') || ''
+      : '',
+  );
   const [loginPassword, setLoginPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(() => {
     return localStorage.getItem('remember_login') === 'true';
   });
-
-  // Load saved credentials on mount
-  useEffect(() => {
-    const remember = localStorage.getItem('remember_login') === 'true';
-    if (remember) {
-      const savedCompanyId = localStorage.getItem('saved_company_id');
-      const savedUserId = localStorage.getItem('saved_user_id');
-      if (savedCompanyId) setLoginCompanyId(savedCompanyId);
-      if (savedUserId) setLoginUserId(savedUserId);
-    }
-  }, []);
 
   // SignUp form state
   const [signupCompanyId, setSignupCompanyId] = useState('');
@@ -96,7 +93,7 @@ export default function Login() {
       setSignupPhone('');
       setSignupPosition('');
       setSignupTitle('');
-    } catch (err: any) {
+    } catch {
       // Error message is handled by store
     } finally {
       setIsLoading(false);
@@ -250,7 +247,7 @@ export default function Login() {
                   <input
                     type="text"
                     required
-                    placeholder="예: COMP001 (없는 코드면 신규 회사 생성)"
+                    placeholder="관리자에게 발급받은 회사 코드"
                     value={signupCompanyId}
                     onChange={(e) => setSignupCompanyId(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 pl-9 pr-3 text-slate-200 placeholder-slate-600 outline-none text-xs transition-colors"
@@ -307,6 +304,7 @@ export default function Login() {
                   <input
                     type="password"
                     required
+                    minLength={8}
                     placeholder="비밀번호 입력"
                     value={signupPassword}
                     onChange={(e) => setSignupPassword(e.target.value)}

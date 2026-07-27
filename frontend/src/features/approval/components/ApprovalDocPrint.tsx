@@ -1,29 +1,27 @@
-import RichTextViewer from './RichTextViewer';
-import PrintHeader from './PrintHeader';
-import { formatDateTime } from '../utils/datetime';
-import { isRichTextEmpty, type RichTextDocument } from '../types/richText';
+import RichTextViewer from '../../../components/RichTextViewer';
+import PrintHeader from '../../../components/PrintHeader';
+import { formatDateTime } from '../../../utils/datetime';
+import { isRichTextEmpty, type RichTextDocument } from '../../../types/richText';
 import ApprovalSignatureBox, { type ApprovalSignatureStep } from './ApprovalSignatureBox';
+import {
+  APPROVAL_RESULT,
+  getApprovalStepTypeLabel,
+} from '../../../constants/approval';
+import type { FileItem } from '../../files/file.types';
 
 export type ApprovalDocumentStep = ApprovalSignatureStep;
-
-export interface ApprovalDocumentAttachment {
-  itemNo: number;
-  originalFileName: string;
-  fileSize: number;
-}
 
 interface ApprovalDocPrintProps {
   mode: 'detail' | 'print';
   id: string;
-  status: string;
   title: string;
   content?: RichTextDocument | null;
   createdAt: string;
   drafterName: string;
   drafterDepartment: string;
   steps: ApprovalDocumentStep[];
-  attachments: ApprovalDocumentAttachment[];
-  onDownloadAttachment?: (attachment: ApprovalDocumentAttachment) => void;
+  attachments: FileItem[];
+  onDownloadAttachment?: (attachment: FileItem) => void;
 }
 
 const formatDateOnly = (value?: string | null) => {
@@ -43,16 +41,7 @@ const formatSize = (bytes: number) =>
 
 export default function ApprovalDocPrint(props: ApprovalDocPrintProps) {
   return (
-    <article className="approval-document print-area print-portrait bg-white text-black border border-gray-500 p-5 print:border-0 print:p-0">
-      <style>{`
-        .approval-document {
-          -webkit-print-color-adjust: exact;
-          print-color-adjust: exact;
-        }
-        .approval-document .rich-text-content {
-          color: #000;
-        }
-      `}</style>
+    <article className="approval-document print-area print-portrait bg-white text-black border border-gray-500 p-5 print:border-0 print:p-0 [-webkit-print-color-adjust:exact] [print-color-adjust:exact] [&_.rich-text-content]:text-black">
       <PrintHeader approvalNo={props.id} />
       <h1 className="text-center text-xl font-bold tracking-[0.35em] mb-5">결 재 품 의 서</h1>
 
@@ -127,9 +116,15 @@ export default function ApprovalDocPrint(props: ApprovalDocPrintProps) {
             <tbody>
               {props.steps.map((step) => (
                 <tr key={step.stepNo}>
-                  <td className="border border-gray-300 p-1.5">{step.approvalType === 'D' ? '기안' : step.approvalType === 'G' ? '합의' : step.approvalType === 'R' ? '참조' : '결재'}</td>
+                  <td className="border border-gray-300 p-1.5">{getApprovalStepTypeLabel(step.approvalType)}</td>
                   <td className="border border-gray-300 p-1.5">{step.approverName}</td>
-                  <td className="border border-gray-300 p-1.5">{step.approvalResult === 'Y' ? '승인' : step.approvalResult === 'N' ? '반려' : '대기'}</td>
+                  <td className="border border-gray-300 p-1.5">
+                    {step.approvalResult === APPROVAL_RESULT.APPROVED
+                      ? '승인'
+                      : step.approvalResult === APPROVAL_RESULT.REJECTED
+                        ? '반려'
+                        : '대기'}
+                  </td>
                   <td className="border border-gray-300 p-1.5 font-mono">{step.actionAt ? formatDateTime(step.actionAt) : '-'}</td>
                   <td className="border border-gray-300 p-1.5">{step.comments || '-'}</td>
                 </tr>

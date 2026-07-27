@@ -1,38 +1,31 @@
 /* =========================================================================
-   DataSource 설정 — Supabase(PostgreSQL) 기준
+   DataSource 설정 — PostgreSQL 공통
 
-   Supabase 연결 방식 3종:
-   ┌────────────────┬────────────────────────────────┬──────┬────────────┬───────────┐
-   │ 방식           │ 호스트                         │ 포트 │ FOR UPDATE │ SET LOCAL │
-   ├────────────────┼────────────────────────────────┼──────┼────────────┼───────────┤
-   │ 트랜잭션 풀러  │ aws-0-xxx.pooler.supabase.com  │ 6543 │     ✅     │    ❌     │
-   │ 세션 풀러      │ aws-0-xxx.pooler.supabase.com  │ 5432 │     ✅     │    ✅     │ ← 권장
-   │ 직접 연결      │ db.xxx.supabase.co             │ 5432 │     ✅     │    ✅     │
-   └────────────────┴────────────────────────────────┴──────┴────────────┴───────────┘
-
-   NestJS는 상주 프로세스이므로 **세션 풀러(port 5432)** 가 적합합니다.
-   세션 풀러는 SET LOCAL, Advisory Lock, FOR UPDATE 모두 정상 작동 →
-   DataSource 이중화 없이 단일 연결로 채번·재고 비관적 락 처리 가능.
+   DB_* 환경변수만 바꿔 로컬 Docker PostgreSQL과 운영 PostgreSQL을 같은
+   애플리케이션 코드로 사용한다. DB_URL은 기존 외부 DB 연결 호환용이다.
    ========================================================================= */
 import { DataSourceOptions } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 
-/** 단일 DataSource 옵션 (Supabase 세션 풀러, port 5432) */
+/** 단일 PostgreSQL DataSource 옵션 */
 export function getDataSourceOptions(config: ConfigService): DataSourceOptions {
   let dbUrl = config.get<string>('DB_URL');
   const username = config.get<string>('DB_USERNAME');
   const password = config.get<string>('DB_PASSWORD');
+  const schema = config.get<string>('DB_SCHEMA', 'public');
+  const sslEnabled = config.get<string>('DB_SSL', 'false') === 'true';
 
   const options: any = {
     type: 'postgres',
     timezone: 'Z',
     entities: [__dirname + '/../entities/*.entity{.ts,.js}'],
     // 개발 편의: DB_SYNCHRONIZE=true 면 엔티티→스키마 자동 반영.
-    // 운영(NODE_ENV=production)에선 어떤 경우에도 비활성 — 운영 DDL은 Flyway가 관리(데이터 유실 방지).
+    // 운영(NODE_ENV=production)에선 어떤 경우에도 비활성 — 운영 DDL은 직접 검토 후 적용한다.
     synchronize:
       config.get('NODE_ENV') !== 'production' &&
       config.get<string>('DB_SYNCHRONIZE', 'false') === 'true',
     logging: config.get('NODE_ENV') === 'development',
+    schema,
     extra: {
       // 세션 풀러: 연결당 하나의 PostgreSQL 서버 세션 유지
       // QueryRunner FOR UPDATE + SET LOCAL 모두 정상 동작
@@ -65,9 +58,13 @@ export function getDataSourceOptions(config: ConfigService): DataSourceOptions {
         parsedUrl.searchParams.delete('sslmode');
         dbUrl = parsedUrl.toString();
       }
-      options.ssl = { rejectUnauthorized: false };
+      options.ssl = sslEnabled ? { rejectUnauthorized: false } : false;
     } catch (e) {
-      if (dbUrl.includes('ssl=true') || dbUrl.includes('sslmode=require')) {
+      if (
+        sslEnabled ||
+        dbUrl.includes('ssl=true') ||
+        dbUrl.includes('sslmode=require')
+      ) {
         options.ssl = { rejectUnauthorized: false };
       }
     }

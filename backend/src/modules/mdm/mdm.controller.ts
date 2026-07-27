@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -57,9 +58,15 @@ export class MdmController {
 
   /** 업무 입력화면의 선택 목록용 — 인증된 사용자는 회사 내 플랜트를 조회할 수 있다. */
   @Get('refs/plants')
-  async getPlantsForUse(): Promise<Plant[]> {
+  async getPlantsForUse(@Query('plantId') plantId?: string): Promise<Plant[]> {
+    const { companyId, userId } = getTenantContext();
+    return this.mdmService.getPlantsForUse(companyId, userId, plantId);
+  }
+
+  @Get('refs/departments')
+  async getDepartmentsForUse(): Promise<Department[]> {
     const { companyId } = getTenantContext();
-    return this.mdmService.getPlantsByCompany(companyId);
+    return this.mdmService.getDepartmentsByCompany(companyId);
   }
 
   @Post('plants')
@@ -140,6 +147,16 @@ export class MdmController {
     return this.mdmService.saveRole(companyId, role, userId);
   }
 
+  @Put('roles/:id')
+  @Permission(AppModule.MDM, 'U')
+  async updateRole(
+    @Param('id') id: string,
+    @Body() role: Partial<Role>,
+  ): Promise<Role> {
+    const { companyId, userId } = getTenantContext();
+    return this.mdmService.updateRole(companyId, id, role, userId);
+  }
+
   @Post('roles/:roleId/details')
   @HttpCode(HttpStatus.OK)
   @Permission(AppModule.MDM, 'U')
@@ -203,16 +220,16 @@ export class MdmController {
 
   /** 결재선·작성자 표시 등 업무화면에서 사용하는 읽기 전용 사용자 참조 API. */
   @Get('refs/users')
-  async getUsersForUse(): Promise<User[]> {
+  async getUsersForUse(): Promise<Partial<User>[]> {
     const { companyId } = getTenantContext();
-    return this.mdmService.getUsersByCompany(companyId);
+    return this.mdmService.getUsersForUse(companyId);
   }
 
   /** 업무 입력화면의 선택 목록용 — 변경 권한과 분리된 읽기 전용 참조 API. */
   @Get('refs/warehouses')
-  async getWarehousesForUse(): Promise<Warehouse[]> {
-    const { companyId } = getTenantContext();
-    return this.mdmService.getWarehousesByCompany(companyId);
+  async getWarehousesForUse(@Query('plantId') plantId?: string): Promise<Warehouse[]> {
+    const { companyId, userId } = getTenantContext();
+    return this.mdmService.getWarehousesForUse(companyId, userId, plantId);
   }
 
   @Post('warehouses')

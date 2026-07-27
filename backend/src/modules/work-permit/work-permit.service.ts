@@ -68,6 +68,7 @@ export class WorkPermitService {
     companyId: string,
     input: SaveWorkPermitDto,
     operator: string,
+    mode: 'create' | 'update',
   ): Promise<WorkPermitResponseDto> {
     const plantId = await resolveActivePlantId(
       this.dataSource,
@@ -80,6 +81,12 @@ export class WorkPermitService {
     await runner.connect();
     await runner.startTransaction();
     let id = input.id?.trim() || '';
+    if (mode === 'create' && id) {
+      throw new BadRequestException('신규 작업허가서에는 문서번호를 지정할 수 없습니다.');
+    }
+    if (mode === 'update' && !id) {
+      throw new BadRequestException('수정할 작업허가서 문서번호가 필요합니다.');
+    }
     try {
       const repository = runner.manager.getRepository(WorkPermit);
       let entity: WorkPermit;

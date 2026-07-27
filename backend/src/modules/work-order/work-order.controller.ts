@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Delete,
   Body,
   Query,
@@ -51,7 +52,16 @@ export class WorkOrderController {
     @Body() request: SaveWorkOrderDto,
   ): Promise<WorkOrderResponseDto> {
     const { companyId, userId } = getTenantContext();
-    return this.workOrderService.saveWorkOrder(companyId, request, userId);
+    return this.workOrderService.saveWorkOrder(companyId, request, userId, 'create');
+  }
+
+  @Put()
+  @PermissionSave(AppModule.WO, 'workOrder.status', 'U')
+  async updateWorkOrder(
+    @Body() request: SaveWorkOrderDto,
+  ): Promise<WorkOrderResponseDto> {
+    const { companyId, userId } = getTenantContext();
+    return this.workOrderService.saveWorkOrder(companyId, request, userId, 'update');
   }
 
   @Delete()

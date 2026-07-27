@@ -1,6 +1,6 @@
 import PrintHeader from './PrintHeader';
 import { PrintSection, PrintField, PrintTable } from './PrintDoc';
-import ApprovalSignatureBox, { type ApprovalSignatureStep } from './ApprovalSignatureBox';
+import ApprovalSignatureBox, { type ApprovalSignatureStep } from '../features/approval/components/ApprovalSignatureBox';
 
 interface PrItem {
   inventoryId: string;

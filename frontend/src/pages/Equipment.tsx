@@ -1,181 +1,175 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
 import { useAuthStore } from '../store/useAuthStore';
-import axiosInstance from '../api/axios';
 import { getApiErrorMessage } from '../utils/apiError';
 import { formatDateOnly } from '../utils/datetime';
+import { APP_MODULE } from '../constants/module';
+import { equipmentApi } from '../features/equipment/equipment.api';
+import type { Equipment as EquipmentModel, EquipmentFormValues } from '../features/equipment/equipment.types';
+import { referenceApi } from '../features/mdm/reference.api';
+import type { CodeItem, Plant } from '../features/mdm/mdm.types';
+import { downloadBlob } from '../utils/downloadBlob';
+import { openListPrint } from '../utils/listPrint';
+import EquipmentFormModal from '../features/equipment/components/EquipmentFormModal';
 import ListBadge from '../components/ListBadge';
 import ListIconButton from '../components/ListIconButton';
-import { 
-  Wrench, Plus, Edit2, Trash2, Printer, Save, X, MinusCircle, FileSpreadsheet, RefreshCw 
+import {
+  Wrench, Plus, Edit2, Trash2, Printer, FileSpreadsheet
 } from 'lucide-react';
 
-interface EquipmentType {
-  id: string;
-  plantId: string;
-  name: string;
-  location: string | null;
-  eqTypeCode: string | null;
-  installDate: string | null;
-  workPermitYn: string;
-  makerName: string | null;
-  spec: string | null;
-  model: string | null;
-  serialNumber: string | null;
-  remarks: string | null;
-  lastCheckDate: string | null;
-  nextCheckDate: string | null;
-}
-
-interface CheckCycle {
-  checkTypeCode: string;
-  cycleVal: number | null;
-  cycleUnit: string;
-  lastCheckDate: string | null;
-  nextCheckDate: string | null;
-}
-
 export default function Equipment() {
-  const [equipments, setEquipments] = useState<EquipmentType[]>([]);
-  const [plants, setPlants] = useState<{ id: string; name: string }[]>([]);
+  const user = useAuthStore((state) => state.user);
+  const activePlantId = useAuthStore((state) => state.activePlantId);
+  const permission = user?.permissions?.[APP_MODULE.EQP];
+  const canCreate = permission?.C === 'Y';
+  const canUpdate = permission?.U === 'Y';
+  const canDelete = permission?.D === 'Y';
+  const [equipments, setEquipments] = useState<EquipmentModel[]>([]);
+  const [plants, setPlants] = useState<Plant[]>([]);
+  const [equipmentTypes, setEquipmentTypes] = useState<CodeItem[]>([]);
+  const [checkTypes, setCheckTypes] = useState<CodeItem[]>([]);
   const [selectedPlantId, setSelectedPlantId] = useState('');
-  
+
   // Form states
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // Equipment Fields
-  const [id, setId] = useState('');
-  const [plantId, setPlantId] = useState('');
-  const [name, setName] = useState('');
-  const [location, setLocation] = useState('');
-  const [eqTypeCode, setEqTypeCode] = useState('PUMP'); // Default
-  const [installDate, setInstallDate] = useState('');
-  const [workPermitYn, setWorkPermitYn] = useState('N');
-  const [makerName, setMakerName] = useState('');
-  const [spec, setSpec] = useState('');
-  const [model, setModel] = useState('');
-  const [serialNumber, setSerialNumber] = useState('');
-  const [remarks, setRemarks] = useState('');
-
-  // Combined Check Cycles
-  const [checkCycles, setCheckCycles] = useState<CheckCycle[]>([]);
+  const [formValues, setFormValues] = useState<EquipmentFormValues | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const plantNames = useMemo(
+    () => new Map(plants.map((plant) => [plant.id, plant.name])),
+    [plants],
+  );
 
   const fetchData = async () => {
     try {
-      const [eqRes, plantRes] = await Promise.all([
-        axiosInstance.get('/master/equipments'),
-        axiosInstance.get('/mdm/plants')
+      const [loadedEquipments, loadedPlants, loadedEquipmentTypes, loadedCheckTypes] = await Promise.all([
+        equipmentApi.getAll(),
+        referenceApi.getPlants(activePlantId),
+        referenceApi.getCodes('EQ_TYPE'),
+        referenceApi.getCodes('PM_TYPE'),
       ]);
-      setEquipments(eqRes.data);
-      setPlants(plantRes.data);
-      if (plantRes.data.length > 0 && !plantId) {
-        setPlantId(plantRes.data[0].id);
-      }
+      setEquipments(loadedEquipments);
+      setPlants(loadedPlants);
+      setEquipmentTypes(loadedEquipmentTypes);
+      setCheckTypes(loadedCheckTypes);
     } catch (err) {
       console.error(err);
       toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    let active = true;
+    void Promise.all([
+      equipmentApi.getAll(),
+      referenceApi.getPlants(activePlantId),
+      referenceApi.getCodes('EQ_TYPE'),
+      referenceApi.getCodes('PM_TYPE'),
+    ]).then(([loadedEquipments, loadedPlants, loadedEquipmentTypes, loadedCheckTypes]) => {
+      if (!active) return;
+      setEquipments(loadedEquipments);
+      setPlants(loadedPlants);
+      setEquipmentTypes(loadedEquipmentTypes);
+      setCheckTypes(loadedCheckTypes);
+    }).catch((err) => {
+      if (active) toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
+    });
+    return () => { active = false; };
+  }, [activePlantId]);
 
   const handleOpenCreate = () => {
     setEditingId(null);
-    setId('');
-    setName('');
-    setLocation('');
-    if (plants.length > 0) setPlantId(plants[0].id);
-    setEqTypeCode('PUMP');
-    setInstallDate('');
-    setWorkPermitYn('N');
-    setMakerName('');
-    setSpec('');
-    setModel('');
-    setSerialNumber('');
-    setRemarks('');
-    setCheckCycles([]);
+    setFormValues({
+      id: '',
+      plantId: plants[0]?.id || '',
+      name: '',
+      location: '',
+      eqTypeCode: equipmentTypes[0]?.id || '',
+      installDate: '',
+      workPermitYn: 'N',
+      makerName: '',
+      spec: '',
+      model: '',
+      serialNumber: '',
+      remarks: '',
+      checkCycles: [],
+    });
     setIsFormOpen(true);
   };
 
-  const handleOpenEdit = async (eq: EquipmentType) => {
+  const handleOpenEdit = async (eq: EquipmentModel) => {
+    if (pendingAction) return;
+    setPendingAction(`edit:${eq.plantId}:${eq.id}`);
     try {
-      const res = await axiosInstance.get(`/master/equipments/details?plantId=${eq.plantId}&id=${eq.id}`);
-      const data = res.data;
+      const data = await equipmentApi.getDetail(eq.plantId, eq.id);
       const targetEq = data.equipment;
-      
+
       setEditingId(targetEq.id);
-      setId(targetEq.id);
-      setPlantId(targetEq.plantId);
-      setName(targetEq.name);
-      setLocation(targetEq.location || '');
-      setEqTypeCode(targetEq.eqTypeCode || '');
-      setInstallDate(formatDateOnly(targetEq.installDate));
-      setWorkPermitYn(targetEq.workPermitYn || 'N');
-      setMakerName(targetEq.makerName || '');
-      setSpec(targetEq.spec || '');
-      setModel(targetEq.model || '');
-      setSerialNumber(targetEq.serialNumber || '');
-      setRemarks(targetEq.remarks || '');
-      setCheckCycles((data.checkCycles || []).map((c: any) => ({
-        checkTypeCode: c.checkTypeCode,
-        cycleVal: c.cycleVal,
-        cycleUnit: c.cycleUnit,
-        lastCheckDate: formatDateOnly(c.lastCheckDate) || null,
-        nextCheckDate: formatDateOnly(c.nextCheckDate) || null,
-      })));
-      
+      setFormValues({
+        id: targetEq.id,
+        plantId: targetEq.plantId,
+        name: targetEq.name,
+        location: targetEq.location || '',
+        eqTypeCode: targetEq.eqTypeCode || '',
+        installDate: formatDateOnly(targetEq.installDate),
+        workPermitYn: targetEq.workPermitYn || 'N',
+        makerName: targetEq.makerName || '',
+        spec: targetEq.spec || '',
+        model: targetEq.model || '',
+        serialNumber: targetEq.serialNumber || '',
+        remarks: targetEq.remarks || '',
+        checkCycles: (data.checkCycles || []).map((cycle) => ({
+          ...cycle,
+          lastCheckDate: formatDateOnly(cycle.lastCheckDate) || null,
+          nextCheckDate: formatDateOnly(cycle.nextCheckDate) || null,
+        })),
+      });
+
       setIsFormOpen(true);
     } catch (err) {
       toast.error(getApiErrorMessage(err, '설비 상세 내역을 불러오지 못했습니다.'));
+    } finally {
+      setPendingAction(null);
     }
   };
 
-  const handleDelete = async (eq: EquipmentType) => {
-    if (!(await requestConfirmation('정말 이 설비를 삭제하시겠습니까?'))) return;
+  const handleDelete = async (eq: EquipmentModel) => {
+    if (pendingAction) return;
+    setPendingAction(`delete:${eq.plantId}:${eq.id}`);
+    if (!(await requestConfirmation('정말 이 설비를 삭제하시겠습니까?'))) {
+      setPendingAction(null);
+      return;
+    }
     try {
-      await axiosInstance.delete(`/master/equipments?plantId=${eq.plantId}&id=${eq.id}`);
+      await equipmentApi.delete(eq.plantId, eq.id);
       toast.success('설비가 성공적으로 삭제되었습니다.');
       fetchData();
     } catch (err) {
       toast.error(getApiErrorMessage(err, '설비 삭제 실패.'));
+    } finally {
+      setPendingAction(null);
     }
   };
 
-  const handleAddCheckCycle = () => {
-    setCheckCycles([...checkCycles, { checkTypeCode: '', cycleVal: null, cycleUnit: 'M', lastCheckDate: null, nextCheckDate: null }]);
-  };
-
-  const handleRemoveCheckCycle = (idx: number) => {
-    setCheckCycles(checkCycles.filter((_, i) => i !== idx));
-  };
-
-  const handleCheckCycleChange = (idx: number, field: keyof CheckCycle, val: any) => {
-    setCheckCycles(checkCycles.map((item, i) => {
-      if (i === idx) {
-        return { ...item, [field]: val === '' ? null : val };
-      }
-      return item;
-    }));
-  };
-
-  const handleFormSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!id || !name || !plantId) return;
+  const handleFormSubmit = async (values: EquipmentFormValues) => {
+    if (!values.id || !values.name || !values.plantId) return;
 
     setIsLoading(true);
     try {
       const payload = {
         equipment: {
-          id, plantId, name, location: location || null, eqTypeCode: eqTypeCode || null,
-          installDate: installDate || null, workPermitYn, makerName: makerName || null,
-          spec: spec || null, model: model || null, serialNumber: serialNumber || null,
-          remarks: remarks || null
+          id: values.id, plantId: values.plantId, name: values.name,
+          location: values.location || null, eqTypeCode: values.eqTypeCode || null,
+          installDate: values.installDate || null, workPermitYn: values.workPermitYn,
+          makerName: values.makerName || null, spec: values.spec || null,
+          model: values.model || null, serialNumber: values.serialNumber || null,
+          remarks: values.remarks || null,
         },
-        checkCycles: checkCycles.map(c => ({
+        checkCycles: values.checkCycles.map(c => ({
           checkTypeCode: c.checkTypeCode,
           cycleVal: c.cycleVal ? Number(c.cycleVal) : null,
           cycleUnit: c.cycleUnit,
@@ -184,7 +178,8 @@ export default function Equipment() {
         }))
       };
 
-      await axiosInstance.post('/master/equipments', payload);
+      if (editingId) await equipmentApi.update(payload);
+      else await equipmentApi.create(payload);
       toast.success('설비 정보가 성공적으로 저장되었습니다.');
       setIsFormOpen(false);
       fetchData();
@@ -196,120 +191,47 @@ export default function Equipment() {
   };
 
   const handleCsvDownload = async () => {
+    if (pendingAction) return;
+    setPendingAction('csv');
     try {
-      const res = await axiosInstance.get('/master/equipments/csv', { responseType: 'blob' });
-      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', 'equipments_export.csv');
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      downloadBlob(await equipmentApi.downloadCsv(), 'equipments_export.csv');
     } catch (err) {
       toast.error(getApiErrorMessage(err, 'CSV 다운로드 실패'));
+    } finally {
+      setPendingAction(null);
     }
   };
 
   const handlePrint = () => {
-    const user = useAuthStore.getState().user;
     const now = new Date();
     const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
-
-    const printData = {
-      equipments: filteredEquipments,
-      plants,
+    const opened = openListPrint({
+      title: '설비 마스터 목록',
+      rows: filteredEquipments,
+      getRowKey: (equipment) => `${equipment.plantId}:${equipment.id}`,
       companyName: user?.companyName || user?.companyId || 'CMMS',
       printerName: user?.name || '-',
-      printDate: stamp,
-    };
-
-    const printWindow = window.open('', '_blank', 'width=1200,height=800');
-    if (!printWindow) {
-      toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
-      return;
-    }
-
-    // 새 창 제목 설정
-    printWindow.document.title = '설비 마스터 목록 - 인쇄';
-
-    const eqTypeLabel: Record<string, string> = {
-      PUMP: '펌프', MOTOR: '모터', BOILER: '보일러', VALVE: '밸브',
-      COMPRESSOR: '압축기', PANEL: '전기판넬', ETC: '기타 설비',
-    };
-
-    const rows = printData.equipments.map(eq => `
-      <tr>
-        <td class="mono">${eq.id}</td>
-        <td class="name">${eq.name}</td>
-        <td>${printData.plants.find(p => p.id === eq.plantId)?.name || eq.plantId}</td>
-        <td>${eqTypeLabel[eq.eqTypeCode || ''] || eq.eqTypeCode || '-'}</td>
-        <td>${eq.location || '-'}</td>
-        <td>${eq.installDate || '-'}</td>
-        <td>${eq.makerName || '-'}</td>
-        <td>${eq.model || '-'}</td>
-        <td>${eq.workPermitYn === 'Y' ? '대상' : '미대상'}</td>
-      </tr>
-    `).join('');
-
-    printWindow.document.write(`<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>설비 마스터 목록 - 인쇄</title>
-  <style>
-    @page {
-      size: A4 landscape;
-      margin: 10mm 10mm 14mm 10mm;
-      @bottom-right {
-        content: counter(page) " / " counter(pages);
-        font-size: 8pt;
-        color: #666;
-      }
-    }
-    @page :first { margin-top: 10mm; }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #000; padding: 10mm; }
-    .print-log { display: flex; justify-content: space-between; font-size: 8pt; color: #666; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 8px; }
-    .header { text-align: center; font-size: 16pt; font-weight: bold; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 12px; }
-    table { width: 100%; border-collapse: collapse; font-size: 9pt; }
-    th, td { padding: 6px 8px; border: 1px solid #ccc; text-align: left; }
-    th { background: #f0f0f0; font-weight: bold; }
-    td.mono { font-family: monospace; }
-    td.name { font-weight: 600; }
-    @media print { .no-print { display: none; } }
-  </style>
-</head>
-<body>
-  <div class="no-print" style="text-align:right; margin-bottom:12px;">
-    <button onclick="window.print()" style="padding:8px 20px; background:#2563eb; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:10pt;">인쇄</button>
-  </div>
-  <div class="print-log">
-    <span>회사: ${printData.companyName}</span>
-    <span>출력자: ${printData.printerName} &nbsp;|&nbsp; 출력일시: ${printData.printDate}</span>
-  </div>
-  <div class="header">설비 마스터 목록</div>
-  <table>
-    <thead>
-      <tr>
-        <th>설비코드</th><th>설비명</th><th>플랜트</th><th>설비유형</th><th>설치위치</th><th>설치일자</th><th>제조사</th><th>모델</th><th>작업허가</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${rows || '<tr><td colspan="9" style="text-align:center;padding:24px;color:#999;">등록된 설비가 없습니다.</td></tr>'}
-    </tbody>
-  </table>
-</body>
-</html>`);
-    printWindow.document.close();
-    printWindow.focus();
+      printedAt: stamp,
+      emptyMessage: '등록된 설비가 없습니다.',
+      columns: [
+        { header: '설비코드', render: (equipment) => equipment.id, className: 'font-mono' },
+        { header: '설비명', render: (equipment) => equipment.name },
+        { header: '플랜트', render: (equipment) => plantNames.get(equipment.plantId) || equipment.plantId },
+        { header: '설비유형', render: (equipment) => equipmentTypes.find((type) => type.id === equipment.eqTypeCode)?.name || equipment.eqTypeCode || '-' },
+        { header: '설치위치', render: (equipment) => equipment.location || '-' },
+        { header: '설치일자', render: (equipment) => formatDateOnly(equipment.installDate) || '-' },
+        { header: '제조사', render: (equipment) => equipment.makerName || '-' },
+        { header: '모델', render: (equipment) => equipment.model || '-' },
+        { header: '작업허가', render: (equipment) => equipment.workPermitYn === 'Y' ? '대상' : '미대상' },
+      ],
+    });
+    if (!opened) toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
   };
 
   // Filter list by selected plant
-  const filteredEquipments = selectedPlantId 
-    ? equipments.filter(e => e.plantId === selectedPlantId) 
+  const filteredEquipments = selectedPlantId
+    ? equipments.filter(e => e.plantId === selectedPlantId)
     : equipments;
-
   return (
     <div className="space-y-6">
       {/* Header and top buttons */}
@@ -325,6 +247,7 @@ export default function Equipment() {
         <div className="flex gap-2">
           <button
             onClick={handleCsvDownload}
+            disabled={pendingAction === 'csv'}
             className="bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <FileSpreadsheet size={14} />
@@ -337,13 +260,13 @@ export default function Equipment() {
             <Printer size={14} />
             목록 인쇄
           </button>
-          <button
+          {canCreate && <button
             onClick={handleOpenCreate}
             className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border-0"
           >
             <Plus size={15} />
             입력
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -389,7 +312,7 @@ export default function Equipment() {
                   <tr key={eq.id} className="border-b border-slate-900 hover:bg-slate-900/30 text-slate-300 print:border-slate-200 print:text-slate-800 print:hover:bg-transparent">
                     <td className="p-3 font-mono text-slate-400 print:text-slate-600">{eq.id}</td>
                     <td className="p-3 font-semibold text-slate-200 print:text-slate-900">{eq.name}</td>
-                    <td className="p-3">{plants.find(p => p.id === eq.plantId)?.name || eq.plantId}</td>
+                    <td className="p-3">{plantNames.get(eq.plantId) || eq.plantId}</td>
                     <td className="p-3 text-slate-400 print:text-slate-600">{eq.location || '-'}</td>
                     <td className="p-3 text-slate-400 print:text-slate-600">{formatDateOnly(eq.installDate) || '-'}</td>
                     <td className="p-3 text-slate-400 print:text-slate-600">{eq.makerName || '-'}</td>
@@ -402,18 +325,20 @@ export default function Equipment() {
                       </ListBadge>
                     </td>
                     <td className="p-3 text-right space-x-2 print:hidden">
-                      <ListIconButton
+                      {canUpdate && <ListIconButton
                         onClick={() => handleOpenEdit(eq)}
+                        disabled={pendingAction !== null}
                         label={`${eq.name} 상세/수정`}
                         icon={Edit2}
                         tone="accent"
-                      />
-                      <ListIconButton
+                      />}
+                      {canDelete && <ListIconButton
                         onClick={() => handleDelete(eq)}
+                        disabled={pendingAction !== null}
                         label={`${eq.name} 삭제`}
                         icon={Trash2}
                         tone="danger"
-                      />
+                      />}
                     </td>
                   </tr>
                 ))
@@ -423,307 +348,18 @@ export default function Equipment() {
         </div>
       </div>
 
-      {/* Detail Input Dialog/Modal */}
-      {isFormOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl">
-            {/* Modal Header */}
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0">
-              <h2 className="text-lg font-bold text-slate-200">
-                {editingId ? `설비 수정 (${editingId})` : '신규 설비 등록'}
-              </h2>
-              <button
-                onClick={() => setIsFormOpen(false)}
-                className="text-slate-500 hover:text-slate-300 p-1 hover:bg-slate-800 rounded transition-colors border-0 cursor-pointer bg-transparent"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <form onSubmit={handleFormSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
-              {/* [기본 정보] 섹션 */}
-              <div>
-                <h3 className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-3 border-l-2 border-blue-500 pl-2">
-                  [기본 정보]
-                </h3>
-                <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-5">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-                    <div>
-                      <label className="block text-slate-400 mb-1.5">플랜트 지정 <span className="text-rose-500">*</span></label>
-                      <select
-                        value={plantId}
-                        onChange={(e) => setPlantId(e.target.value)}
-                        disabled={!!editingId}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none transition-colors"
-                      >
-                        {plants.map(p => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 mb-1.5">설비 코드 <span className="text-rose-500">*</span></label>
-                      <input
-                        type="text"
-                        required
-                        disabled={!!editingId}
-                        value={id}
-                        onChange={(e) => setId(e.target.value)}
-                        placeholder="예: EQ_PMP001"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none transition-colors disabled:opacity-50"
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="block text-slate-400 mb-1.5">설비명 <span className="text-rose-500">*</span></label>
-                      <input
-                        type="text"
-                        required
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        placeholder="예: 제1송수 펌프 모터"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none transition-colors"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 mb-1.5">설비 구분 타입</label>
-                      <select
-                        value={eqTypeCode}
-                        onChange={(e) => setEqTypeCode(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none transition-colors"
-                      >
-                        <option value="PUMP">펌프 (PUMP)</option>
-                        <option value="MOTOR">모터 (MOTOR)</option>
-                        <option value="BOILER">보일러 (BOILER)</option>
-                        <option value="VALVE">밸브 (VALVE)</option>
-                        <option value="COMPRESSOR">압축기 (COMPRESSOR)</option>
-                        <option value="PANEL">전기판넬 (PANEL)</option>
-                        <option value="ETC">기타 설비 (ETC)</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 mb-1.5">설치 위치</label>
-                      <input
-                        type="text"
-                        value={location}
-                        onChange={(e) => setLocation(e.target.value)}
-                        placeholder="예: 공장 동편 기계실"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none transition-colors"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 mb-1.5">설치 일자</label>
-                      <input
-                        type="date"
-                        value={installDate}
-                        onChange={(e) => setInstallDate(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none transition-colors"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 mb-1.5">작업허가 대상</label>
-                      <select
-                        value={workPermitYn}
-                        onChange={(e) => setWorkPermitYn(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none transition-colors"
-                      >
-                        <option value="N">미대상 (일반작업)</option>
-                        <option value="Y">대상 (안전허가 요구)</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* [제조사 및 스펙 정보] 섹션 */}
-              <div>
-                <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-3 border-l-2 border-emerald-500 pl-2">
-                  [제조사 및 스펙 정보]
-                </h3>
-                <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-5">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-                    <div>
-                      <label className="block text-slate-400 mb-1.5">제조사</label>
-                      <input
-                        type="text"
-                        value={makerName}
-                        onChange={(e) => setMakerName(e.target.value)}
-                        placeholder="제조사명"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none transition-colors"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 mb-1.5">모델명</label>
-                      <input
-                        type="text"
-                        value={model}
-                        onChange={(e) => setModel(e.target.value)}
-                        placeholder="모델명"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none transition-colors"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 mb-1.5">일련번호 (S/N)</label>
-                      <input
-                        type="text"
-                        value={serialNumber}
-                        onChange={(e) => setSerialNumber(e.target.value)}
-                        placeholder="Serial Number"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none transition-colors"
-                      />
-                    </div>
-                    <div className="sm:col-span-2 md:col-span-1">
-                      <label className="block text-slate-400 mb-1.5">제조사 스펙상세</label>
-                      <input
-                        type="text"
-                        value={spec}
-                        onChange={(e) => setSpec(e.target.value)}
-                        placeholder="예: 220V, 60Hz, 15kW"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none transition-colors"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* [운영 정보] 섹션 */}
-              <div>
-                <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-3 border-l-2 border-indigo-500 pl-2">
-                  [운영 정보]
-                </h3>
-                <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-5">
-                  <div className="grid grid-cols-1 gap-4 text-xs">
-                    <div>
-                      <label className="block text-slate-400 mb-1.5">비고 및 설명</label>
-                      <textarea
-                        value={remarks}
-                        onChange={(e) => setRemarks(e.target.value)}
-                        placeholder="설비 관련 설명 또는 특이사항 기록"
-                        rows={2}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none transition-colors resize-none"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Check Cycles Section */}
-              <div>
-                <div className="flex justify-between items-center mb-4 border-l-2 border-emerald-500 pl-2">
-                  <div>
-                    <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">설비 정기 점검 주기</h3>
-                    <p className="text-[10px] text-slate-500 mt-0.5">점검유형별 주기를 등록하면 예방점검 스케줄에 자동 반영됩니다.</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleAddCheckCycle}
-                    className="bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-lg px-2.5 py-1 text-[11px] font-semibold flex items-center gap-1 transition-colors border-0 cursor-pointer"
-                  >
-                    <RefreshCw size={13} />
-                    주기 추가
-                  </button>
-                </div>
-
-                <div className="space-y-3">
-                  {checkCycles.length === 0 ? (
-                    <div className="border border-dashed border-slate-800 p-6 text-center text-slate-500 text-xs rounded-xl">
-                      등록된 점검주기가 없습니다. 주기 추가 버튼으로 점검 주기를 등록해 주세요.
-                    </div>
-                  ) : (
-                    checkCycles.map((cycle, idx) => (
-                      <div key={idx} className="flex gap-3 bg-slate-950 border border-slate-800 rounded-xl p-4 text-xs items-end">
-                        <div className="flex-1 grid grid-cols-2 lg:grid-cols-5 gap-3">
-                          <div>
-                            <label className="block text-slate-500 text-[10px] mb-1">점검유형 <span className="text-rose-500">*</span></label>
-                            <select
-                              value={cycle.checkTypeCode}
-                              onChange={(e) => handleCheckCycleChange(idx, 'checkTypeCode', e.target.value)}
-                              className="w-full bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg py-1.5 px-2 text-slate-200 outline-none"
-                            >
-                              <option value="">-- 선택 --</option>
-                              <option value="INSPECT">예방점검</option>
-                              <option value="PATROL">순회점검</option>
-                              <option value="REPLACE">소모품교체</option>
-                              <option value="LEGAL">정기법정검사</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-slate-500 text-[10px] mb-1">주기 값 <span className="text-rose-500">*</span></label>
-                            <input
-                              type="number"
-                              min="1"
-                              value={cycle.cycleVal === null ? '' : cycle.cycleVal}
-                              onChange={(e) => handleCheckCycleChange(idx, 'cycleVal', e.target.value)}
-                              placeholder="예: 3"
-                              className="w-full bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg py-1.5 px-3 text-slate-200 outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-slate-500 text-[10px] mb-1">주기 단위 <span className="text-rose-500">*</span></label>
-                            <select
-                              value={cycle.cycleUnit}
-                              onChange={(e) => handleCheckCycleChange(idx, 'cycleUnit', e.target.value)}
-                              className="w-full bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg py-1.5 px-3 text-slate-200 outline-none"
-                            >
-                              <option value="D">일 (D)</option>
-                              <option value="W">주 (W)</option>
-                              <option value="M">월 (M)</option>
-                              <option value="Y">년 (Y)</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-slate-500 text-[10px] mb-1">지난 점검일</label>
-                            <input
-                              type="date"
-                              value={cycle.lastCheckDate || ''}
-                              onChange={(e) => handleCheckCycleChange(idx, 'lastCheckDate', e.target.value)}
-                              className="w-full bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg py-1.5 px-3 text-slate-200 outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-slate-500 text-[10px] mb-1">다음 점검일</label>
-                            <input
-                              type="date"
-                              value={cycle.nextCheckDate || ''}
-                              onChange={(e) => handleCheckCycleChange(idx, 'nextCheckDate', e.target.value)}
-                              className="w-full bg-slate-900 border border-slate-800 focus:border-emerald-500 rounded-lg py-1.5 px-3 text-slate-200 outline-none"
-                            />
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveCheckCycle(idx)}
-                          className="p-2 bg-slate-900 hover:bg-slate-850 text-rose-500 rounded-lg transition-colors border-0 cursor-pointer mb-0"
-                        >
-                          <MinusCircle size={16} />
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </form>
-
-            {/* Modal Footer */}
-            <div className="p-6 border-t border-slate-800 flex justify-end gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => setIsFormOpen(false)}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer border-0"
-              >
-                취소
-              </button>
-              <button
-                onClick={handleFormSubmit}
-                disabled={isLoading}
-                className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-6 text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer border-0 disabled:opacity-50"
-              >
-                <Save size={14} />
-                {isLoading ? '저장 중...' : '설비 저장'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {isFormOpen && formValues && (
+        <EquipmentFormModal
+          key={editingId || 'create'}
+          editingId={editingId}
+          initialValues={formValues}
+          plants={plants}
+          equipmentTypes={equipmentTypes}
+          checkTypes={checkTypes}
+          isSaving={isLoading}
+          onClose={() => setIsFormOpen(false)}
+          onSubmit={handleFormSubmit}
+        />
       )}
     </div>
   );

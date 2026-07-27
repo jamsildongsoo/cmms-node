@@ -1,7 +1,7 @@
 import PrintHeader from './PrintHeader';
 import { PrintSection, PrintField, PrintTable } from './PrintDoc';
 import { getCommonStatusLabel } from '../constants/status';
-import ApprovalSignatureBox, { type ApprovalSignatureStep } from './ApprovalSignatureBox';
+import ApprovalSignatureBox, { type ApprovalSignatureStep } from '../features/approval/components/ApprovalSignatureBox';
 
 interface WoItem {
   itemNo: number;

@@ -19,13 +19,15 @@ import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import {
   JwtPayload,
-  LoginRequest,
   LoginResponse,
-  SignUpRequest,
-  PasswordChangeRequest,
-  UserUpdateRequest,
   UserProfileResponse,
 } from './auth.interfaces';
+import {
+  LoginRequestDto,
+  PasswordChangeRequestDto,
+  SignUpRequestDto,
+  UserUpdateRequestDto,
+} from './dto/auth-request.dto';
 import { AppModule } from '../../common/constants/module.constants';
 import { User } from '../../entities/users.entity';
 import { Role } from '../../entities/role.entity';
@@ -64,7 +66,7 @@ export class AuthService {
   // =========================================================================
   // 로그인
   // =========================================================================
-  async login(req: LoginRequest, ipAddress: string): Promise<LoginResponse> {
+  async login(req: LoginRequestDto, ipAddress: string): Promise<LoginResponse> {
     const companyId = req.companyId.toUpperCase().trim();
 
     // 1. 사용자 조회
@@ -226,7 +228,7 @@ export class AuthService {
   // =========================================================================
   // 회원가입
   // =========================================================================
-  async signUp(req: SignUpRequest): Promise<void> {
+  async signUp(req: SignUpRequestDto): Promise<void> {
     const companyId = req.companyId.toUpperCase().trim();
 
     const company = await this.companyRepository.findOne({
@@ -296,7 +298,7 @@ export class AuthService {
   async updateMyProfile(
     companyId: string,
     userId: string,
-    req: UserUpdateRequest,
+    req: UserUpdateRequestDto,
   ): Promise<void> {
     await this.userRepository.update(
       { companyId, id: userId, deleteYn: 'N' },
@@ -317,7 +319,7 @@ export class AuthService {
   async changePassword(
     companyId: string,
     userId: string,
-    req: PasswordChangeRequest,
+    req: PasswordChangeRequestDto,
   ): Promise<void> {
     const user = await this.userRepository.findOne({
       select: { passwordHash: true },
