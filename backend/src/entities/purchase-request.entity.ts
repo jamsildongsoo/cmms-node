@@ -19,6 +19,9 @@ export class PurchaseRequest extends BaseEntity {
   @Column({ name: 'requester_id', length: 50 })
   requesterId!: string;
 
+  @Column({ name: 'department_id', type: 'varchar', length: 50, nullable: true })
+  departmentId!: string | null;
+
   @Column({ name: 'request_date', type: 'date' })
   requestDate!: string;
 
@@ -36,6 +39,9 @@ export class PurchaseRequest extends BaseEntity {
 
   @Column({ type: 'varchar', name: 'purchase_manager_contact', length: 100, nullable: true })
   purchaseManagerContact!: string | null;
+
+  @Column({ type: 'text', name: 'purchase_manager_remarks', nullable: true })
+  purchaseManagerRemarks!: string | null;
 
   @Column({ name: 'order_date', type: 'date', nullable: true })
   orderDate!: string | null;

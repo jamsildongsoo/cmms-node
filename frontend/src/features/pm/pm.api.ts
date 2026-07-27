@@ -12,8 +12,8 @@ export const pmApi = {
     return response.data;
   },
   async getDetail(plantId: string, id: string): Promise<PmRecordDetail> {
-    const response = await axiosInstance.get<PmRecordDetail>('/pm/records/details', {
-      params: { plantId, id },
+    const response = await axiosInstance.get<PmRecordDetail>(`/pm/records/${id}`, {
+      params: { plantId },
     });
     return response.data;
   },
@@ -28,13 +28,13 @@ export const pmApi = {
     return response.data;
   },
   async update(request: PmSaveRequest): Promise<PmRecord> {
-    const response = await axiosInstance.put<PmRecord>('/pm/records', request);
+    const response = await axiosInstance.put<PmRecord>(`/pm/records/${request.pmRecord.id}`, request);
     return response.data;
   },
   async closePlan(plantId: string, id: string): Promise<void> {
-    await axiosInstance.patch(`/pm/plans/${id}/close`, undefined, { params: { plantId } });
+    await axiosInstance.post(`/pm/plans/${id}/actions/close`, undefined, { params: { plantId } });
   },
   async delete(plantId: string, id: string): Promise<void> {
-    await axiosInstance.delete('/pm/records', { params: { plantId, id } });
+    await axiosInstance.delete(`/pm/records/${id}`, { params: { plantId } });
   },
 };

@@ -117,6 +117,18 @@ html.light {
   padding-left: 1.5rem;
 }
 
+.rich-text-content ul {
+  list-style-type: disc;
+}
+
+.rich-text-content ol {
+  list-style-type: decimal;
+}
+
+.rich-text-content li {
+  display: list-item;
+}
+
 .rich-text-content a {
   color: #60a5fa;
   text-decoration: underline;

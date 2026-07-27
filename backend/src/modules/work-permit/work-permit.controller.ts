@@ -5,6 +5,7 @@ import {
   Put,
   Delete,
   Body,
+  Param,
   Query,
   UseGuards,
   HttpCode,
@@ -35,11 +36,11 @@ export class WorkPermitController {
     return this.workPermitService.getWorkPermitsByCompany(companyId, userId, searchType, searchValue);
   }
 
-  @Get('details')
+  @Get(':id')
   @Permission(AppModule.WP, 'R')
   async getWorkPermitDetails(
+    @Param('id') id: string,
     @Query('plantId') plantId: string,
-    @Query('id') id: string,
   ): Promise<WorkPermitResponseDto> {
     const { companyId, userId } = getTenantContext();
     return this.workPermitService.getWorkPermitDetails(companyId, plantId, id, userId);
@@ -54,23 +55,23 @@ export class WorkPermitController {
     return this.workPermitService.saveWorkPermit(companyId, permit, userId, 'create');
   }
 
-  @Put()
-  @PermissionSave(AppModule.WP, 'status', 'U')
+  @Put(':id')
   async updateWorkPermit(
+    @Param('id') id: string,
     @Body() permit: SaveWorkPermitDto,
   ): Promise<WorkPermitResponseDto> {
-    const { companyId, userId } = getTenantContext();
-    return this.workPermitService.saveWorkPermit(companyId, permit, userId, 'update');
+    const { companyId, userId, roleId } = getTenantContext();
+    permit.id = id;
+    return this.workPermitService.saveWorkPermit(companyId, permit, userId, 'update', roleId);
   }
 
-  @Delete()
+  @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Permission(AppModule.WP, 'D')
   async deleteWorkPermit(
+    @Param('id') id: string,
     @Query('plantId') plantId: string,
-    @Query('id') id: string,
   ): Promise<void> {
-    const { companyId, userId } = getTenantContext();
-    await this.workPermitService.deleteWorkPermit(companyId, plantId, id, userId);
+    const { companyId, userId, roleId } = getTenantContext();
+    await this.workPermitService.deleteWorkPermit(companyId, plantId, id, userId, roleId);
   }
 }

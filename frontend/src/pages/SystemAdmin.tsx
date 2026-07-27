@@ -74,6 +74,10 @@ export default function SystemAdmin() {
       toast.error('회사 코드와 회사명은 필수입니다.');
       return;
     }
+    if (!/^[A-Z0-9]{1,5}$/.test(coId.trim())) {
+      toast.error('회사 코드는 영문 대문자·숫자로 최대 5자까지 입력해주세요.');
+      return;
+    }
     if (!coAdminId.trim() || !coAdminName.trim() || !coAdminPw) {
       toast.error('관리자 ID·이름·초기 비밀번호는 필수입니다.');
       return;
@@ -161,10 +165,20 @@ export default function SystemAdmin() {
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
           <div className="space-y-2">
             <h3 className="text-sm font-bold text-slate-200">신규 회사 생성</h3>
-            <p className="text-[11px] text-slate-500">생성 시 기본 롤(ADMIN/MANAGER/USER)·권한 매트릭스·공통코드가 자동 시딩되고, 아래 관리자 계정이 <span className="text-slate-300 font-semibold">ADMIN 롤</span>로 함께 생성됩니다. 회사 코드는 대문자로 정규화됩니다.</p>
+            <p className="text-[11px] text-slate-500">생성 시 기본 롤(ADMIN/MANAGER/USER)·권한 매트릭스·공통코드가 자동 시딩되고, 아래 관리자 계정이 <span className="text-slate-300 font-semibold">ADMIN 롤</span>로 함께 생성됩니다.</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <input value={coId} onChange={e => setCoId(e.target.value)} placeholder="회사 코드 * (영문 대문자/숫자)"
-                className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200" />
+              <div>
+                <input
+                  value={coId}
+                  maxLength={5}
+                  onChange={e => setCoId(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5))}
+                  placeholder="회사 코드 * (예: GRE)"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200"
+                />
+                <p className="mt-1 px-1 text-[10px] text-amber-400/90">
+                  결재문서 번호에 포함됩니다. 영문 대문자·숫자 최대 5자, 3자를 권장합니다.
+                </p>
+              </div>
               <input value={coName} onChange={e => setCoName(e.target.value)} placeholder="회사명 *"
                 className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200" />
               <input value={coBizNo} onChange={e => setCoBizNo(e.target.value)} placeholder="사업자번호 (선택)"

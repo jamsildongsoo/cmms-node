@@ -21,7 +21,7 @@ import { openPrintWindow } from '../utils/printWindow';
 import { openListPrint } from '../utils/listPrint';
 import { createProcurementApprovalContent } from '../utils/procurementApprovalContent';
 import { getApiErrorMessage } from '../utils/apiError';
-import type { CodeItem, Plant, Warehouse } from '../features/mdm/mdm.types';
+import type { CodeItem, Department, Plant, Warehouse } from '../features/mdm/mdm.types';
 import type { InventoryReference as InventoryRef } from '../features/master/master-reference.types';
 import type {
   PurchaseReceiveLine as ReceiveLine,
@@ -49,17 +49,19 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [plants, setPlants] = useState<Plant[]>([]);
+  const [depts, setDepts] = useState<Department[]>([]);
   const [prTypes, setPrTypes] = useState<CodeItem[]>([]);
   const [inventories, setInventories] = useState<InventoryRef[]>([]);
   const [usersList, setUsersList] = useState<ReferenceUser[]>([]);
 
   const loadRefs = async () => {
     try {
-      const [vendorItems, warehouseItems, plantItems, typeItems, inventoryItems, userItems] =
+      const [vendorItems, warehouseItems, plantItems, deptItems, typeItems, inventoryItems, userItems] =
         await Promise.all([
           procurementApi.getVendors(),
           referenceApi.getWarehouses(),
           referenceApi.getPlants(),
+          referenceApi.getDepartments(),
           referenceApi.getCodes('PR_TYPE'),
           masterReferenceApi.getInventories(),
           referenceApi.getUsers(),
@@ -67,6 +69,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       setVendors(vendorItems);
       setWarehouses(warehouseItems);
       setPlants(plantItems);
+      setDepts(deptItems);
       setPrTypes(typeItems);
       setInventories(inventoryItems);
       setUsersList(userItems);
@@ -126,6 +129,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
     setFormHeader({
       requestDate: todayLocal(),
       plantId: activePlantId || user?.lastLoginPlantId || '',
+      departmentId: user?.departmentId || '',
     });
     setFormItems([{ inventoryId: '', qty: 0, unit: '' }]);
     setFormOpen(true);
@@ -183,6 +187,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
     vendorId: string;
     purchaseManager: string;
     purchaseManagerContact: string;
+    purchaseManagerRemarks: string;
     orderDate: string;
     etaDate: string;
   } | null>(null);
@@ -196,6 +201,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
         vendorId: orderModal.vendorId,
         purchaseManager: orderModal.purchaseManager,
         purchaseManagerContact: orderModal.purchaseManagerContact,
+        purchaseManagerRemarks: orderModal.purchaseManagerRemarks,
         orderDate: orderModal.orderDate,
         etaDate: orderModal.etaDate,
       });
@@ -373,6 +379,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
                 vendorManager={vendor?.manager}
                 purchaseManager={header.purchaseManager || '-'}
                 purchaseManagerContact={header.purchaseManagerContact}
+                purchaseManagerRemarks={header.purchaseManagerRemarks}
                 remarks={header.remarks}
                 items={detail.items.map((item) => ({
                   ...item,
@@ -390,7 +397,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
               warehouseId={header.warehouseId}
               title={header.title}
               remarks={header.remarks}
-              departmentName={requester?.departmentName || requester?.departmentId}
+              departmentName={getDepartmentName(header.departmentId || requester?.departmentId)}
               authorName={requester?.name || header.requesterId}
               approvalId={header.approvalId}
               approvalSteps={await loadApprovalSignatureSteps(header.approvalId, usersList)}
@@ -411,6 +418,8 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
     return warehouses.filter(w => w.plantId === formHeader.plantId);
   }, [warehouses, formHeader.plantId]);
   const currentUserRef = usersList.find((candidate) => candidate.id === user?.id);
+  const getDepartmentName = (departmentId?: string | null) =>
+    depts.find((dept) => dept.id === departmentId)?.name || departmentId || '-';
   const approvalContent = useMemo(() => {
     if (!approvalRef) return undefined;
     const requester = usersList.find((candidate) => candidate.id === approvalRef.requesterId)
@@ -421,8 +430,8 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
 
     return createProcurementApprovalContent({
       requestNo: approvalRef.id,
-      createdAt: formatDateOnly(approvalRef.createdAt),
-      departmentName: `${requester?.departmentId || '-'} / ${requester?.departmentName || '-'}`,
+      createdAt: approvalRef.createdAt,
+      departmentName: getDepartmentName(approvalRef.departmentId || requester?.departmentId),
       authorName: `${approvalRef.requesterId || user?.id || '-'} / ${requester?.name || user?.name || '-'}`,
       requestDate: formatDateOnly(approvalRef.requestDate),
       requestTypeName: requestType
@@ -447,6 +456,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
   }, [
     approvalRef,
     currentUserRef,
+    depts,
     formItems,
     inventories,
     plants,
@@ -597,6 +607,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
                         vendorId: pr.vendorId || '',
                         purchaseManager: pr.purchaseManager || '',
                         purchaseManagerContact: pr.purchaseManagerContact || '',
+                        purchaseManagerRemarks: pr.purchaseManagerRemarks || '',
                         orderDate: todayLocal(),
                         etaDate: '',
                       })} label="발주" icon={ShoppingCart} tone="warning" />
@@ -667,7 +678,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
           <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs mb-6">
             <div><span className="text-slate-500 block mb-0.5">문서번호</span><span className="font-mono font-semibold text-slate-300">{formHeader.id || '(저장 시 자동발행)'}</span></div>
             <div><span className="text-slate-500 block mb-0.5">작성일</span><span className="font-mono text-slate-300">{formatDateOnly(formHeader.createdAt) || (formHeader.id ? '-' : '저장 시 기록')}</span></div>
-            <div><span className="text-slate-500 block mb-0.5">부서</span><span className="text-slate-300">{user?.departmentId || '-'} / {currentUserRef?.departmentName || '-'}</span></div>
+            <div><span className="text-slate-500 block mb-0.5">부서</span><span className="text-slate-300">{formHeader.departmentId || '-'} / {getDepartmentName(formHeader.departmentId)}</span></div>
             <div><span className="text-slate-500 block mb-0.5">작성자</span><span className="text-slate-300">{user?.id || '-'} / {user?.name || '-'}</span></div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
@@ -727,17 +738,35 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       {/* 발주 모달 */}
       {orderModal && (
         <Modal title="발주 등록" onClose={() => setOrderModal(null)}>
-          <div className="space-y-3 text-xs">
-            <Field label="벤더"><input value={orderModal.vendorId} onChange={e => setOrderModal({ ...orderModal, vendorId: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" list="purchase-vendor-options" placeholder="벤더명 또는 코드를 직접 입력" />
-              <datalist id="purchase-vendor-options">
-                {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-              </datalist>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            <Field label="벤더 선택">
+              <select
+                value={orderModal.vendorId}
+                onChange={e => setOrderModal({ ...orderModal, vendorId: e.target.value })}
+                className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50"
+              >
+                <option value="">선택</option>
+                {vendors.map((vendor) => (
+                  <option key={vendor.id} value={vendor.id}>
+                    {vendor.id} — {vendor.name}
+                  </option>
+                ))}
+              </select>
             </Field>
             <Field label="구매담당자"><input value={orderModal.purchaseManager} onChange={e => setOrderModal({ ...orderModal, purchaseManager: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" placeholder="예: 홍길동, 구매팀 대표, 익명" /></Field>
-            <Field label="담당자 연락처"><input value={orderModal.purchaseManagerContact} onChange={e => setOrderModal({ ...orderModal, purchaseManagerContact: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" placeholder="전화번호 또는 이메일" /></Field>
+            <Field label="구매담당자 연락처"><input value={orderModal.purchaseManagerContact} onChange={e => setOrderModal({ ...orderModal, purchaseManagerContact: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" placeholder="전화번호 또는 이메일" /></Field>
             <Field label="발주일"><input type="date" value={orderModal.orderDate} onChange={e => setOrderModal({ ...orderModal, orderDate: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
             <Field label="예정도착일"><input type="date" value={orderModal.etaDate} onChange={e => setOrderModal({ ...orderModal, etaDate: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
-            <div className="flex justify-end gap-2 mt-4">
+            <Field label="구매담당자 비고" className="md:col-span-3">
+              <textarea
+                value={orderModal.purchaseManagerRemarks}
+                onChange={e => setOrderModal({ ...orderModal, purchaseManagerRemarks: e.target.value })}
+                rows={3}
+                className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50 resize-y"
+                placeholder="발주 진행 메모를 입력하세요"
+              />
+            </Field>
+            <div className="md:col-span-3 flex justify-end gap-2 mt-4">
               <button onClick={() => setOrderModal(null)} className="bg-slate-700 text-white rounded px-3 py-1.5 border-0 cursor-pointer">취소</button>
               <button onClick={submitOrder} className="bg-amber-700 hover:bg-amber-600 text-white rounded px-3 py-1.5 font-semibold border-0 cursor-pointer">발주</button>
             </div>
@@ -802,13 +831,20 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       {/* 벤더 폼 */}
       {vendorForm && (
         <Modal title={vendorForm.editing ? '벤더 수정' : '신규 벤더'} onClose={() => setVendorForm(null)}>
-          <div className="grid grid-cols-2 gap-3 text-xs">
-            <Field label="코드"><input value={vendorForm.id} onChange={e => setVendorForm({ ...vendorForm, id: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" disabled={vendorForm.editing} /></Field>
-            <Field label="이름"><input value={vendorForm.name} onChange={e => setVendorForm({ ...vendorForm, name: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+            <Field label="벤더코드"><input value={vendorForm.id} onChange={e => setVendorForm({ ...vendorForm, id: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" disabled={vendorForm.editing} /></Field>
+            <Field label="이름" className="md:col-span-1 lg:col-span-2"><input value={vendorForm.name} onChange={e => setVendorForm({ ...vendorForm, name: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
             <Field label="사업자번호"><input value={vendorForm.bizNo} onChange={e => setVendorForm({ ...vendorForm, bizNo: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
-            <Field label="연락처"><input value={vendorForm.contact} onChange={e => setVendorForm({ ...vendorForm, contact: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
             <Field label="담당자"><input value={vendorForm.manager} onChange={e => setVendorForm({ ...vendorForm, manager: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
-            <Field label="비고" className="col-span-2"><input value={vendorForm.remarks} onChange={e => setVendorForm({ ...vendorForm, remarks: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
+            <Field label="연락처"><input value={vendorForm.contact} onChange={e => setVendorForm({ ...vendorForm, contact: e.target.value })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></Field>
+            <Field label="비고" className="md:col-span-2 lg:col-span-3">
+              <textarea
+                value={vendorForm.remarks}
+                onChange={e => setVendorForm({ ...vendorForm, remarks: e.target.value })}
+                rows={4}
+                className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50 resize-y"
+              />
+            </Field>
           </div>
           <div className="flex justify-end gap-2 mt-4">
             <button onClick={() => setVendorForm(null)} className="bg-slate-700 text-white rounded px-3 py-1.5 text-xs border-0 cursor-pointer">취소</button>

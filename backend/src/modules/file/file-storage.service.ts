@@ -93,7 +93,7 @@ export class FileStorageService {
         if (!group) throw new NotFoundException('첨부 그룹을 찾을 수 없습니다.');
         gno = groupNo;
         effectiveModule = this.parseAppModule(group.refModule);
-        await this.assertModulePermission(effectiveModule, ['U']);
+        await this.assertUploadPermissionForExistingGroup(group, effectiveModule);
       } else {
         effectiveModule = this.parseAppModule(refModule);
         await this.assertModulePermission(effectiveModule, ['C', 'U']);
@@ -342,6 +342,22 @@ export class FileStorageService {
     });
 
     if (!allowed) throw new ForbiddenException('파일 접근 권한이 없습니다.');
+  }
+
+  private async assertUploadPermissionForExistingGroup(
+    group: FileAttachment,
+    module: AppModule,
+  ): Promise<void> {
+    const { userId } = getTenantContext();
+
+    // 전자결재 초안 작성자는 기존 첨부 그룹에 파일을 이어서 추가할 수 있어야 한다.
+    // 기본 USER/MANAGER 권한은 APR의 U가 N이므로, 작성자 본인에 한해 C도 허용한다.
+    if (module === AppModule.APR && group.createdBy === userId) {
+      await this.assertModulePermission(module, ['C', 'U']);
+      return;
+    }
+
+    await this.assertModulePermission(module, ['U']);
   }
 
   private async getItemOwned(

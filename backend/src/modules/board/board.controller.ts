@@ -2,10 +2,10 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Delete,
   Body,
   Param,
-  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -36,7 +36,7 @@ export class BoardController {
     return this.boardService.getBoards(companyId);
   }
 
-  @Get(':id/details')
+  @Get(':id')
   @Permission(AppModule.BRD, 'R')
   async getBoardDetails(
     @Param('id', ParseIntPipe) id: number,
@@ -51,6 +51,16 @@ export class BoardController {
     return this.boardService.saveBoard(companyId, board, userId, roleId);
   }
 
+  @Put(':id')
+  async updateBoard(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() board: SaveBoardDto,
+  ): Promise<BoardResponseDto> {
+    const { companyId, userId, roleId } = getTenantContext();
+    board.id = id;
+    return this.boardService.saveBoard(companyId, board, userId, roleId);
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteBoard(
@@ -60,20 +70,22 @@ export class BoardController {
     await this.boardService.deleteBoard(companyId, id, userId, roleId);
   }
 
-  @Post('comment')
+  @Post(':id/comments')
   @Permission(AppModule.BRD, 'C')
   async saveComment(
+    @Param('id', ParseIntPipe) boardId: number,
     @Body() comment: SaveCommentDto,
   ): Promise<BoardCommentResponseDto> {
     const { companyId, userId } = getTenantContext();
+    comment.boardId = boardId;
     return this.boardService.saveComment(companyId, comment, userId);
   }
 
-  @Delete('comment')
+  @Delete(':id/comments/:commentNo')
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteComment(
-    @Query('boardId', ParseIntPipe) boardId: number,
-    @Query('commentNo', ParseIntPipe) commentNo: number,
+    @Param('id', ParseIntPipe) boardId: number,
+    @Param('commentNo', ParseIntPipe) commentNo: number,
   ): Promise<void> {
     const { companyId, userId, roleId } = getTenantContext();
     await this.boardService.deleteComment(

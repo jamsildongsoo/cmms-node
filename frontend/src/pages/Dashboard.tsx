@@ -17,6 +17,7 @@ const Procurement = lazy(() => import('./Procurement'));
 const PurchaseReceipt = lazy(() => import('./PurchaseReceipt'));
 const Approval = lazy(() => import('./Approval'));
 const SystemAdmin = lazy(() => import('./SystemAdmin'));
+const PowerGeneration = lazy(() => import('./PowerGeneration'));
 
 function PageLoading() {
   return (
@@ -62,6 +63,8 @@ export default function Dashboard() {
         return <Board />;
       case 'system':
         return <SystemAdmin />;
+      case 'power-generation':
+        return <PowerGeneration />;
       default:
         return <Board />;
     }

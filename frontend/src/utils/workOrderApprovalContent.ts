@@ -1,4 +1,5 @@
 import type { RichTextDocument, RichTextNode } from '../types/richText';
+import { formatDateOnly } from './datetime';
 import {
   approvalHeading,
   approvalParagraph,
@@ -33,7 +34,7 @@ export const createWorkOrderApprovalContent = (
     approvalHeading('문서 정보', 3),
     approvalTable([
       ['문서번호', input.woNo],
-      ['작성일자', input.createdAt || '-'],
+      ['작성일자', formatDateOnly(input.createdAt) || '-'],
       ['부서명', input.departmentName || '-'],
       ['작성자', input.authorName || '-'],
     ]),

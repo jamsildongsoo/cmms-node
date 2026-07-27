@@ -35,19 +35,21 @@ export const procurementApi = {
     return response.data;
   },
   async confirm(id: string): Promise<void> {
-    await axiosInstance.post(`/procurement/requests/${id}/confirm`);
+    await axiosInstance.post(`/procurement/requests/${id}/actions/confirm`);
   },
   async deleteRequest(id: string): Promise<void> {
     await axiosInstance.delete(`/procurement/requests/${id}`);
   },
   async closeRequest(id: string): Promise<void> {
-    await axiosInstance.post(`/procurement/requests/${id}/close`);
+    await axiosInstance.post(`/procurement/requests/${id}/actions/close`);
   },
   async placeOrder(request: Record<string, unknown>): Promise<void> {
-    await axiosInstance.post('/procurement/orders', request);
+    const requestId = String(request.requestId);
+    const { requestId: _requestId, ...payload } = request;
+    await axiosInstance.post(`/procurement/requests/${requestId}/actions/order`, payload);
   },
   async startShipping(requestId: string, shipStartDate: string): Promise<void> {
-    await axiosInstance.post('/procurement/shipments', { requestId, shipStartDate });
+    await axiosInstance.post(`/procurement/requests/${requestId}/actions/ship`, { shipStartDate });
   },
   async receive(request: {
     requestId: string;
@@ -56,7 +58,8 @@ export const procurementApi = {
     close?: boolean;
     lines: PurchaseReceiveLine[];
   }): Promise<void> {
-    await axiosInstance.post('/procurement/receipts', request);
+    const { requestId, ...payload } = request;
+    await axiosInstance.post(`/procurement/requests/${requestId}/actions/receive`, payload);
   },
   async getReceiptRequests(): Promise<PurchaseReceiptRequestSummary[]> {
     const response = await axiosInstance.get<PurchaseReceiptRequestSummary[]>(

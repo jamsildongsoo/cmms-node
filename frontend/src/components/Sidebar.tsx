@@ -1,6 +1,6 @@
 import {
   Wrench, Package, ClipboardList, FileSignature,
-  Layers, Bell, User, LayoutDashboard, ShieldCheck, ShoppingCart, PackageCheck
+  Layers, Bell, User, LayoutDashboard, ShieldCheck, ShoppingCart, PackageCheck, Zap
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
@@ -42,6 +42,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
         { id: 'pm', label: '예방점검', icon: ClipboardList },
         { id: 'wo', label: '작업지시서', icon: ClipboardList },
         { id: 'wp', label: '작업허가서', icon: FileSignature },
+        { id: 'power-generation', label: '발전량 조회', icon: Zap },
         ...(canRequestPurchase ? [{ id: 'procurement-request', label: '구매요청', icon: ShoppingCart }] : []),
         ...(canManagePurchase ? [{ id: 'procurement-management', label: '구매관리', icon: ShoppingCart }] : []),
         ...(canReceivePurchase ? [{ id: 'purchase-receipt', label: '구매입고', icon: PackageCheck }] : []),

@@ -16,6 +16,8 @@ import { ApprovalModule } from './modules/approval/approval.module';
 import { BoardModule } from './modules/board/board.module';
 import { ProcurementModule } from './modules/procurement/procurement.module';
 import { SystemModule } from './modules/system/system.module';
+import { PowerGenerationModule } from './modules/power-generation/power-generation.module';
+import { PermissionPolicyModule } from './common/permissions/permission-policy.module';
 
 @Module({
   imports: [
@@ -24,6 +26,7 @@ import { SystemModule } from './modules/system/system.module';
       envFilePath: ['.env', '../.env'],
     }),
     DatabaseModule,
+    PermissionPolicyModule,
     AuthModule,
     MdmModule,
     MasterModule,
@@ -37,6 +40,7 @@ import { SystemModule } from './modules/system/system.module';
     BoardModule,
     ProcurementModule,
     SystemModule,
+    PowerGenerationModule,
   ],
   providers: [
     {

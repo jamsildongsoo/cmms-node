@@ -22,6 +22,7 @@ import { Role } from '../../entities/role.entity';
 import { Warehouse } from '../../entities/warehouse.entity';
 import { Vendor } from '../../entities/vendor.entity';
 import { ProcurementRepository } from './procurement.repository';
+import { PermissionPolicyService } from '../../common/permissions/permission-policy.service';
 
 export interface ItemLine {
   lineNo: number;
@@ -35,6 +36,7 @@ export interface SaveRequest {
   header: {
     id?: string | null;
     plantId?: string | null;
+    departmentId?: string | null;
     warehouseId: string;
     requestDate?: string | Date;
     requestType?: string | null;
@@ -48,7 +50,8 @@ export interface SaveRequest {
 export interface RequestDetail { header: PurchaseRequestResponse; items: ItemLine[] }
 export interface OrderRequest {
   requestId: string; vendorId: string; purchaseManager: string;
-  purchaseManagerContact?: string | null; orderDate?: string | Date; etaDate?: string | Date;
+  purchaseManagerContact?: string | null; purchaseManagerRemarks?: string | null;
+  orderDate?: string | Date; etaDate?: string | Date;
 }
 export interface ShipRequest { requestId: string; shipStartDate?: string | Date }
 export interface ReceiveLine { lineNo: number; qty: string; unitPrice: string }
@@ -58,9 +61,10 @@ export interface ReceiveRequest {
 }
 export interface PurchaseRequestResponse {
   companyId: string; id: string; plantId: string; warehouseId: string;
-  requesterId: string; requestDate: string; requestType: string | null;
+  requesterId: string; departmentId: string | null; requestDate: string; requestType: string | null;
   title: string; approvalId: string | null;
   vendorId: string | null; purchaseManager: string | null; purchaseManagerContact: string | null;
+  purchaseManagerRemarks: string | null;
   orderDate: string | null; etaDate: string | null;
   shipStartDate: string | null; status: string; procStatus: string | null;
   remarks: string | null; createdAt: string; createdBy: string;
@@ -91,6 +95,7 @@ export class ProcurementService {
     private readonly sequenceService: SequenceService,
     private readonly inventoryTxService: InventoryTxService,
     private readonly procurementRepository: ProcurementRepository,
+    private readonly permissionPolicyService: PermissionPolicyService,
   ) {}
 
   async getRequests(
@@ -234,6 +239,7 @@ export class ProcurementService {
     req: SaveRequest,
     operator: string,
     mode: 'create' | 'update',
+    roleId?: string,
   ): Promise<PurchaseRequestResponse> {
     const { header, items = [] } = req;
     const user = await this.dataSource.getRepository(User).findOne({
@@ -244,6 +250,9 @@ export class ProcurementService {
     const plantId = multiPlant ? header.plantId : user.lastLoginPlantId;
     if (!plantId) {
       throw new BadRequestException('지정 플랜트가 없어 구매요청을 생성할 수 없습니다.');
+    }
+    if (!user.departmentId) {
+      throw new BadRequestException('사용자 소속 부서가 없어 구매요청을 생성할 수 없습니다.');
     }
 
     const runner = this.dataSource.createQueryRunner();
@@ -268,6 +277,7 @@ export class ProcurementService {
           id,
           plantId,
           requesterId: operator,
+          departmentId: user.departmentId,
           requestDate: dateOnly(header.requestDate) || today(),
           status: DocStatus.TEMP,
           procStatus: null,
@@ -276,6 +286,15 @@ export class ProcurementService {
         });
       } else {
         entity = await this.findLocked(runner.manager, companyId, id);
+        await this.permissionPolicyService.assertCanUpdateOwnTempOrPermission({
+          companyId,
+          roleId: roleId ?? '',
+          module: AppModule.PUR,
+          status: entity.status,
+          ownerId: entity.requesterId,
+          operatorId: operator,
+          resourceLabel: '구매',
+        });
         if (![DocStatus.TEMP, DocStatus.REJECTED].includes(entity.status as DocStatus)) {
           throw new BadRequestException('저장(T) 또는 반려(R) 상태에서만 수정할 수 있습니다.');
         }
@@ -293,6 +312,9 @@ export class ProcurementService {
         status: entity.status,
         updatedBy: operator,
       });
+      if (!entity.departmentId) {
+        entity.departmentId = user.departmentId;
+      }
       await repository.save(entity);
       const itemRepository = runner.manager.getRepository(PurchaseRequestItem);
       await itemRepository.delete({ companyId, requestId: id });
@@ -348,6 +370,7 @@ export class ProcurementService {
       vendorId,
       purchaseManager,
       purchaseManagerContact: req.purchaseManagerContact?.trim() || null,
+      purchaseManagerRemarks: req.purchaseManagerRemarks?.trim() || null,
       orderDate: dateOnly(req.orderDate) || today(),
       etaDate: dateOnly(req.etaDate),
       procStatus: ProcStatus.ORDERED,
@@ -549,9 +572,18 @@ export class ProcurementService {
   }
 
   async deleteRequest(
-    companyId: string, requestId: string, operator: string,
+    companyId: string, requestId: string, operator: string, roleId: string,
   ): Promise<void> {
     const entity = await this.mustGetActive(companyId, requestId);
+    await this.permissionPolicyService.assertCanDeleteOwnTempOrPermission({
+      companyId,
+      roleId,
+      module: AppModule.PUR,
+      status: entity.status,
+      ownerId: entity.requesterId,
+      operatorId: operator,
+      resourceLabel: '구매',
+    });
     if (entity.status !== DocStatus.TEMP) {
       throw new BadRequestException(
         '저장 상태(T)에서만 삭제할 수 있습니다. 확정 이후는 종료(E)로 처리하세요.',
@@ -609,6 +641,7 @@ export class ProcurementService {
       plantId: entity.plantId,
       warehouseId: entity.warehouseId,
       requesterId: entity.requesterId,
+      departmentId: entity.departmentId,
       requestDate: entity.requestDate,
       title: entity.title,
       requestType: entity.requestType,
@@ -616,6 +649,7 @@ export class ProcurementService {
       vendorId: entity.vendorId,
       purchaseManager: entity.purchaseManager,
       purchaseManagerContact: entity.purchaseManagerContact,
+      purchaseManagerRemarks: entity.purchaseManagerRemarks,
       orderDate: entity.orderDate,
       etaDate: entity.etaDate,
       shipStartDate: entity.shipStartDate,
@@ -626,4 +660,5 @@ export class ProcurementService {
       createdBy: entity.createdBy,
     };
   }
+
 }

@@ -7,8 +7,8 @@ export const workOrderApi = {
     return response.data;
   },
   async getDetail(plantId: string, id: string): Promise<WorkOrderDetail> {
-    const response = await axiosInstance.get<WorkOrderDetail>('/work-order/details', {
-      params: { plantId, id },
+    const response = await axiosInstance.get<WorkOrderDetail>(`/work-order/${id}`, {
+      params: { plantId },
     });
     return response.data;
   },
@@ -17,10 +17,10 @@ export const workOrderApi = {
     return response.data;
   },
   async update(request: WorkOrderSaveRequest): Promise<WorkOrder> {
-    const response = await axiosInstance.put<WorkOrder>('/work-order', request);
+    const response = await axiosInstance.put<WorkOrder>(`/work-order/${request.workOrder.id}`, request);
     return response.data;
   },
   async delete(plantId: string, id: string): Promise<void> {
-    await axiosInstance.delete('/work-order', { params: { plantId, id } });
+    await axiosInstance.delete(`/work-order/${id}`, { params: { plantId } });
   },
 };

@@ -217,9 +217,8 @@ export default function ApprovalDraftModal({
     }
     setIsLoading(true);
     try {
-      const saved = await approvalApi.submit({
+      const request = {
         approval: {
-          id: approvalId || null,
           title: title.trim(),
           content,
           fileGroupId,
@@ -228,7 +227,10 @@ export default function ApprovalDraftModal({
         steps: lines,
         refNo: refNo || null,
         refModule: refModule || null,
-      });
+      };
+      const saved = approvalId
+        ? await approvalApi.update(approvalId, request)
+        : await approvalApi.create(request);
       const savedId = saved.id;
       localStorage.removeItem(`approval-draft-${approvalId || 'new'}`);
       if (temporary) {

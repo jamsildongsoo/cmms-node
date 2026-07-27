@@ -23,7 +23,7 @@ import { inventoryTransactionApi } from '../features/inventory-transaction/inven
 import { referenceApi } from '../features/mdm/reference.api';
 import { masterReferenceApi } from '../features/master/master-reference.api';
 import type { InventoryReference } from '../features/master/master-reference.types';
-import type { CodeItem, ReferenceUser, Warehouse } from '../features/mdm/mdm.types';
+import type { CodeItem, Department, ReferenceUser, Warehouse } from '../features/mdm/mdm.types';
 
 export default function InventoryTransaction() {
   const user = useAuthStore((s) => s.user);
@@ -33,6 +33,7 @@ export default function InventoryTransaction() {
   const [statusList, setStatusList] = useState<InventoryStatusModel[]>([]);
   const [historyList, setHistoryList] = useState<InventoryHistoryModel[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [depts, setDepts] = useState<Department[]>([]);
   const [inventories, setInventories] = useState<InventoryReference[]>([]);
   const [usersList, setUsersList] = useState<ReferenceUser[]>([]);
   const [txReasons, setTxReasons] = useState<CodeItem[]>([]);
@@ -83,10 +84,11 @@ export default function InventoryTransaction() {
 
   const fetchData = async () => {
     try {
-      const [loadedStatus, loadedHistory, loadedWarehouses, loadedInventories, loadedUsers, loadedReasons] = await Promise.all([
+      const [loadedStatus, loadedHistory, loadedWarehouses, loadedDepts, loadedInventories, loadedUsers, loadedReasons] = await Promise.all([
         inventoryTransactionApi.getStatus(),
         inventoryTransactionApi.getHistory(),
         referenceApi.getWarehouses(),
+        referenceApi.getDepartments(),
         masterReferenceApi.getInventories(),
         referenceApi.getUsers(),
         referenceApi.getCodes('TX_REASON'),
@@ -97,6 +99,7 @@ export default function InventoryTransaction() {
         txDate: formatDateOnly(history.txDate),
       })));
       setWarehouses(loadedWarehouses);
+      setDepts(loadedDepts);
       setInventories(loadedInventories);
       setUsersList(loadedUsers);
       setTxReasons(loadedReasons);
@@ -213,6 +216,9 @@ export default function InventoryTransaction() {
     }
     const { printWindow, container } = printTarget;
     const manager = usersList.find((candidate) => candidate.id === slip.userId);
+    const departmentName = depts.find((dept) => dept.id === manager?.departmentId)?.name
+      || manager?.departmentId
+      || '-';
     const slipCategory = getSlipCategory(slip.txTypeCode);
     const slipItems = historyList.filter((history) => {
       const sameDocument = slip.docNo
@@ -226,7 +232,7 @@ export default function InventoryTransaction() {
           txTypeCode={slip.txTypeCode}
           docNo={slip.docNo}
           txDate={slip.txDate}
-          departmentName={`${manager?.departmentId || '-'} / ${manager?.departmentName || '-'}`}
+          departmentName={departmentName}
           managerName={manager ? `${manager.id} / ${manager.name}` : slip.userId}
           items={slipItems.map((item) => {
             const inventory = inventories.find((candidate) => candidate.id === item.inventoryId);

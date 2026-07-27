@@ -17,7 +17,11 @@ export class SequenceService {
   ) {}
 
   /**
-   * 문서번호 채번: {module}-{dept}-{yyyyMM}-{0001}
+   * 문서번호 채번: {documentPrefix}-{dept}-{yyyyMM}-{0001}
+   *
+   * documentPrefix를 생략하면 기존처럼 module을 사용한다. 채번 상태의
+   * ref_module은 항상 module로 유지되므로 권한·첨부·모듈 구분과 표시 번호를
+   * 독립적으로 운영할 수 있다.
    *
    * [C3 버그 해결] Spring의 synchronized + @Transactional 조합 대신
    * DB 레벨 SELECT FOR UPDATE로 직렬화 — 멀티 인스턴스에서도 정확
@@ -26,6 +30,7 @@ export class SequenceService {
     companyId: string,
     module: AppModule | string,
     departmentId: string | null,
+    documentPrefix: string = module,
   ): Promise<string> {
     const deptId = departmentId?.trim() || 'DEPT_ROOT';
     const yearMonth = format(new Date(), 'yyyyMM');
@@ -44,7 +49,7 @@ export class SequenceService {
       );
 
       const nextSeq = result[0].last_seq;
-      return `${module}-${deptId}-${yearMonth}-${String(nextSeq).padStart(4, '0')}`;
+      return `${documentPrefix}-${deptId}-${yearMonth}-${String(nextSeq).padStart(4, '0')}`;
     } catch (err) {
       throw err;
     }

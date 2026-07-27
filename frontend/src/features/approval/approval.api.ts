@@ -15,17 +15,32 @@ export const approvalApi = {
 
   async getDetail(approvalId: string): Promise<ApprovalDetail> {
     const response = await axiosInstance.get<ApprovalDetail>(
-      `/approval/${approvalId}/details`,
+      `/approval/${approvalId}`,
     );
     return response.data;
   },
 
-  async submit(request: ApprovalSubmitRequest): Promise<ApprovalDocument> {
+  async create(request: ApprovalSubmitRequest): Promise<ApprovalDocument> {
     const response = await axiosInstance.post<ApprovalDocument>(
-      '/approval/submit',
+      '/approval',
       request,
     );
     return response.data;
+  },
+
+  async update(
+    approvalId: string,
+    request: ApprovalSubmitRequest,
+  ): Promise<ApprovalDocument> {
+    const response = await axiosInstance.put<ApprovalDocument>(
+      `/approval/${approvalId}`,
+      request,
+    );
+    return response.data;
+  },
+
+  async delete(approvalId: string): Promise<void> {
+    await axiosInstance.delete(`/approval/${approvalId}`);
   },
 
   async action(
@@ -33,8 +48,7 @@ export const approvalApi = {
     action: ApprovalAction,
     comments?: string,
   ): Promise<void> {
-    await axiosInstance.post(`/approval/${approvalId}/action`, {
-      action,
+    await axiosInstance.post(`/approval/${approvalId}/actions/${action}`, {
       comments,
     });
   },

@@ -5,6 +5,7 @@ import {
   Put,
   Delete,
   Body,
+  Param,
   Query,
   UseGuards,
   HttpCode,
@@ -36,11 +37,11 @@ export class WorkOrderController {
     return this.workOrderService.getWorkOrdersByCompany(companyId, userId, searchType, searchValue);
   }
 
-  @Get('details')
+  @Get(':id')
   @Permission(AppModule.WO, 'R')
   async getWorkOrderDetails(
+    @Param('id') id: string,
     @Query('plantId') plantId: string,
-    @Query('id') id: string,
   ): Promise<WorkOrderDetailsDto> {
     const { companyId, userId } = getTenantContext();
     return this.workOrderService.getWorkOrderDetails(companyId, plantId, id, userId);
@@ -55,23 +56,23 @@ export class WorkOrderController {
     return this.workOrderService.saveWorkOrder(companyId, request, userId, 'create');
   }
 
-  @Put()
-  @PermissionSave(AppModule.WO, 'workOrder.status', 'U')
+  @Put(':id')
   async updateWorkOrder(
+    @Param('id') id: string,
     @Body() request: SaveWorkOrderDto,
   ): Promise<WorkOrderResponseDto> {
-    const { companyId, userId } = getTenantContext();
-    return this.workOrderService.saveWorkOrder(companyId, request, userId, 'update');
+    const { companyId, userId, roleId } = getTenantContext();
+    request.workOrder.id = id;
+    return this.workOrderService.saveWorkOrder(companyId, request, userId, 'update', roleId);
   }
 
-  @Delete()
+  @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Permission(AppModule.WO, 'D')
   async deleteWorkOrder(
+    @Param('id') id: string,
     @Query('plantId') plantId: string,
-    @Query('id') id: string,
   ): Promise<void> {
-    const { companyId, userId } = getTenantContext();
-    await this.workOrderService.deleteWorkOrder(companyId, plantId, id, userId);
+    const { companyId, userId, roleId } = getTenantContext();
+    await this.workOrderService.deleteWorkOrder(companyId, plantId, id, userId, roleId);
   }
 }

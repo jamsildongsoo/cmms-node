@@ -15,13 +15,15 @@ export const boardApi = {
 
   async getDetail(boardId: number): Promise<BoardDetail> {
     const response = await axiosInstance.get<BoardDetail>(
-      `/board/${boardId}/details`,
+      `/board/${boardId}`,
     );
     return response.data;
   },
 
   async savePost(request: SaveBoardRequest): Promise<BoardPost> {
-    const response = await axiosInstance.post<BoardPost>('/board', request);
+    const response = request.id == null
+      ? await axiosInstance.post<BoardPost>('/board', request)
+      : await axiosInstance.put<BoardPost>(`/board/${request.id}`, request);
     return response.data;
   },
 
@@ -33,16 +35,13 @@ export const boardApi = {
     request: SaveBoardCommentRequest,
   ): Promise<BoardComment> {
     const response = await axiosInstance.post<BoardComment>(
-      '/board/comment',
+      `/board/${request.boardId}/comments`,
       request,
     );
     return response.data;
   },
 
   async deleteComment(boardId: number, commentNo: number): Promise<void> {
-    await axiosInstance.delete('/board/comment', {
-      params: { boardId, commentNo },
-    });
+    await axiosInstance.delete(`/board/${boardId}/comments/${commentNo}`);
   },
 };
-

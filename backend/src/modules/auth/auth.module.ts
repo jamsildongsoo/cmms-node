@@ -26,12 +26,19 @@ import { LoginHistory } from '../../entities/login-history.entity';
     ]),
     JwtModule.registerAsync({
       imports: [ConfigModule],
-      useFactory: (config: ConfigService) => ({
-        secret: config.getOrThrow<string>('JWT_SECRET'),
-        signOptions: {
-          expiresIn: config.get<number>('JWT_EXPIRATION', 1800), // 초 단위
-        },
-      }),
+      useFactory: (config: ConfigService) => {
+        // ConfigService의 제네릭은 런타임 형변환을 하지 않는다. 환경변수 "1800"을
+        // 그대로 jsonwebtoken에 넘기면 문자열 시간으로 해석되어 1800ms가 된다.
+        const expirationSeconds = Number(config.get<string>('JWT_EXPIRATION', '1800'));
+        return {
+          secret: config.getOrThrow<string>('JWT_SECRET'),
+          signOptions: {
+            expiresIn: Number.isFinite(expirationSeconds) && expirationSeconds > 0
+              ? expirationSeconds
+              : 1800,
+          },
+        };
+      },
       inject: [ConfigService],
     }),
   ],

@@ -18,6 +18,7 @@ import {
   SavePmRecordDto,
 } from './dto/pm.dto';
 import { PmRepository } from './pm.repository';
+import { PermissionPolicyService } from '../../common/permissions/permission-policy.service';
 
 @Injectable()
 export class PmService {
@@ -25,6 +26,7 @@ export class PmService {
     private readonly dataSource: DataSource,
     private readonly sequenceService: SequenceService,
     private readonly pmRepository: PmRepository,
+    private readonly permissionPolicyService: PermissionPolicyService,
   ) {}
 
   async getPmSchedules(companyId: string, targetDate: Date): Promise<PmScheduleResponseDto[]> {
@@ -106,6 +108,7 @@ export class PmService {
     request: SavePmRecordDto,
     operator: string,
     mode: 'create' | 'update',
+    roleId?: string,
   ): Promise<PmRecordResponseDto> {
     const { pmRecord, checkItems } = request;
     const plantId = this.requirePlantId(
@@ -162,6 +165,15 @@ export class PmService {
           pmId,
         );
         previousStatus = record.status;
+        await this.permissionPolicyService.assertCanUpdateOwnTempOrPermission({
+          companyId,
+          roleId: roleId ?? '',
+          module: AppModule.PM,
+          status: record.status,
+          ownerId: record.createdBy,
+          operatorId: operator,
+          resourceLabel: '예방점검',
+        });
         if (![DocStatus.TEMP, DocStatus.REJECTED].includes(record.status as DocStatus)) {
           throw new BadRequestException('임시저장 또는 반려 상태의 예방점검만 수정할 수 있습니다.');
         }
@@ -249,12 +261,25 @@ export class PmService {
     plantId: string,
     id: string,
     operator: string,
+    roleId: string,
   ): Promise<void> {
     const activePlantId = this.requirePlantId(
       await resolveActivePlantId(this.dataSource, companyId, operator, plantId),
     );
     await this.dataSource.transaction(async (manager) => {
       const record = await this.findLockedRecord(manager, companyId, activePlantId, id);
+      await this.permissionPolicyService.assertCanDeleteOwnTempOrPermission({
+        companyId,
+        roleId,
+        module: AppModule.PM,
+        status: record.status,
+        ownerId: record.createdBy,
+        operatorId: operator,
+        resourceLabel: '예방점검',
+      });
+      if (record.status !== DocStatus.TEMP) {
+        throw new BadRequestException('임시저장 상태의 예방점검만 삭제할 수 있습니다.');
+      }
       if (record.stepStage === 'P') {
         const resultCount = await manager.getRepository(PmRecord).count({
           where: {

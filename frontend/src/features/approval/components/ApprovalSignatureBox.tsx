@@ -23,7 +23,13 @@ const formatDateOnly = (value?: string | null) => {
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
 };
 
-const getResultSuffix = (result?: string | null) => {
+const getResultSuffix = (
+  approvalType: ApprovalStepType,
+  result?: string | null,
+) => {
+  if (approvalType === APPROVAL_STEP_TYPE.DRAFT && result === APPROVAL_RESULT.APPROVED) {
+    return '/상신';
+  }
   if (result === APPROVAL_RESULT.APPROVED) return '/결재';
   if (result === APPROVAL_RESULT.REJECTED) return '/반려';
   return '';
@@ -47,14 +53,23 @@ function SignatureGrid({
       </div>
       <div className="grid grid-cols-4">
         {slots.map((step, index) => (
-          <div key={step?.stepNo ?? `${label}-${index}`} className="min-w-0 border-r border-gray-400 text-center text-black last:border-r-0">
-            <div className="min-h-6 border-b border-gray-300 bg-white px-1 py-1 text-[9px] font-semibold">
+          <div
+            key={step?.stepNo ?? `${label}-${index}`}
+            className="grid min-w-0 grid-rows-[24px_32px_24px] border-r border-gray-400 text-center text-black last:border-r-0"
+          >
+            <div
+              className="flex min-w-0 items-center justify-center overflow-hidden whitespace-nowrap border-b border-gray-300 bg-white px-1 text-[9px] font-semibold leading-none"
+              title={step?.approverTitle || undefined}
+            >
               {step?.approverTitle || (step?.approvalType === APPROVAL_STEP_TYPE.DRAFT ? '기안자' : '')}
             </div>
-            <div className="min-h-8 border-b border-gray-300 px-1 py-2 text-[10px] font-bold">
-              {step ? `${step.approverName}${getResultSuffix(step.approvalResult)}` : ''}
+            <div
+              className="flex min-w-0 items-center justify-center overflow-hidden whitespace-nowrap border-b border-gray-300 px-1 text-[10px] font-bold leading-none"
+              title={step ? `${step.approverName}${getResultSuffix(step.approvalType, step.approvalResult)}` : undefined}
+            >
+              {step ? `${step.approverName}${getResultSuffix(step.approvalType, step.approvalResult)}` : ''}
             </div>
-            <div className="min-h-6 px-1 py-1 text-[9px] font-mono">
+            <div className="flex min-w-0 items-center justify-center overflow-hidden whitespace-nowrap px-1 text-[9px] font-mono leading-none">
               {step ? formatDateOnly(step.approvalType === APPROVAL_STEP_TYPE.DRAFT ? (step.actionAt || drafterDate) : step.actionAt) : ''}
             </div>
           </div>

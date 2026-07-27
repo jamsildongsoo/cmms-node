@@ -27,10 +27,12 @@ import { fileApi } from '../features/files/file.api';
 import type { FileItem } from '../features/files/file.types';
 import { downloadBlob } from '../features/files/file.utils';
 import {
-  FileSignature, Check, X, Printer, Pencil, Plus
+  FileSignature, Check, X, Printer, Pencil, Plus, Trash2
 } from 'lucide-react';
 import ListBadge from '../components/ListBadge';
 import ListIconButton from '../components/ListIconButton';
+import { APP_MODULE } from '../constants/module';
+import { requestConfirmation } from '../utils/userActionDialog';
 
 const loadApprovalPageData = (inbox: ApprovalInbox) =>
   Promise.all([
@@ -40,6 +42,10 @@ const loadApprovalPageData = (inbox: ApprovalInbox) =>
 
 export default function Approval() {
   const user = useAuthStore((s) => s.user);
+  const approvalPermission = user?.permissions?.[APP_MODULE.APR];
+  const canCreate = approvalPermission?.C === 'Y';
+  const canUpdate = approvalPermission?.U === 'Y';
+  const canDelete = approvalPermission?.D === 'Y';
   const [activeTab, setActiveTab] = useState<ApprovalInbox>('pending');
 
   const [approvals, setApprovals] = useState<ApprovalDocument[]>([]);
@@ -147,6 +153,17 @@ export default function Approval() {
     setIsDraftModalOpen(true);
   };
 
+  const handleDeleteDraft = async (app: ApprovalDocument) => {
+    if (!(await requestConfirmation(`[${app.id}] 임시저장 결재문서를 삭제할까요?`))) return;
+    try {
+      await approvalApi.delete(app.id);
+      toast.success('임시저장 결재문서를 삭제했습니다.');
+      await fetchData();
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '결재문서 삭제에 실패했습니다.'));
+    }
+  };
+
   const currentApprovalStep = approvalSteps.find(
     (step) =>
       ACTIONABLE_APPROVAL_STEP_TYPES.some(
@@ -227,13 +244,15 @@ export default function Approval() {
         </div>
 
         <div className="flex items-center gap-3">
-          <button
-            onClick={handleOpenDraftModal}
-            className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors border-0 cursor-pointer shadow-lg shadow-blue-900/20"
-          >
-            <Plus size={14} />
-            기안문
-          </button>
+          {canCreate && (
+            <button
+              onClick={handleOpenDraftModal}
+              className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors border-0 cursor-pointer shadow-lg shadow-blue-900/20"
+            >
+              <Plus size={14} />
+              기안문
+            </button>
+          )}
 
           {/* Subtab control */}
           <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg">
@@ -319,12 +338,20 @@ export default function Approval() {
                     </td>
                     <td className="p-3 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        {app.status === 'T' && app.drafterId === user?.id && (
+                        {app.status === DOC_STATUS.TEMP && app.drafterId === user?.id && canUpdate && (
                           <ListIconButton
                             onClick={() => handleEditDraft(app)}
                             label={`${app.id} 수정`}
                             icon={Pencil}
                             tone="accent"
+                          />
+                        )}
+                        {app.status === DOC_STATUS.TEMP && app.drafterId === user?.id && canDelete && (
+                          <ListIconButton
+                            onClick={() => void handleDeleteDraft(app)}
+                            label={`${app.id} 삭제`}
+                            icon={Trash2}
+                            tone="danger"
                           />
                         )}
                       </div>

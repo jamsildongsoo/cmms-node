@@ -52,7 +52,6 @@ export interface ApprovalLine {
 
 export interface ApprovalSubmitRequest {
   approval: {
-    id?: string | null;
     title: string;
     content?: RichTextDocument | null;
     fileGroupId?: number | null;

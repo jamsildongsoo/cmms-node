@@ -434,17 +434,30 @@ export class MdmService {
   }
 
   async getUsersForUse(companyId: string): Promise<Partial<User>[]> {
-    return this.userRepo.find({
+    const users = await this.userRepo.find({
       select: {
         id: true,
         name: true,
         departmentId: true,
         position: true,
         title: true,
+        department: {
+          name: true,
+        },
       },
+      relations: { department: true },
       where: { companyId, useYn: 'Y', deleteYn: 'N' },
       order: { id: 'ASC' },
     });
+
+    return users.map((user) => ({
+      id: user.id,
+      name: user.name,
+      departmentId: user.departmentId,
+      departmentName: user.department?.name ?? null,
+      position: user.position,
+      title: user.title,
+    })) as Partial<User>[];
   }
 
   async saveUser(companyId: string, userDto: Partial<User>, operator: string): Promise<User> {
@@ -804,8 +817,8 @@ export class MdmService {
       const rolesToSeed = [
         { id: 'ADMIN', name: '관리자', multiPlant: 'Y' },
         { id: 'MANAGER', name: '현장관리자', multiPlant: 'N' },
-        { id: 'PURCHASER', name: '구매·자재담당', multiPlant: 'Y' },
-        { id: 'USER', name: '정비원', multiPlant: 'N' },
+        { id: 'PURCHASER', name: '구매·재고담당자', multiPlant: 'Y' },
+        { id: 'USER', name: '일반사용자', multiPlant: 'N' },
       ];
 
       const roleRepository = manager.getRepository(Role);
@@ -825,6 +838,62 @@ export class MdmService {
 
       const roleDetailRepository = manager.getRepository(RoleDetail);
       const appModules = Object.values(AppModule);
+      const permissionMatrix: Record<string, Record<AppModule, {
+        permC: 'Y' | 'N';
+        permR: 'Y' | 'N';
+        permU: 'Y' | 'N';
+        permD: 'Y' | 'N';
+        permA: 'Y' | 'N';
+      }>> = {
+        ADMIN: {
+          [AppModule.MDM]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'N' },
+          [AppModule.EQP]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'N' },
+          [AppModule.INV]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'N' },
+          [AppModule.STK]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'N' },
+          [AppModule.PM]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'Y' },
+          [AppModule.WO]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'Y' },
+          [AppModule.WP]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'Y' },
+          [AppModule.APR]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'N' },
+          [AppModule.BRD]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'N' },
+          [AppModule.PUR]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'Y' },
+        },
+        MANAGER: {
+          [AppModule.MDM]: { permC: 'N', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.EQP]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'N' },
+          [AppModule.INV]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'N' },
+          [AppModule.STK]: { permC: 'Y', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.PM]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'Y' },
+          [AppModule.WO]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'Y' },
+          [AppModule.WP]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'Y' },
+          [AppModule.APR]: { permC: 'Y', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.BRD]: { permC: 'Y', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.PUR]: { permC: 'Y', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+        },
+        PURCHASER: {
+          [AppModule.MDM]: { permC: 'N', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.EQP]: { permC: 'N', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.INV]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'N' },
+          [AppModule.STK]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'N' },
+          [AppModule.PM]: { permC: 'N', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.WO]: { permC: 'N', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.WP]: { permC: 'N', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.APR]: { permC: 'Y', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.BRD]: { permC: 'Y', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.PUR]: { permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'Y' },
+        },
+        USER: {
+          [AppModule.MDM]: { permC: 'N', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.EQP]: { permC: 'N', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.INV]: { permC: 'N', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.STK]: { permC: 'N', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.PM]: { permC: 'Y', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.WO]: { permC: 'Y', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.WP]: { permC: 'Y', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.APR]: { permC: 'Y', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.BRD]: { permC: 'Y', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+          [AppModule.PUR]: { permC: 'N', permR: 'Y', permU: 'N', permD: 'N', permA: 'N' },
+        },
+      };
       await roleDetailRepository.save(
         rolesToSeed.flatMap((role) =>
           appModules.map((moduleDetail) =>
@@ -832,17 +901,7 @@ export class MdmService {
               companyId: coId,
               roleId: role.id,
               moduleDetail,
-              permC: 'Y',
-              permR: 'Y',
-              permU:
-                moduleDetail === AppModule.BRD && role.id !== 'ADMIN'
-                  ? 'N'
-                  : 'Y',
-              permD:
-                moduleDetail === AppModule.BRD && role.id !== 'ADMIN'
-                  ? 'N'
-                  : 'Y',
-              permA: 'Y',
+              ...permissionMatrix[role.id][moduleDetail],
             }),
           ),
         ),

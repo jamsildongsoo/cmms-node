@@ -52,11 +52,11 @@ export class PmController {
     return this.pmService.getPmRecords(companyId, userId, stepStage, searchType, searchValue, showAll);
   }
 
-  @Get('records/details')
+  @Get('records/:id')
   @Permission(AppModule.PM, 'R')
   async getPmRecordDetails(
+    @Param('id') id: string,
     @Query('plantId') plantId: string,
-    @Query('id') id: string,
   ): Promise<PmRecordDetailsDto> {
     const { companyId, userId } = getTenantContext();
     return this.pmService.getPmRecordDetails(companyId, plantId, id, userId);
@@ -79,14 +79,17 @@ export class PmController {
     return this.pmService.savePmRecord(companyId, request, userId, 'create');
   }
 
-  @Put('records')
-  @PermissionSave(AppModule.PM, 'pmRecord.status', 'U')
-  async updatePmRecord(@Body() request: SavePmRecordDto): Promise<PmRecordResponseDto> {
-    const { companyId, userId } = getTenantContext();
-    return this.pmService.savePmRecord(companyId, request, userId, 'update');
+  @Put('records/:id')
+  async updatePmRecord(
+    @Param('id') id: string,
+    @Body() request: SavePmRecordDto,
+  ): Promise<PmRecordResponseDto> {
+    const { companyId, userId, roleId } = getTenantContext();
+    request.pmRecord.id = id;
+    return this.pmService.savePmRecord(companyId, request, userId, 'update', roleId);
   }
 
-  @Patch('plans/:id/close')
+  @Post('plans/:id/actions/close')
   @Permission(AppModule.PM, 'U')
   async closePmPlan(
     @Param('id') id: string,
@@ -96,14 +99,13 @@ export class PmController {
     await this.pmService.closePmPlan(companyId, plantId, id, userId);
   }
 
-  @Delete('records')
+  @Delete('records/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Permission(AppModule.PM, 'D')
   async deletePmRecord(
+    @Param('id') id: string,
     @Query('plantId') plantId: string,
-    @Query('id') id: string,
   ): Promise<void> {
-    const { companyId, userId } = getTenantContext();
-    await this.pmService.deletePmRecord(companyId, plantId, id, userId);
+    const { companyId, userId, roleId } = getTenantContext();
+    await this.pmService.deletePmRecord(companyId, plantId, id, userId, roleId);
   }
 }

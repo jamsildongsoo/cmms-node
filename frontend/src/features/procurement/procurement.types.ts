@@ -13,6 +13,7 @@ export interface PurchaseRequest {
   plantId: string;
   warehouseId: string;
   requesterId: string;
+  departmentId?: string | null;
   requestDate: string;
   requestType?: string;
   vendorId?: string | null;
@@ -27,6 +28,7 @@ export interface PurchaseRequest {
   createdAt?: string | null;
   purchaseManager?: string | null;
   purchaseManagerContact?: string | null;
+  purchaseManagerRemarks?: string | null;
 }
 
 export interface PurchaseRequestItem {
@@ -61,6 +63,7 @@ export interface PurchaseReceiptRequest {
   plantId: string;
   warehouseId: string;
   requesterId: string;
+  departmentId?: string | null;
   status: string;
   procStatus?: string | null;
 }

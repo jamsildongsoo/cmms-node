@@ -11,6 +11,7 @@ import {
   WorkPermit,
   WorkPermitCheckItem,
 } from '../../entities/work-permit.entity';
+import { PermissionPolicyService } from '../../common/permissions/permission-policy.service';
 import {
   SaveWorkPermitDto,
   WorkPermitResponseDto,
@@ -23,6 +24,7 @@ export class WorkPermitService {
     private readonly dataSource: DataSource,
     private readonly sequenceService: SequenceService,
     private readonly workPermitRepository: WorkPermitRepository,
+    private readonly permissionPolicyService: PermissionPolicyService,
   ) {}
 
   async getWorkPermitsByCompany(
@@ -69,6 +71,7 @@ export class WorkPermitService {
     input: SaveWorkPermitDto,
     operator: string,
     mode: 'create' | 'update',
+    roleId?: string,
   ): Promise<WorkPermitResponseDto> {
     const plantId = await resolveActivePlantId(
       this.dataSource,
@@ -110,6 +113,15 @@ export class WorkPermitService {
           plantId,
           id,
         );
+        await this.permissionPolicyService.assertCanUpdateOwnTempOrPermission({
+          companyId,
+          roleId: roleId ?? '',
+          module: AppModule.WP,
+          status: entity.status,
+          ownerId: entity.createdBy,
+          operatorId: operator,
+          resourceLabel: '작업허가',
+        });
         if (![DocStatus.TEMP, DocStatus.REJECTED].includes(entity.status as DocStatus)) {
           throw new BadRequestException('임시저장 또는 반려 상태의 작업허가서만 수정할 수 있습니다.');
         }
@@ -160,6 +172,7 @@ export class WorkPermitService {
     plantId: string,
     id: string,
     operator: string,
+    roleId: string,
   ): Promise<void> {
     const activePlantId = await resolveActivePlantId(
       this.dataSource,
@@ -173,6 +186,15 @@ export class WorkPermitService {
       where: { companyId, plantId: activePlantId, id, deleteYn: 'N' },
     });
     if (!entity) throw new NotFoundException('작업허가서를 찾을 수 없습니다.');
+    await this.permissionPolicyService.assertCanDeleteOwnTempOrPermission({
+      companyId,
+      roleId,
+      module: AppModule.WP,
+      status: entity.status,
+      ownerId: entity.createdBy,
+      operatorId: operator,
+      resourceLabel: '작업허가',
+    });
     if (entity.status !== DocStatus.TEMP) {
       throw new BadRequestException('임시저장 상태의 작업허가서만 삭제할 수 있습니다.');
     }

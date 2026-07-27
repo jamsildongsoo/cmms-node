@@ -24,6 +24,7 @@ interface PurchaseOrderPrintProps {
   vendorManager?: string | null;
   purchaseManager: string;
   purchaseManagerContact?: string | null;
+  purchaseManagerRemarks?: string | null;
   remarks?: string | null;
   items: PurchaseOrderItem[];
 }
@@ -46,7 +47,10 @@ export default function PurchaseOrderPrint(p: PurchaseOrderPrintProps) {
           </div>
           <div className="grid grid-cols-2 gap-4 py-2">
             <PrintField label="구매담당자" value={p.purchaseManager} />
-            <PrintField label="담당자 연락처" value={p.purchaseManagerContact} />
+            <PrintField label="구매담당자 연락처" value={p.purchaseManagerContact} />
+          </div>
+          <div className="py-2">
+            <PrintField label="구매담당자 비고" value={p.purchaseManagerRemarks} />
           </div>
           <div className="grid grid-cols-2 gap-4 py-2">
             <PrintField label="플랜트" value={p.plantName} />

@@ -36,7 +36,7 @@ select_start_mode() {
 운영 기동 방식을 선택하세요.
   1. 현재 저장된 이미지로 기동 (기본값)
   2. 새 API/Web 이미지를 다운로드한 후 기동
-  3. 최초 SYSTEM 관리자 계정 생성
+  3. 최초 SYSTEM 관리자 계정 생성 후 기동
 
 30초 안에 선택하지 않으면 1번으로 실행합니다.
 MENU
@@ -57,6 +57,7 @@ MENU
       ;;
     3)
       seed_system
+      start_services
       ;;
     *)
       echo "ERROR: 1, 2 또는 3을 선택하세요." >&2
@@ -73,6 +74,10 @@ seed_system() {
 최초 SYSTEM 관리자 계정을 생성합니다.
   회사코드: SYSTEM
   아이디: system
+
+⚠️  운영 DB는 자동으로 테이블을 생성하지 않습니다(DB_SYNCHRONIZE=false).
+    반드시 운영 DDL을 먼저 적용하여 DB 스키마를 준비한 후 진행하세요.
+    DDL이 적용되지 않은 빈 DB에서는 SYSTEM 계정을 생성할 수 없습니다.
 
 운영 DB 스키마가 준비된 후 최초 한 번만 실행하세요.
 입력한 비밀번호는 화면에 표시되지 않습니다.
@@ -107,7 +112,7 @@ NOTICE
   docker compose -f "$COMPOSE_FILE" run --rm api \
     node scripts/seed-system.js "$password"
 
-  echo "✅ SYSTEM 관리자 계정 생성 완료"
+  echo "✅ SYSTEM 관리자 계정 생성 완료 — 운영 서비스를 이어서 기동합니다."
   echo "   회사코드: SYSTEM"
   echo "   아이디: system"
 }

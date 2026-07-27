@@ -246,7 +246,7 @@ export default function WorkOrder() {
           content: createWorkOrderApprovalContent({
             woNo: savedId,
             statusLabel: getStatusLabel('P'),
-            createdAt: formatDateOnly(saved.createdAt),
+            createdAt: saved.createdAt,
             departmentName: depts.find((dept) => dept.id === departmentId)?.name || departmentId,
             authorName:
               usersList.find((candidate) => candidate.id === saved.createdBy)?.name

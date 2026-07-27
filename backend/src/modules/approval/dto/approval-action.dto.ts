@@ -1,10 +1,10 @@
-import { IsNotEmpty, IsString, IsOptional, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsEnum } from 'class-validator';
 import { ApprovalAction } from '../../../common/constants/approval.constants';
 
 export class ApprovalActionDto {
-  @IsNotEmpty()
+  @IsOptional()
   @IsEnum(ApprovalAction)
-  action!: ApprovalAction;
+  action?: ApprovalAction;
 
   @IsOptional()
   @IsString()

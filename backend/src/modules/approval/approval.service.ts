@@ -24,6 +24,7 @@ import {
 } from './dto/approval-response.dto';
 import { ApprovalSubmitDto } from './dto/approval-submit.dto';
 import { ApprovalRepository } from './approval.repository';
+import { PermissionPolicyService } from '../../common/permissions/permission-policy.service';
 
 @Injectable()
 export class ApprovalService {
@@ -31,12 +32,33 @@ export class ApprovalService {
     private readonly dataSource: DataSource,
     private readonly sequenceService: SequenceService,
     private readonly approvalRepository: ApprovalRepository,
+    private readonly permissionPolicyService: PermissionPolicyService,
   ) {}
 
-  async submitApproval(
+  async createApproval(
     companyId: string,
     request: ApprovalSubmitDto,
     operator: string,
+  ): Promise<ApprovalResponseDto> {
+    return this.saveApproval(companyId, request, operator, null);
+  }
+
+  async updateApproval(
+    companyId: string,
+    id: string,
+    request: ApprovalSubmitDto,
+    operator: string,
+    roleId: string,
+  ): Promise<ApprovalResponseDto> {
+    return this.saveApproval(companyId, request, operator, id.trim(), roleId);
+  }
+
+  private async saveApproval(
+    companyId: string,
+    request: ApprovalSubmitDto,
+    operator: string,
+    existingId: string | null,
+    roleId?: string,
   ): Promise<ApprovalResponseDto> {
     const { approval: input, steps, refNo, refModule } = request;
     this.validateReference(refModule ?? null, refNo ?? null);
@@ -55,7 +77,7 @@ export class ApprovalService {
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();
     await runner.startTransaction();
-    let approvalId = input.id?.trim() || '';
+    let approvalId = existingId || '';
     try {
       const repository = runner.manager.getRepository(Approval);
       const stepRepository = runner.manager.getRepository(ApprovalStep);
@@ -70,6 +92,7 @@ export class ApprovalService {
           companyId,
           AppModule.APR,
           drafter?.departmentId ?? null,
+          companyId,
         );
         entity = repository.create({
           companyId,
@@ -85,9 +108,19 @@ export class ApprovalService {
           companyId,
           approvalId,
         );
+        const canEditOwnTemp = await this.permissionPolicyService.assertCanUpdateOwnTempOrPermission({
+          companyId,
+          roleId: roleId ?? '',
+          module: AppModule.APR,
+          status: entity.status,
+          ownerId: entity.drafterId,
+          operatorId: operator,
+          resourceLabel: '전자결재',
+        });
         if (entity.status !== DocStatus.TEMP) {
           throw new BadRequestException('임시저장 상태에서만 재상신할 수 있습니다.');
         }
+        if (canEditOwnTemp) this.assertDraftOwner(entity, operator);
         if (steps) {
           await stepRepository.delete({
             companyId,
@@ -184,15 +217,56 @@ export class ApprovalService {
     );
   }
 
-  async getApprovalDetails(companyId: string, id: string): Promise<ApprovalDetailResponseDto> {
+  async getApprovalDetails(
+    companyId: string,
+    id: string,
+    userId: string,
+  ): Promise<ApprovalDetailResponseDto> {
     const approval = await this.approvalRepository.findDetail(companyId, id);
     if (!approval) throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
+    this.assertCanReadApproval(approval, userId);
     return {
       approval: this.toApprovalResponse(approval),
       steps: [...(approval.steps || [])]
         .sort((a, b) => a.stepNo - b.stepNo)
         .map((step) => this.toStepResponse(step)),
     };
+  }
+
+  async deleteApproval(
+    companyId: string,
+    id: string,
+    operator: string,
+    roleId: string,
+  ): Promise<void> {
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    try {
+      const approval = await this.findLockedApproval(runner.manager, companyId, id);
+      const canDeleteOwnTemp = await this.permissionPolicyService.assertCanDeleteOwnTempOrPermission({
+        companyId,
+        roleId,
+        module: AppModule.APR,
+        status: approval.status,
+        ownerId: approval.drafterId,
+        operatorId: operator,
+        resourceLabel: '전자결재',
+      });
+      if (approval.status !== DocStatus.TEMP) {
+        throw new BadRequestException('임시저장 문서만 삭제할 수 있습니다.');
+      }
+      if (canDeleteOwnTemp) this.assertDraftOwner(approval, operator);
+      approval.deleteYn = 'Y';
+      approval.updatedBy = operator;
+      await runner.manager.getRepository(Approval).save(approval);
+      await runner.commitTransaction();
+    } catch (error) {
+      await runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await runner.release();
+    }
   }
 
   async processApprovalAction(
@@ -289,6 +363,25 @@ export class ApprovalService {
       .getOne();
     if (!approval) throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
     return approval;
+  }
+
+  private assertDraftOwner(approval: Approval, userId: string): void {
+    if (approval.drafterId !== userId) {
+      throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
+    }
+  }
+
+  private assertCanReadApproval(approval: Approval, userId: string): void {
+    if (approval.drafterId === userId) return;
+    if (approval.status === DocStatus.TEMP) {
+      throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
+    }
+    const isParticipant = (approval.steps || []).some(
+      (step) => step.approverId === userId,
+    );
+    if (!isParticipant) {
+      throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
+    }
   }
 
   private async updateLinkedDocument(

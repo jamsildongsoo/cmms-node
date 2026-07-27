@@ -9,8 +9,8 @@ export const workPermitApi = {
     return response.data;
   },
   async getDetail(plantId: string, id: string): Promise<WorkPermit> {
-    const response = await axiosInstance.get<WorkPermit>('/work-permit/details', {
-      params: { plantId, id },
+    const response = await axiosInstance.get<WorkPermit>(`/work-permit/${id}`, {
+      params: { plantId },
     });
     return response.data;
   },
@@ -19,10 +19,10 @@ export const workPermitApi = {
     return response.data;
   },
   async update(request: WorkPermitSaveRequest): Promise<WorkPermit> {
-    const response = await axiosInstance.put<WorkPermit>('/work-permit', request);
+    const response = await axiosInstance.put<WorkPermit>(`/work-permit/${request.id}`, request);
     return response.data;
   },
   async delete(plantId: string, id: string): Promise<void> {
-    await axiosInstance.delete('/work-permit', { params: { plantId, id } });
+    await axiosInstance.delete(`/work-permit/${id}`, { params: { plantId } });
   },
 };
