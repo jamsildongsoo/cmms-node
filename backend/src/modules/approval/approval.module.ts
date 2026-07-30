@@ -11,9 +11,11 @@ import { WorkOrder } from '../../entities/work-order.entity';
 import { WorkPermit } from '../../entities/work-permit.entity';
 import { EquipmentCheckCycle } from '../../entities/equipment-check-cycle.entity';
 import { PurchaseRequest } from '../../entities/purchase-request.entity';
+import { FileModule } from '../file/file.module';
 
 @Module({
   imports: [
+    FileModule,
     TypeOrmModule.forFeature([
       Approval,
       ApprovalStep,

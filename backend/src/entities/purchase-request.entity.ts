@@ -28,6 +28,9 @@ export class PurchaseRequest extends BaseEntity {
   @Column({ length: 200, default: '' })
   title!: string;
 
+  @Column({ name: 'file_group_id', type: 'bigint', nullable: true })
+  fileGroupId!: string | number | null;
+
   @Column({ type: 'varchar',  name: 'request_type', length: 50, nullable: true })
   requestType!: string | null;
 

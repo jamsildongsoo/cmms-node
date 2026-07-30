@@ -6,7 +6,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import { getCommonStatusLabel as getStatusLabel } from '../constants/status';
 import { APP_MODULE } from '../constants/module';
 import { formatDateOnly, todayLocal } from '../utils/datetime';
-import { getApiErrorMessage } from '../utils/apiError';
+import { toastApiError } from '../utils/apiError';
 import PrintHeader from '../components/PrintHeader';
 import WorkOrderPrint from '../components/WorkOrderPrint';
 import PrintWindowLayout from '../components/PrintWindowLayout';
@@ -83,11 +83,12 @@ export default function WorkOrder() {
         params.set('searchType', searchType);
         params.set('searchValue', searchValue);
       }
+      // 폼 선택값 구성을 위한 시스템 참조값 조회다. 작업지시 목록 R 권한을 대체하지 않는다.
       const [loadedWorkOrders, loadedEquipments, loadedDepartments, loadedUsers] = await Promise.all([
         workOrderApi.getAll(params),
         masterReferenceApi.getEquipments(),
-        referenceApi.getDepartments(),
-        referenceApi.getUsers(),
+        referenceApi.getDepartmentOptions(),
+        referenceApi.getUserOptions(),
       ]);
       setWorkOrders((loadedWorkOrders || []).map((workOrder: WorkOrderModel & { step_stage?: string }) => ({
         ...workOrder,
@@ -98,7 +99,7 @@ export default function WorkOrder() {
       setDepts(loadedDepartments);
       setUsersList(loadedUsers);
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
+      toastApiError(err, '목록을 불러오지 못했습니다.');
     }
   };
 
@@ -164,7 +165,7 @@ export default function WorkOrder() {
 
       setIsFormOpen(true);
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '작업지시 상세 기록을 불러오지 못했습니다.'));
+      toastApiError(err, '작업지시 상세 기록을 불러오지 못했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -177,7 +178,7 @@ export default function WorkOrder() {
       toast.success('작업지시가 삭제되었습니다.');
       fetchData();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '삭제 실패.'));
+      toastApiError(err, '삭제 실패.');
     }
   };
 
@@ -269,7 +270,7 @@ export default function WorkOrder() {
       setIsFormOpen(false);
       fetchData();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '저장 중 오류가 발생했습니다.'));
+      toastApiError(err, '저장 중 오류가 발생했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -331,7 +332,7 @@ export default function WorkOrder() {
       })));
       setIsFormOpen(true);
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '작업지시 계획 항목을 불러오지 못했습니다.'));
+      toastApiError(err, '작업지시 계획 항목을 불러오지 못했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -374,7 +375,7 @@ export default function WorkOrder() {
       printWindow.focus();
     } catch (err) {
       printWindow.close();
-      toast.error(getApiErrorMessage(err, '출력 문서를 불러오지 못했습니다.'));
+      toastApiError(err, '출력 문서를 불러오지 못했습니다.');
     }
   };
 

@@ -16,7 +16,8 @@ export default function Header() {
   const [plants, setPlants] = useState<PlantOption[]>([]);
   useEffect(() => {
     if (user?.multiPlant === 'Y') {
-      referenceApi.getPlants()
+      // 선택 UI 구성을 위한 시스템 참조값 조회다. 관리 목록 조회 권한을 대체하지 않는다.
+      referenceApi.getPlantOptions()
         .then(setPlants)
         .catch(() => setPlants([]));
     }

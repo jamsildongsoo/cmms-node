@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
 import { useAuthStore } from '../store/useAuthStore';
-import { getApiErrorMessage } from '../utils/apiError';
+import { toastApiError } from '../utils/apiError';
 import ListIconButton from '../components/ListIconButton';
 import { APP_MODULE } from '../constants/module';
 import { inventoryApi } from '../features/inventory/inventory.api';
@@ -40,33 +40,35 @@ export default function Inventory() {
 
   const fetchData = async () => {
     try {
+      // 폼 선택값 구성을 위한 시스템 참조값 조회다. 자재 마스터 R 권한을 대체하지 않는다.
       const [loadedInventories, loadedDepartments, loadedTypes] = await Promise.all([
         inventoryApi.getAll(),
-        referenceApi.getDepartments(),
-        referenceApi.getCodes('INV_TYPE'),
+        referenceApi.getDepartmentOptions(),
+        referenceApi.getInventoryTypeOptions(),
       ]);
       setInventories(loadedInventories);
       setDepts(loadedDepartments);
       setInventoryTypes(loadedTypes);
     } catch (err) {
       console.error(err);
-      toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
+      toastApiError(err, '목록을 불러오지 못했습니다.');
     }
   };
 
   useEffect(() => {
     let active = true;
+    // 폼 선택값 구성을 위한 시스템 참조값 조회다. 자재 마스터 R 권한을 대체하지 않는다.
     void Promise.all([
       inventoryApi.getAll(),
-      referenceApi.getDepartments(),
-      referenceApi.getCodes('INV_TYPE'),
+      referenceApi.getDepartmentOptions(),
+      referenceApi.getInventoryTypeOptions(),
     ]).then(([loadedInventories, loadedDepartments, loadedTypes]) => {
-      if (!active) return;
-      setInventories(loadedInventories);
-      setDepts(loadedDepartments);
-      setInventoryTypes(loadedTypes);
+        if (!active) return;
+        setInventories(loadedInventories);
+        setDepts(loadedDepartments);
+        setInventoryTypes(loadedTypes);
     }).catch((err) => {
-      if (active) toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
+      if (active) toastApiError(err, '목록을 불러오지 못했습니다.');
     });
     return () => { active = false; };
   }, []);
@@ -107,7 +109,7 @@ export default function Inventory() {
       toast.success('자재 품목이 삭제되었습니다.');
       fetchData();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '삭제에 실패했습니다.'));
+      toastApiError(err, '삭제에 실패했습니다.');
     } finally {
       setPendingAction(null);
     }
@@ -117,23 +119,23 @@ export default function Inventory() {
     if (!values.id || !values.name) return;
 
     setIsLoading(true);
-    try {
-      const payload = {
-        id: values.id, name: values.name, invTypeCode: values.invTypeCode,
-        departmentId: values.departmentId || null, unit: values.unit || null,
-        makerName: values.makerName || null, spec: values.spec || null,
-        model: values.model || null, serialNumber: values.serialNumber || null,
-        safetyQty: values.safetyQty, reorderQty: values.reorderQty,
-        leadTimeDays: values.leadTimeDays, remarks: values.remarks || null,
-      };
+    const payload = {
+      id: values.id, name: values.name, invTypeCode: values.invTypeCode,
+      departmentId: values.departmentId || null, unit: values.unit || null,
+      makerName: values.makerName || null, spec: values.spec || null,
+      model: values.model || null, serialNumber: values.serialNumber || null,
+      safetyQty: values.safetyQty, reorderQty: values.reorderQty,
+      leadTimeDays: values.leadTimeDays, remarks: values.remarks || null,
+    };
 
+    try {
       if (editingId) await inventoryApi.update(editingId, payload);
       else await inventoryApi.create(payload);
       toast.success('자재 마스터가 저장되었습니다.');
       setIsFormOpen(false);
       fetchData();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '저장 실패.'));
+      toastApiError(err, '저장 실패.');
     } finally {
       setIsLoading(false);
     }
@@ -145,7 +147,7 @@ export default function Inventory() {
     try {
       downloadBlob(await inventoryApi.downloadCsv(), 'inventory_export.csv');
     } catch (err) {
-      toast.error(getApiErrorMessage(err, 'CSV 다운로드 실패'));
+      toastApiError(err, 'CSV 다운로드 실패');
     } finally {
       setPendingAction(null);
     }

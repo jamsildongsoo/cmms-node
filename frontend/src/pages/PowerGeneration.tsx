@@ -3,7 +3,7 @@ import { CalendarDays, Database, Download, RefreshCw, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { powerGenerationApi } from '../features/power-generation/power-generation.api';
 import type { PowerGenerationMonthly } from '../features/power-generation/power-generation.types';
-import { getApiErrorMessage } from '../utils/apiError';
+import { toastApiError } from '../utils/apiError';
 
 function todayText(): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -37,7 +37,7 @@ export default function PowerGeneration() {
     try {
       setMonthly(await powerGenerationApi.getMonthly(month.replace('-', '')));
     } catch (error) {
-      toast.error(getApiErrorMessage(error, '월간 발전량을 불러오지 못했습니다.'));
+      toastApiError(error, '월간 발전량을 불러오지 못했습니다.');
     }
   };
 
@@ -62,7 +62,7 @@ export default function PowerGeneration() {
         `${result.tradingDay} 발전량 ${result.importedCount}건, ${formatMwh(result.totalMwh)} MWh를 저장했습니다.`,
       );
     } catch (error) {
-      toast.error(getApiErrorMessage(error, 'KPX 발전량을 가져오지 못했습니다.'));
+      toastApiError(error, 'KPX 발전량을 가져오지 못했습니다.');
     } finally {
       setIsLoading(false);
     }

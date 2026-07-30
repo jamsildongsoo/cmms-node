@@ -5,7 +5,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import PrintHeader from '../components/PrintHeader';
 import SlipPrint from '../components/SlipPrint';
 import { formatDateOnly, todayLocal, thisMonthLocal } from '../utils/datetime';
-import { getApiErrorMessage } from '../utils/apiError';
+import { toastApiError } from '../utils/apiError';
 import { APP_MODULE } from '../constants/module';
 import { getTxTypeLabel } from '../constants/status';
 import PrintWindowLayout from '../components/PrintWindowLayout';
@@ -84,14 +84,15 @@ export default function InventoryTransaction() {
 
   const fetchData = async () => {
     try {
+      // 선택 UI 구성을 위한 시스템 참조값 조회다. 재고현황/이력 R 권한을 대체하지 않는다.
       const [loadedStatus, loadedHistory, loadedWarehouses, loadedDepts, loadedInventories, loadedUsers, loadedReasons] = await Promise.all([
         inventoryTransactionApi.getStatus(),
         inventoryTransactionApi.getHistory(),
-        referenceApi.getWarehouses(),
-        referenceApi.getDepartments(),
+        referenceApi.getWarehouseOptions(),
+        referenceApi.getDepartmentOptions(),
         masterReferenceApi.getInventories(),
-        referenceApi.getUsers(),
-        referenceApi.getCodes('TX_REASON'),
+        referenceApi.getUserOptions(),
+        referenceApi.getInventoryTransactionReasonOptions(),
       ]);
       setStatusList(loadedStatus);
       setHistoryList((loadedHistory || []).map((history: InventoryHistoryModel) => ({
@@ -105,7 +106,7 @@ export default function InventoryTransaction() {
       setTxReasons(loadedReasons);
     } catch (err) {
       console.error(err);
-      toast.error(getApiErrorMessage(err, '재고 데이터를 불러오지 못했습니다.'));
+      toastApiError(err, '재고 데이터를 불러오지 못했습니다.');
     }
   };
 
@@ -176,7 +177,7 @@ export default function InventoryTransaction() {
       setIsTxModalOpen(false);
       fetchData();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '처리 오류 발생'));
+      toastApiError(err, '처리 오류 발생');
     } finally {
       setIsLoading(false);
     }
@@ -194,7 +195,7 @@ export default function InventoryTransaction() {
       setIsClosingModalOpen(false);
       fetchData();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '마감 처리 오류'));
+      toastApiError(err, '마감 처리 오류');
     } finally {
       setIsLoading(false);
     }

@@ -14,7 +14,7 @@ import type {
   ApprovalStep,
   ApprovalUser,
 } from '../approval.types';
-import { getApiErrorMessage } from '../../../utils/apiError';
+import { toastApiError } from '../../../utils/apiError';
 import { requestConfirmation } from '../../../utils/userActionDialog';
 import {
   createEmptyRichTextDocument,
@@ -108,7 +108,7 @@ export default function ApprovalDraftModal({
               })),
           );
         } catch (error) {
-          toast.error(getApiErrorMessage(error, '결재 문서 정보를 불러오지 못했습니다.'));
+          toastApiError(error, '결재 문서 정보를 불러오지 못했습니다.');
           onCloseRef.current();
         } finally {
           if (active) setIsLoading(false);
@@ -241,7 +241,7 @@ export default function ApprovalDraftModal({
         onSubmitted?.(savedId);
       }
     } catch (error) {
-      toast.error(getApiErrorMessage(error, temporary ? '임시저장에 실패했습니다.' : '상신에 실패했습니다.'));
+      toastApiError(error, temporary ? '임시저장에 실패했습니다.' : '상신에 실패했습니다.');
     } finally {
       setIsLoading(false);
     }

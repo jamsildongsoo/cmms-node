@@ -1,9 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
-import axiosInstance from '../api/axios';
 import { formatDateTime } from '../utils/datetime';
-import { getApiErrorMessage } from '../utils/apiError';
+import { toastApiError } from '../utils/apiError';
 import { useAuthStore } from '../store/useAuthStore';
 import ApprovalDraftModal from '../features/approval/components/ApprovalDraftModal';
 import ApprovalDocPrint, {
@@ -33,11 +32,13 @@ import ListBadge from '../components/ListBadge';
 import ListIconButton from '../components/ListIconButton';
 import { APP_MODULE } from '../constants/module';
 import { requestConfirmation } from '../utils/userActionDialog';
+import { referenceApi } from '../features/mdm/reference.api';
 
 const loadApprovalPageData = (inbox: ApprovalInbox) =>
   Promise.all([
     approvalApi.getInbox(inbox),
-    axiosInstance.get<ApprovalUser[]>('/mdm/refs/users'),
+    // 선택 UI 구성을 위한 시스템 참조값 조회다. 결재함 조회 권한을 대체하지 않는다.
+    referenceApi.getUserOptions() as Promise<ApprovalUser[]>,
   ]);
 
 export default function Approval() {
@@ -82,25 +83,25 @@ export default function Approval() {
     try {
       const [appRes, userRes] = await loadApprovalPageData(activeTab);
       setApprovals(appRes);
-      setUsersList(userRes.data);
+      setUsersList(userRes);
     } catch (err) {
       console.error(err);
-      toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
+      toastApiError(err, '목록을 불러오지 못했습니다.');
     }
   };
 
   useEffect(() => {
     let active = true;
     void loadApprovalPageData(activeTab)
-      .then(([loadedApprovals, usersResponse]) => {
+      .then(([loadedApprovals, loadedUsers]) => {
         if (!active) return;
         setApprovals(loadedApprovals);
-        setUsersList(usersResponse.data);
+        setUsersList(loadedUsers);
       })
       .catch((error: unknown) => {
         if (!active) return;
         console.error(error);
-        toast.error(getApiErrorMessage(error, '목록을 불러오지 못했습니다.'));
+        toastApiError(error, '목록을 불러오지 못했습니다.');
       });
     return () => {
       active = false;
@@ -122,7 +123,7 @@ export default function Approval() {
       setComments('');
       setIsDetailOpen(true);
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '결재 문서 정보를 불러오는데 실패했습니다.'));
+      toastApiError(err, '결재 문서 정보를 불러오는데 실패했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -137,7 +138,7 @@ export default function Approval() {
       setIsDetailOpen(false);
       fetchData();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '결재 처리 실패'));
+      toastApiError(err, '결재 처리 실패');
     } finally {
       setIsLoading(false);
     }
@@ -160,7 +161,7 @@ export default function Approval() {
       toast.success('임시저장 결재문서를 삭제했습니다.');
       await fetchData();
     } catch (error) {
-      toast.error(getApiErrorMessage(error, '결재문서 삭제에 실패했습니다.'));
+      toastApiError(error, '결재문서 삭제에 실패했습니다.');
     }
   };
 

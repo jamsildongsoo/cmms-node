@@ -11,9 +11,11 @@ import { User } from '../../entities/users.entity';
 import { Role } from '../../entities/role.entity';
 import { Vendor } from '../../entities/vendor.entity';
 import { Warehouse } from '../../entities/warehouse.entity';
+import { FileModule } from '../file/file.module';
 
 @Module({
   imports: [
+    FileModule,
     InventoryTxModule,
     TypeOrmModule.forFeature([
       PurchaseRequest,

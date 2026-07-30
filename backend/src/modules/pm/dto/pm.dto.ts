@@ -29,6 +29,7 @@ export class PmRecordHeaderDto {
   @IsOptional() @IsDateString() certExpireDate?: string | null;
   @IsOptional() @IsString() certAgency?: string | null;
   @IsOptional() @IsString() approvalId?: string | null;
+  @IsOptional() fileGroupId?: string | number | null;
   @IsOptional() @IsString() refNo?: string | null;
   @IsOptional() @IsString() refModule?: string | null;
   @IsIn(Object.values(DocStatus)) status!: string;
@@ -77,6 +78,7 @@ export class PmRecordResponseDto {
   certExpireDate!: string | null;
   certAgency!: string | null;
   approvalId!: string | null;
+  fileGroupId!: number | null;
   refNo!: string | null;
   refModule!: string | null;
   status!: string;

@@ -23,6 +23,7 @@ import { Warehouse } from '../../entities/warehouse.entity';
 import { Vendor } from '../../entities/vendor.entity';
 import { ProcurementRepository } from './procurement.repository';
 import { PermissionPolicyService } from '../../common/permissions/permission-policy.service';
+import { FileStorageService } from '../file/file-storage.service';
 
 export interface ItemLine {
   lineNo: number;
@@ -38,6 +39,7 @@ export interface SaveRequest {
     plantId?: string | null;
     departmentId?: string | null;
     warehouseId: string;
+    fileGroupId?: string | number | null;
     requestDate?: string | Date;
     requestType?: string | null;
     title?: string;
@@ -62,6 +64,7 @@ export interface ReceiveRequest {
 export interface PurchaseRequestResponse {
   companyId: string; id: string; plantId: string; warehouseId: string;
   requesterId: string; departmentId: string | null; requestDate: string; requestType: string | null;
+  fileGroupId: number | null;
   title: string; approvalId: string | null;
   vendorId: string | null; purchaseManager: string | null; purchaseManagerContact: string | null;
   purchaseManagerRemarks: string | null;
@@ -96,6 +99,7 @@ export class ProcurementService {
     private readonly inventoryTxService: InventoryTxService,
     private readonly procurementRepository: ProcurementRepository,
     private readonly permissionPolicyService: PermissionPolicyService,
+    private readonly fileStorageService: FileStorageService,
   ) {}
 
   async getRequests(
@@ -304,6 +308,7 @@ export class ProcurementService {
         }
       }
       Object.assign(entity, {
+        fileGroupId: header.fileGroupId ?? null,
         title: header.title?.trim() || '',
         warehouseId: header.warehouseId,
         vendorId: header.vendorId ?? null,
@@ -316,6 +321,16 @@ export class ProcurementService {
         entity.departmentId = user.departmentId;
       }
       await repository.save(entity);
+      if (entity.fileGroupId != null) {
+        await this.fileStorageService.bindGroupToReference({
+          manager: runner.manager,
+          companyId,
+          groupNo: entity.fileGroupId,
+          refModule: AppModule.PUR,
+          refNo: id,
+          operatorId: operator,
+        });
+      }
       const itemRepository = runner.manager.getRepository(PurchaseRequestItem);
       await itemRepository.delete({ companyId, requestId: id });
       if (items.length) {
@@ -589,9 +604,11 @@ export class ProcurementService {
         '저장 상태(T)에서만 삭제할 수 있습니다. 확정 이후는 종료(E)로 처리하세요.',
       );
     }
+    const fileGroupId = entity.fileGroupId;
     entity.deleteYn = 'Y';
     entity.updatedBy = operator;
     await this.dataSource.getRepository(PurchaseRequest).save(entity);
+    await this.fileStorageService.deleteGroupByCompany(companyId, fileGroupId, operator);
   }
 
   private async mustGetActive(
@@ -643,6 +660,7 @@ export class ProcurementService {
       requesterId: entity.requesterId,
       departmentId: entity.departmentId,
       requestDate: entity.requestDate,
+      fileGroupId: entity.fileGroupId == null ? null : Number(entity.fileGroupId),
       title: entity.title,
       requestType: entity.requestType,
       approvalId: entity.approvalId,

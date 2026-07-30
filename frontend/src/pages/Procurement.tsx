@@ -20,7 +20,7 @@ import PrintWindowLayout from '../components/PrintWindowLayout';
 import { openPrintWindow } from '../utils/printWindow';
 import { openListPrint } from '../utils/listPrint';
 import { createProcurementApprovalContent } from '../utils/procurementApprovalContent';
-import { getApiErrorMessage } from '../utils/apiError';
+import { toastApiError } from '../utils/apiError';
 import type { CodeItem, Department, Plant, Warehouse } from '../features/mdm/mdm.types';
 import type { InventoryReference as InventoryRef } from '../features/master/master-reference.types';
 import type {
@@ -56,15 +56,16 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
 
   const loadRefs = async () => {
     try {
+      // 폼 선택값 구성을 위한 시스템 참조값 조회다. 구매요청/업체 관리 R 권한을 대체하지 않는다.
       const [vendorItems, warehouseItems, plantItems, deptItems, typeItems, inventoryItems, userItems] =
         await Promise.all([
           procurementApi.getVendors(),
-          referenceApi.getWarehouses(),
-          referenceApi.getPlants(),
-          referenceApi.getDepartments(),
-          referenceApi.getCodes('PR_TYPE'),
+          referenceApi.getWarehouseOptions(),
+          referenceApi.getPlantOptions(),
+          referenceApi.getDepartmentOptions(),
+          referenceApi.getProcurementTypeOptions(),
           masterReferenceApi.getInventories(),
-          referenceApi.getUsers(),
+          referenceApi.getUserOptions(),
         ]);
       setVendors(vendorItems);
       setWarehouses(warehouseItems);
@@ -75,7 +76,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       setUsersList(userItems);
     } catch (error: unknown) {
       console.error('구매 기준정보 조회 실패', error);
-      toast.error(getApiErrorMessage(error, '구매 기준정보를 불러오지 못했습니다.'));
+      toastApiError(error, '구매 기준정보를 불러오지 못했습니다.');
     }
   };
   useEffect(() => {
@@ -148,7 +149,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       })));
       setFormOpen(true);
     } catch (error: unknown) {
-      toast.error(getApiErrorMessage(error, '구매요청을 불러오지 못했습니다.'));
+      toastApiError(error, '구매요청을 불러오지 못했습니다.');
     }
   };
 
@@ -176,7 +177,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       setFormOpen(false);
       await loadRequests();
     } catch (error: unknown) {
-      toast.error(getApiErrorMessage(error, '구매요청 처리에 실패했습니다.'));
+      toastApiError(error, '구매요청 처리에 실패했습니다.');
     }
   };
 
@@ -207,7 +208,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       });
       setOrderModal(null);
       await loadRequests();
-    } catch (error: unknown) { toast.error(getApiErrorMessage(error, '발주 실패')); }
+    } catch (error: unknown) { toastApiError(error, '발주 실패'); }
   };
 
   // 배송 시작 모달
@@ -218,7 +219,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       await procurementApi.startShipping(shipModal.id, shipModal.shipStartDate);
       setShipModal(null);
       await loadRequests();
-    } catch (error: unknown) { toast.error(getApiErrorMessage(error, '배송 실패')); }
+    } catch (error: unknown) { toastApiError(error, '배송 실패'); }
   };
 
   // 입고 모달
@@ -243,7 +244,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       setReceiveModal({
         pr, lines, close: false, txDate: todayLocal(), warehouseId: pr.warehouseId,
       });
-    } catch (error: unknown) { toast.error(getApiErrorMessage(error, '상세 조회 실패')); }
+    } catch (error: unknown) { toastApiError(error, '상세 조회 실패'); }
   };
   const submitReceive = async () => {
     if (!receiveModal) return;
@@ -270,7 +271,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       });
       setReceiveModal(null);
       await loadRequests();
-    } catch (error: unknown) { toast.error(getApiErrorMessage(error, '입고 실패')); }
+    } catch (error: unknown) { toastApiError(error, '입고 실패'); }
   };
 
   const closeRequest = async (id: string) => {
@@ -279,13 +280,13 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       : '이 요청을 종료(E)하시겠습니까? (미입고 잔여는 닫힙니다)';
     if (!(await requestConfirmation(message, '종료 처리'))) return;
     try { await procurementApi.closeRequest(id); await loadRequests(); }
-    catch (error: unknown) { toast.error(getApiErrorMessage(error, '종료 실패')); }
+    catch (error: unknown) { toastApiError(error, '종료 실패'); }
   };
 
   const deleteRequest = async (id: string) => {
     if (!(await requestConfirmation('이 저장중인 요청을 삭제하시겠습니까?'))) return;
     try { await procurementApi.deleteRequest(id); await loadRequests(); }
-    catch (error: unknown) { toast.error(getApiErrorMessage(error, '삭제 실패')); }
+    catch (error: unknown) { toastApiError(error, '삭제 실패'); }
   };
 
   // 목록 인쇄
@@ -409,7 +410,7 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       printWindow.focus();
     } catch (error: unknown) {
       printWindow.close();
-      toast.error(getApiErrorMessage(error, '인쇄 실패'));
+      toastApiError(error, '인쇄 실패');
     }
   };
 
@@ -487,12 +488,12 @@ export default function Procurement({ mode = 'request' }: { mode?: 'request' | '
       }
       setVendorForm(null);
       await loadRefs();
-    } catch (error: unknown) { toast.error(getApiErrorMessage(error, '저장 실패')); }
+    } catch (error: unknown) { toastApiError(error, '저장 실패'); }
   };
   const deleteVendor = async (id: string) => {
     if (!(await requestConfirmation('이 벤더를 삭제하시겠습니까?'))) return;
     try { await procurementApi.deleteVendor(id); await loadRefs(); }
-    catch (error: unknown) { toast.error(getApiErrorMessage(error, '삭제 실패')); }
+    catch (error: unknown) { toastApiError(error, '삭제 실패'); }
   };
 
   return (

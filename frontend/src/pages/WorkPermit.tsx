@@ -6,7 +6,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import { getCommonStatusLabel as getStatusLabel } from '../constants/status';
 import { APP_MODULE } from '../constants/module';
 import { formatDateTime, nowLocalInput, utcToInput, inputToUtc } from '../utils/datetime';
-import { getApiErrorMessage } from '../utils/apiError';
+import { toastApiError } from '../utils/apiError';
 import PrintHeader from '../components/PrintHeader';
 import WorkPermitPrint from '../components/WorkPermitPrint';
 import PrintWindowLayout from '../components/PrintWindowLayout';
@@ -122,11 +122,12 @@ export default function WorkPermit() {
         params.set('searchType', searchType);
         params.set('searchValue', searchValue);
       }
+      // 폼 선택값 구성을 위한 시스템 참조값 조회다. 작업허가서 목록 R 권한을 대체하지 않는다.
       const [loadedPermits, loadedEquipments, loadedDepartments, loadedUsers, loadedWorkOrders] = await Promise.all([
         workPermitApi.getAll(params),
         masterReferenceApi.getEquipments(),
-        referenceApi.getDepartments(),
-        referenceApi.getUsers(),
+        referenceApi.getDepartmentOptions(),
+        referenceApi.getUserOptions(),
         workOrderApi.getAll(),
       ]);
       setPermits((loadedPermits || []).map((permit: WorkPermitModel & { step_stage?: string }) => ({
@@ -138,7 +139,7 @@ export default function WorkPermit() {
       setUsersList(loadedUsers);
       setWorkOrders(loadedWorkOrders);
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
+      toastApiError(err, '목록을 불러오지 못했습니다.');
     }
   };
 
@@ -276,7 +277,7 @@ export default function WorkPermit() {
 
       setIsFormOpen(true);
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '작업허가서 상세 기록을 불러오지 못했습니다.'));
+      toastApiError(err, '작업허가서 상세 기록을 불러오지 못했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -289,7 +290,7 @@ export default function WorkPermit() {
       toast.success('작업허가서가 삭제되었습니다.');
       fetchData();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '삭제 실패.'));
+      toastApiError(err, '삭제 실패.');
     }
   };
 
@@ -382,7 +383,7 @@ export default function WorkPermit() {
       setIsFormOpen(false);
       fetchData();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '저장 중 오류가 발생했습니다.'));
+      toastApiError(err, '저장 중 오류가 발생했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -461,7 +462,7 @@ export default function WorkPermit() {
       printWindow.focus();
     } catch (err) {
       printWindow.close();
-      toast.error(getApiErrorMessage(err, '출력 문서를 불러오지 못했습니다.'));
+      toastApiError(err, '출력 문서를 불러오지 못했습니다.');
     }
   };
 

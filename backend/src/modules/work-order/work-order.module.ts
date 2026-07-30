@@ -5,9 +5,10 @@ import { WorkOrderService } from './work-order.service';
 import { WorkOrderRepository } from './work-order.repository';
 import { WorkOrder } from '../../entities/work-order.entity';
 import { WorkOrderItem } from '../../entities/work-order-item.entity';
+import { FileModule } from '../file/file.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([WorkOrder, WorkOrderItem])],
+  imports: [FileModule, TypeOrmModule.forFeature([WorkOrder, WorkOrderItem])],
   controllers: [WorkOrderController],
   providers: [WorkOrderService, WorkOrderRepository],
   exports: [WorkOrderService, TypeOrmModule],

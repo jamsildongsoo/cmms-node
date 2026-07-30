@@ -17,6 +17,7 @@ import {
   WorkPermitResponseDto,
 } from './dto/work-permit.dto';
 import { WorkPermitRepository } from './work-permit.repository';
+import { FileStorageService } from '../file/file-storage.service';
 
 @Injectable()
 export class WorkPermitService {
@@ -25,6 +26,7 @@ export class WorkPermitService {
     private readonly sequenceService: SequenceService,
     private readonly workPermitRepository: WorkPermitRepository,
     private readonly permissionPolicyService: PermissionPolicyService,
+    private readonly fileStorageService: FileStorageService,
   ) {}
 
   async getWorkPermitsByCompany(
@@ -155,6 +157,16 @@ export class WorkPermitService {
         updatedBy: operator,
       });
       await repository.save(entity);
+      if (entity.fileGroupId != null) {
+        await this.fileStorageService.bindGroupToReference({
+          manager: runner.manager,
+          companyId,
+          groupNo: entity.fileGroupId,
+          refModule: AppModule.WP,
+          refNo: id,
+          operatorId: operator,
+        });
+      }
       await runner.commitTransaction();
     } catch (error) {
       await runner.rollbackTransaction();
@@ -198,9 +210,11 @@ export class WorkPermitService {
     if (entity.status !== DocStatus.TEMP) {
       throw new BadRequestException('임시저장 상태의 작업허가서만 삭제할 수 있습니다.');
     }
+    const fileGroupId = entity.fileGroupId;
     entity.deleteYn = 'Y';
     entity.updatedBy = operator;
     await repository.save(entity);
+    await this.fileStorageService.deleteGroupByCompany(companyId, fileGroupId, operator);
   }
 
   private async findLocked(

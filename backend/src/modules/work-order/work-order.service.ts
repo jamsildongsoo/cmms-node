@@ -19,6 +19,7 @@ import {
   WorkOrderResponseDto,
 } from './dto/work-order.dto';
 import { WorkOrderRepository } from './work-order.repository';
+import { FileStorageService } from '../file/file-storage.service';
 
 @Injectable()
 export class WorkOrderService {
@@ -27,6 +28,7 @@ export class WorkOrderService {
     private readonly sequenceService: SequenceService,
     private readonly workOrderRepository: WorkOrderRepository,
     private readonly permissionPolicyService: PermissionPolicyService,
+    private readonly fileStorageService: FileStorageService,
   ) {}
 
   async getWorkOrdersByCompany(
@@ -157,6 +159,16 @@ export class WorkOrderService {
         updatedBy: operator,
       });
       await repository.save(entity);
+      if (entity.fileGroupId != null) {
+        await this.fileStorageService.bindGroupToReference({
+          manager: runner.manager,
+          companyId,
+          groupNo: entity.fileGroupId,
+          refModule: AppModule.WO,
+          refNo: id,
+          operatorId: operator,
+        });
+      }
       await this.replaceItems(
         runner.manager,
         companyId,
@@ -207,9 +219,11 @@ export class WorkOrderService {
     if (entity.status !== DocStatus.TEMP) {
       throw new BadRequestException('임시저장 상태의 작업지시만 삭제할 수 있습니다.');
     }
+    const fileGroupId = entity.fileGroupId;
     entity.deleteYn = 'Y';
     entity.updatedBy = operator;
     await repository.save(entity);
+    await this.fileStorageService.deleteGroupByCompany(companyId, fileGroupId, operator);
   }
 
   private async findLocked(

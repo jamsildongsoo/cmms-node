@@ -7,7 +7,7 @@ import ListIconButton from '../components/ListIconButton';
 import { getCommonStatusLabel, getProcStatusLabel } from '../constants/status';
 import { useAuthStore } from '../store/useAuthStore';
 import { APP_MODULE } from '../constants/module';
-import { getApiErrorMessage } from '../utils/apiError';
+import { getApiErrorMessage, toastApiError } from '../utils/apiError';
 import { procurementApi } from '../features/procurement/procurement.api';
 import { referenceApi } from '../features/mdm/reference.api';
 import type {
@@ -40,7 +40,8 @@ export default function PurchaseReceipt() {
   }, [requests, searchType, searchValue]);
 
   useEffect(() => {
-    referenceApi.getWarehouses()
+    // 선택 UI 구성을 위한 시스템 참조값 조회다. 입고 대상 조회 권한을 대체하지 않는다.
+    referenceApi.getWarehouseOptions()
       .then(setWarehouses)
       .catch(() => toast.error('창고 정보를 불러오지 못했습니다.'));
     loadRequests();
@@ -50,7 +51,7 @@ export default function PurchaseReceipt() {
     try {
       setRequests(await procurementApi.getReceiptRequests());
     } catch (error: unknown) {
-      toast.error(getApiErrorMessage(error, '입고 대상 구매요청을 불러오지 못했습니다.'));
+      toastApiError(error, '입고 대상 구매요청을 불러오지 못했습니다.');
     }
   }
 
@@ -122,7 +123,7 @@ export default function PurchaseReceipt() {
       setLines([]);
       await loadRequests();
     } catch (error: unknown) {
-      toast.error(getApiErrorMessage(error, '구매입고 처리에 실패했습니다.'));
+      toastApiError(error, '구매입고 처리에 실패했습니다.');
     } finally {
       setSaving(false);
     }

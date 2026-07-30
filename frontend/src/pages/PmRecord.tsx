@@ -5,7 +5,7 @@ import { useAuthStore } from '../store/useAuthStore';
 import { getCommonStatusLabel as getStatusLabel, getJudgeLabel } from '../constants/status';
 import { APP_MODULE } from '../constants/module';
 import { formatDateOnly, todayLocal } from '../utils/datetime';
-import { getApiErrorMessage } from '../utils/apiError';
+import { toastApiError } from '../utils/apiError';
 import PrintHeader from '../components/PrintHeader';
 import PmReportPrint from '../components/PmReportPrint';
 import PrintWindowLayout from '../components/PrintWindowLayout';
@@ -103,12 +103,13 @@ export default function PmRecord() {
         params.set('searchValue', searchValue);
       }
 
+      // 폼 선택값 구성을 위한 시스템 참조값 조회다. 예방점검 목록 R 권한을 대체하지 않는다.
       const [loadedRecords, loadedDepartments, loadedEquipments, loadedUsers, loadedPmTypes] = await Promise.all([
         pmApi.getAll(params),
-        referenceApi.getDepartments(),
+        referenceApi.getDepartmentOptions(),
         masterReferenceApi.getEquipments(),
-        referenceApi.getUsers(),
-        referenceApi.getCodes('PM_TYPE'),
+        referenceApi.getUserOptions(),
+        referenceApi.getPmTypeOptions(),
       ]);
       const records = (loadedRecords || []).map(normalizeRecord);
       if (activeTab === 'plans') {
@@ -124,7 +125,7 @@ export default function PmRecord() {
       setPmTypes(loadedPmTypes);
       setCheckTypeCode((current) => current || loadedPmTypes[0]?.id || '');
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '예방점검 목록을 불러오지 못했습니다.'));
+      toastApiError(err, '예방점검 목록을 불러오지 못했습니다.');
     }
   };
 
@@ -198,7 +199,7 @@ export default function PmRecord() {
       setCheckItems(detail.checkItems || []);
       setIsFormOpen(true);
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '예방점검 상세를 불러오지 못했습니다.'));
+      toastApiError(err, '예방점검 상세를 불러오지 못했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -254,7 +255,7 @@ export default function PmRecord() {
       printWindow.focus();
     } catch (err) {
       printWindow.close();
-      toast.error(getApiErrorMessage(err, '출력 문서를 불러오지 못했습니다.'));
+      toastApiError(err, '출력 문서를 불러오지 못했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -282,7 +283,7 @@ export default function PmRecord() {
       })));
       setIsFormOpen(true);
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '계획 항목을 불러오지 못했습니다.'));
+      toastApiError(err, '계획 항목을 불러오지 못했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -318,7 +319,7 @@ export default function PmRecord() {
         toast.success(`${templates.length}개 템플릿 항목을 불러왔습니다.`);
       }
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '템플릿 로딩 실패.'));
+      toastApiError(err, '템플릿 로딩 실패.');
     } finally {
       setIsLoading(false);
     }
@@ -392,7 +393,7 @@ export default function PmRecord() {
       setPendingAction(null);
       fetchData();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '종료 실패.'));
+      toastApiError(err, '종료 실패.');
     }
   };
 
@@ -403,7 +404,7 @@ export default function PmRecord() {
       setPendingAction(null);
       fetchData();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '삭제 실패.'));
+      toastApiError(err, '삭제 실패.');
     }
   };
 
@@ -511,7 +512,7 @@ export default function PmRecord() {
       setIsFormOpen(false);
       fetchData();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '저장 중 오류가 발생했습니다.'));
+      toastApiError(err, '저장 중 오류가 발생했습니다.');
     } finally {
       setIsLoading(false);
     }

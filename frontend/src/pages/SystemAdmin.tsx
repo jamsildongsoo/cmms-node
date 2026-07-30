@@ -1,34 +1,16 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
-import axiosInstance from '../api/axios';
 import { formatDateTime } from '../utils/datetime';
 import { ShieldCheck, Users, History, Building2, Plus } from 'lucide-react';
 import ListBadge from '../components/ListBadge';
-import { getApiErrorMessage } from '../utils/apiError';
-
-interface SysUser {
-  companyId: string;
-  id: string;
-  name: string;
-  roleId: string | null;
-  departmentId: string | null;
-  position: string | null;
-  title: string | null;
-  email: string | null;
-  phone: string | null;
-  useYn: string;
-  lastLoginAt: string | null;
-  lastLoginIp: string | null;
-}
-interface Company { id: string; name: string; businessNumber?: string | null; email?: string | null; }
-interface LoginHist {
-  companyId: string;
-  userId: string;
-  loginAt: string | null;
-  loginIp: string | null;
-  loginResult: string;
-}
+import { toastApiError } from '../utils/apiError';
+import {
+  systemAdminApi,
+  type Company,
+  type LoginHistory,
+  type SystemUser,
+} from '../features/system/system-admin.api';
 
 export default function SystemAdmin() {
   const [tab, setTab] = useState<'companies' | 'users' | 'history'>('companies');
@@ -47,25 +29,24 @@ export default function SystemAdmin() {
 
   // 사용자 관리
   const [userCompanyId, setUserCompanyId] = useState('');
-  const [users, setUsers] = useState<SysUser[]>([]);
+  const [users, setUsers] = useState<SystemUser[]>([]);
 
   // 로그인 이력
   const [histCompanyId, setHistCompanyId] = useState('');
   const [histUserId, setHistUserId] = useState('');
-  const [history, setHistory] = useState<LoginHist[]>([]);
+  const [history, setHistory] = useState<LoginHistory[]>([]);
 
   const fetchCompanies = async () => {
     try {
-      const res = await axiosInstance.get('/mdm/companies');
-      setCompanies(res.data);
+      setCompanies(await systemAdminApi.getCompanies());
     } catch {
       toast.error('회사 목록을 불러오지 못했습니다.');
     }
   };
 
   useEffect(() => {
-    void axiosInstance.get<Company[]>('/mdm/companies')
-      .then((response) => setCompanies(response.data))
+    void systemAdminApi.getCompanies()
+      .then((loadedCompanies) => setCompanies(loadedCompanies))
       .catch(() => toast.error('회사 목록을 불러오지 못했습니다.'));
   }, []);
 
@@ -84,7 +65,7 @@ export default function SystemAdmin() {
     }
     setCoSaving(true);
     try {
-      await axiosInstance.post('/mdm/companies', {
+      await systemAdminApi.createCompany({
         id: coId.trim(),
         name: coName.trim(),
         businessNumber: coBizNo.trim() || null,
@@ -98,7 +79,7 @@ export default function SystemAdmin() {
       setCoAdminId(''); setCoAdminName(''); setCoAdminPw('');
       fetchCompanies();
     } catch (err: unknown) {
-      toast.error(getApiErrorMessage(err, '회사 생성 실패'));
+      toastApiError(err, '회사 생성 실패');
     } finally {
       setCoSaving(false);
     }
@@ -106,8 +87,7 @@ export default function SystemAdmin() {
 
   const fetchUsers = async () => {
     try {
-      const res = await axiosInstance.get('/system/users', { params: userCompanyId ? { companyId: userCompanyId } : {} });
-      setUsers(res.data);
+      setUsers(await systemAdminApi.getUsers(userCompanyId || undefined));
     } catch {
       toast.error('사용자 목록을 불러오지 못했습니다.');
     }
@@ -115,11 +95,10 @@ export default function SystemAdmin() {
 
   const fetchHistory = async () => {
     try {
-      const params: Record<string, string> = {};
-      if (histCompanyId) params.companyId = histCompanyId;
-      if (histUserId) params.userId = histUserId;
-      const res = await axiosInstance.get('/system/login-history', { params });
-      setHistory(res.data);
+      setHistory(await systemAdminApi.getLoginHistory({
+        companyId: histCompanyId || undefined,
+        userId: histUserId || undefined,
+      }));
     } catch {
       toast.error('로그인 이력을 불러오지 못했습니다.');
     }
@@ -128,15 +107,15 @@ export default function SystemAdmin() {
   useEffect(() => { if (tab === 'users') fetchUsers(); }, [tab, userCompanyId]); // eslint-disable-line
   useEffect(() => { if (tab === 'history') fetchHistory(); }, [tab]); // eslint-disable-line
 
-  const toggleUseYn = async (u: SysUser) => {
+  const toggleUseYn = async (u: SystemUser) => {
     const next = u.useYn === 'Y' ? 'N' : 'Y';
     if (!(await requestConfirmation(`[${u.companyId}] ${u.id} 사용여부를 ${next === 'Y' ? '활성(Y)' : '비활성(N)'}으로 변경할까요?`))) return;
     try {
-      await axiosInstance.put(`/system/users/${u.companyId}/${u.id}/use-yn`, { useYn: next });
+      await systemAdminApi.updateUserUseYn(u.companyId, u.id, next);
       toast.success('사용여부를 변경했습니다.');
       fetchUsers();
     } catch (err: unknown) {
-      toast.error(getApiErrorMessage(err, '변경 실패'));
+      toastApiError(err, '변경 실패');
     }
   };
 

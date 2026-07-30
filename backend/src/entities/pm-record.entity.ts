@@ -64,6 +64,9 @@ export class PmRecord extends BaseEntity {
   @Column({ type: 'varchar',  name: 'approval_id', length: 50, nullable: true })
   approvalId!: string | null;
 
+  @Column({ name: 'file_group_id', type: 'bigint', nullable: true })
+  fileGroupId!: string | number | null;
+
   @Column({ type: 'varchar',  name: 'ref_no', length: 50, nullable: true })
   refNo!: string | null;
 

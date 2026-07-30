@@ -7,9 +7,11 @@ import { PmRecordItem } from '../../entities/pm-record-item.entity';
 import { PmCheckTemplate } from '../../entities/pm-check-template.entity';
 import { EquipmentCheckCycle } from '../../entities/equipment-check-cycle.entity';
 import { PmRepository } from './pm.repository';
+import { FileModule } from '../file/file.module';
 
 @Module({
   imports: [
+    FileModule,
     TypeOrmModule.forFeature([
       PmRecord,
       PmRecordItem,

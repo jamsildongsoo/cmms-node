@@ -18,12 +18,14 @@ import {
 } from './dto/board-response.dto';
 import { SaveBoardDto } from './dto/save-board.dto';
 import { SaveCommentDto } from './dto/save-comment.dto';
+import { FileStorageService } from '../file/file-storage.service';
 
 @Injectable()
 export class BoardService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly boardRepository: BoardRepository,
+    private readonly fileStorageService: FileStorageService,
   ) {}
 
   async getBoards(companyId: string): Promise<BoardResponseDto[]> {
@@ -95,6 +97,15 @@ export class BoardService {
       });
     }
     const saved = await repository.save(entity);
+    if (saved.fileGroupId != null) {
+      await this.fileStorageService.bindGroupToReference({
+        companyId,
+        groupNo: saved.fileGroupId,
+        refModule: AppModule.BRD,
+        refNo: String(saved.id),
+        operatorId: operator,
+      });
+    }
     const responseEntity = await this.boardRepository.findOne(
       companyId,
       Number(saved.id),
@@ -124,9 +135,11 @@ export class BoardService {
         '본인 게시글이 아니거나 게시판 삭제 권한이 없습니다.',
       );
     }
+    const fileGroupId = entity.fileGroupId;
     entity.deleteYn = 'Y';
     entity.updatedBy = operator;
     await repository.save(entity);
+    await this.fileStorageService.deleteGroupByCompany(companyId, fileGroupId, operator);
   }
 
   async saveComment(

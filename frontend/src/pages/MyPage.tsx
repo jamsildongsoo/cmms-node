@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { useAuthStore } from '../store/useAuthStore';
-import axiosInstance from '../api/axios';
 import { User, Mail, Phone, Briefcase, Lock, Save, Shield } from 'lucide-react';
-import { getApiErrorMessage } from '../utils/apiError';
+import { toastApiError } from '../utils/apiError';
+import { accountApi } from '../features/account/account.api';
 
 export default function MyPage() {
   const user = useAuthStore((s) => s.user);
@@ -24,9 +24,8 @@ export default function MyPage() {
 
   useEffect(() => {
     if (user) {
-      axiosInstance.get('/auth/me')
-        .then(res => {
-          const data = res.data;
+      accountApi.getMyProfile()
+        .then((data) => {
           setName(data.name || '');
           setEmail(data.email || '');
           setPhone(data.phone || '');
@@ -43,7 +42,7 @@ export default function MyPage() {
     e.preventDefault();
     setIsLoading(true);
     try {
-      await axiosInstance.put('/auth/me', {
+      await accountApi.updateMyProfile({
         name,
         email,
         phone,
@@ -53,7 +52,7 @@ export default function MyPage() {
       updateUser({ name, position, title });
       toast.success('프로필 정보가 수정되었습니다.');
     } catch (err: unknown) {
-      toast.error(getApiErrorMessage(err, '프로필 수정에 실패했습니다.'));
+      toastApiError(err, '프로필 수정에 실패했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -71,7 +70,7 @@ export default function MyPage() {
     }
     setPasswordLoading(true);
     try {
-      await axiosInstance.put('/auth/me/password', {
+      await accountApi.changeMyPassword({
         currentPassword,
         newPassword
       });
@@ -80,7 +79,7 @@ export default function MyPage() {
       setNewPassword('');
       setConfirmPassword('');
     } catch (err: unknown) {
-      toast.error(getApiErrorMessage(err, '비밀번호 변경에 실패했습니다. 현재 비밀번호를 확인하세요.'));
+      toastApiError(err, '비밀번호 변경에 실패했습니다. 현재 비밀번호를 확인하세요.');
     } finally {
       setPasswordLoading(false);
     }

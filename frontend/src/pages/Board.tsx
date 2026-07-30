@@ -18,7 +18,7 @@ import {
   type RichTextDocument,
 } from '../types/richText';
 import { formatDateTime } from '../utils/datetime';
-import { getApiErrorMessage } from '../utils/apiError';
+import { toastApiError } from '../utils/apiError';
 import ListBadge from '../components/ListBadge';
 import {
   Plus, Trash, X, Megaphone, MessageSquare
@@ -64,7 +64,7 @@ export default function Board() {
       setPosts(await boardApi.getPosts());
     } catch (err) {
       console.error(err);
-      toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
+      toastApiError(err, '목록을 불러오지 못했습니다.');
     }
   };
 
@@ -78,7 +78,7 @@ export default function Board() {
       .catch((err) => {
         if (!active) return;
         console.error(err);
-        toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
+        toastApiError(err, '목록을 불러오지 못했습니다.');
       });
 
     return () => {
@@ -95,7 +95,7 @@ export default function Board() {
       setNewCommentContent('');
       setIsDetailOpen(true);
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '게시글 상세 내역을 불러오는데 실패했습니다.'));
+      toastApiError(err, '게시글 상세 내역을 불러오는데 실패했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -148,7 +148,7 @@ export default function Board() {
         setSelectedPost(saved);
       }
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '저장 오류 발생'));
+      toastApiError(err, '저장 오류 발생');
     } finally {
       setIsLoading(false);
     }
@@ -162,7 +162,7 @@ export default function Board() {
       setIsDetailOpen(false);
       await fetchData();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '삭제 오류 발생'));
+      toastApiError(err, '삭제 오류 발생');
     }
   };
 
@@ -177,7 +177,7 @@ export default function Board() {
       setNewCommentContent('');
       setComments((current) => [...current, saved]);
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '댓글 등록 중 오류 발생'));
+      toastApiError(err, '댓글 등록 중 오류 발생');
     }
   };
 
@@ -189,7 +189,7 @@ export default function Board() {
         current.filter((item) => item.commentNo !== comment.commentNo),
       );
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '댓글 삭제 오류'));
+      toastApiError(err, '댓글 삭제 오류');
     }
   };
 

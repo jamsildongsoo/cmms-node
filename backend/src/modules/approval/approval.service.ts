@@ -25,6 +25,7 @@ import {
 import { ApprovalSubmitDto } from './dto/approval-submit.dto';
 import { ApprovalRepository } from './approval.repository';
 import { PermissionPolicyService } from '../../common/permissions/permission-policy.service';
+import { FileStorageService } from '../file/file-storage.service';
 
 @Injectable()
 export class ApprovalService {
@@ -33,6 +34,7 @@ export class ApprovalService {
     private readonly sequenceService: SequenceService,
     private readonly approvalRepository: ApprovalRepository,
     private readonly permissionPolicyService: PermissionPolicyService,
+    private readonly fileStorageService: FileStorageService,
   ) {}
 
   async createApproval(
@@ -140,6 +142,16 @@ export class ApprovalService {
         updatedBy: operator,
       });
       await repository.save(entity);
+      if (entity.fileGroupId != null) {
+        await this.fileStorageService.bindGroupToReference({
+          manager: runner.manager,
+          companyId,
+          groupNo: entity.fileGroupId,
+          refModule: AppModule.APR,
+          refNo: approvalId,
+          operatorId: operator,
+        });
+      }
 
       if (isNew) {
         await stepRepository.save(
@@ -242,8 +254,10 @@ export class ApprovalService {
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();
     await runner.startTransaction();
+    let fileGroupId: string | number | null = null;
     try {
       const approval = await this.findLockedApproval(runner.manager, companyId, id);
+      fileGroupId = approval.fileGroupId;
       const canDeleteOwnTemp = await this.permissionPolicyService.assertCanDeleteOwnTempOrPermission({
         companyId,
         roleId,
@@ -261,6 +275,7 @@ export class ApprovalService {
       approval.updatedBy = operator;
       await runner.manager.getRepository(Approval).save(approval);
       await runner.commitTransaction();
+      await this.fileStorageService.deleteGroupByCompany(companyId, fileGroupId, operator);
     } catch (error) {
       await runner.rollbackTransaction();
       throw error;

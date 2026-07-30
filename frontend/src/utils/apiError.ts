@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { toast } from 'sonner';
 
 const EXPOSED_STATUS = new Set([400, 403, 404, 409]);
 
@@ -16,4 +17,8 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
   }
 
   return fallback;
+}
+
+export function toastApiError(error: unknown, fallback: string): void {
+  toast.error(getApiErrorMessage(error, fallback));
 }

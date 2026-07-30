@@ -19,6 +19,7 @@ import {
 } from './dto/pm.dto';
 import { PmRepository } from './pm.repository';
 import { PermissionPolicyService } from '../../common/permissions/permission-policy.service';
+import { FileStorageService } from '../file/file-storage.service';
 
 @Injectable()
 export class PmService {
@@ -27,6 +28,7 @@ export class PmService {
     private readonly sequenceService: SequenceService,
     private readonly pmRepository: PmRepository,
     private readonly permissionPolicyService: PermissionPolicyService,
+    private readonly fileStorageService: FileStorageService,
   ) {}
 
   async getPmSchedules(companyId: string, targetDate: Date): Promise<PmScheduleResponseDto[]> {
@@ -187,6 +189,16 @@ export class PmService {
       if (!isNew) delete values.closeYn;
       Object.assign(record, values, { updatedBy: operator });
       await queryRunner.manager.getRepository(PmRecord).save(record);
+      if (record.fileGroupId != null) {
+        await this.fileStorageService.bindGroupToReference({
+          manager: queryRunner.manager,
+          companyId,
+          groupNo: record.fileGroupId,
+          refModule: AppModule.PM,
+          refNo: pmId,
+          operatorId: operator,
+        });
+      }
 
       const itemRepository = queryRunner.manager.getRepository(PmRecordItem);
       await itemRepository.delete({ companyId, plantId, pmRecordId: pmId });
@@ -266,6 +278,7 @@ export class PmService {
     const activePlantId = this.requirePlantId(
       await resolveActivePlantId(this.dataSource, companyId, operator, plantId),
     );
+    let fileGroupId: string | number | null = null;
     await this.dataSource.transaction(async (manager) => {
       const record = await this.findLockedRecord(manager, companyId, activePlantId, id);
       await this.permissionPolicyService.assertCanDeleteOwnTempOrPermission({
@@ -295,10 +308,12 @@ export class PmService {
           throw new BadRequestException('연결된 실적이 있어 계획을 삭제할 수 없습니다.');
         }
       }
+      fileGroupId = record.fileGroupId;
       record.deleteYn = 'Y';
       record.updatedBy = operator;
       await manager.getRepository(PmRecord).save(record);
     });
+    await this.fileStorageService.deleteGroupByCompany(companyId, fileGroupId, operator);
   }
 
   private validateStage(stage: string, refModule: string | null, refNo: string | null): void {
@@ -356,6 +371,7 @@ export class PmService {
       certExpireDate: input.certExpireDate ? toDateOnly(input.certExpireDate) : null,
       certAgency: input.certAgency ?? null,
       approvalId: input.approvalId ?? null,
+      fileGroupId: input.fileGroupId ?? null,
       refNo: stage === 'R' ? refNo : null,
       refModule: stage === 'R' ? refModule : null,
       status: input.status || DocStatus.TEMP,
@@ -495,6 +511,7 @@ export class PmService {
       certExpireDate: record.certExpireDate,
       certAgency: record.certAgency,
       approvalId: record.approvalId,
+      fileGroupId: record.fileGroupId == null ? null : Number(record.fileGroupId),
       refNo: record.refNo,
       refModule: record.refModule,
       status: record.status,

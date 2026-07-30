@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
 import { useAuthStore } from '../store/useAuthStore';
-import { getApiErrorMessage } from '../utils/apiError';
+import { toastApiError } from '../utils/apiError';
 import { formatDateOnly } from '../utils/datetime';
 import { APP_MODULE } from '../constants/module';
 import { equipmentApi } from '../features/equipment/equipment.api';
@@ -46,11 +46,12 @@ export default function Equipment() {
 
   const fetchData = async () => {
     try {
+      // 폼 선택값 구성을 위한 시스템 참조값 조회다. 설비 마스터 R 권한을 대체하지 않는다.
       const [loadedEquipments, loadedPlants, loadedEquipmentTypes, loadedCheckTypes] = await Promise.all([
         equipmentApi.getAll(),
-        referenceApi.getPlants(activePlantId),
-        referenceApi.getCodes('EQ_TYPE'),
-        referenceApi.getCodes('PM_TYPE'),
+        referenceApi.getPlantOptions(activePlantId),
+        referenceApi.getEquipmentTypeOptions(),
+        referenceApi.getPmTypeOptions(),
       ]);
       setEquipments(loadedEquipments);
       setPlants(loadedPlants);
@@ -58,17 +59,18 @@ export default function Equipment() {
       setCheckTypes(loadedCheckTypes);
     } catch (err) {
       console.error(err);
-      toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
+      toastApiError(err, '목록을 불러오지 못했습니다.');
     }
   };
 
   useEffect(() => {
     let active = true;
+    // 폼 선택값 구성을 위한 시스템 참조값 조회다. 설비 마스터 R 권한을 대체하지 않는다.
     void Promise.all([
       equipmentApi.getAll(),
-      referenceApi.getPlants(activePlantId),
-      referenceApi.getCodes('EQ_TYPE'),
-      referenceApi.getCodes('PM_TYPE'),
+      referenceApi.getPlantOptions(activePlantId),
+      referenceApi.getEquipmentTypeOptions(),
+      referenceApi.getPmTypeOptions(),
     ]).then(([loadedEquipments, loadedPlants, loadedEquipmentTypes, loadedCheckTypes]) => {
       if (!active) return;
       setEquipments(loadedEquipments);
@@ -76,7 +78,7 @@ export default function Equipment() {
       setEquipmentTypes(loadedEquipmentTypes);
       setCheckTypes(loadedCheckTypes);
     }).catch((err) => {
-      if (active) toast.error(getApiErrorMessage(err, '목록을 불러오지 못했습니다.'));
+      if (active) toastApiError(err, '목록을 불러오지 못했습니다.');
     });
     return () => { active = false; };
   }, [activePlantId]);
@@ -131,7 +133,7 @@ export default function Equipment() {
 
       setIsFormOpen(true);
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '설비 상세 내역을 불러오지 못했습니다.'));
+      toastApiError(err, '설비 상세 내역을 불러오지 못했습니다.');
     } finally {
       setPendingAction(null);
     }
@@ -149,7 +151,7 @@ export default function Equipment() {
       toast.success('설비가 성공적으로 삭제되었습니다.');
       fetchData();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '설비 삭제 실패.'));
+      toastApiError(err, '설비 삭제 실패.');
     } finally {
       setPendingAction(null);
     }
@@ -184,7 +186,7 @@ export default function Equipment() {
       setIsFormOpen(false);
       fetchData();
     } catch (err) {
-      toast.error(getApiErrorMessage(err, '저장 중 오류가 발생했습니다.'));
+      toastApiError(err, '저장 중 오류가 발생했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -196,7 +198,7 @@ export default function Equipment() {
     try {
       downloadBlob(await equipmentApi.downloadCsv(), 'equipments_export.csv');
     } catch (err) {
-      toast.error(getApiErrorMessage(err, 'CSV 다운로드 실패'));
+      toastApiError(err, 'CSV 다운로드 실패');
     } finally {
       setPendingAction(null);
     }
