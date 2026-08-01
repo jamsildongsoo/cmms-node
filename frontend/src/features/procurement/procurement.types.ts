@@ -1,13 +1,3 @@
-export interface Vendor {
-  id: string;
-  name: string;
-  bizNo?: string;
-  contact?: string;
-  manager?: string;
-  remarks?: string;
-  deleteYn?: string;
-}
-
 export interface PurchaseRequest {
   id: string;
   plantId: string;
@@ -16,7 +6,6 @@ export interface PurchaseRequest {
   departmentId?: string | null;
   requestDate: string;
   requestType?: string;
-  vendorId?: string | null;
   orderDate?: string | null;
   etaDate?: string | null;
   shipStartDate?: string | null;
@@ -26,9 +15,6 @@ export interface PurchaseRequest {
   title?: string;
   approvalId?: string | null;
   createdAt?: string | null;
-  purchaseManager?: string | null;
-  purchaseManagerContact?: string | null;
-  purchaseManagerRemarks?: string | null;
 }
 
 export interface PurchaseRequestItem {
@@ -38,6 +24,25 @@ export interface PurchaseRequestItem {
   unit?: string;
   remarks?: string;
   receivedQty?: number | string | null;
+}
+
+export interface PurchaseRequestDetail {
+  header: PurchaseRequest;
+  items: PurchaseRequestItem[];
+}
+
+export interface PlaceOrderRequest {
+  requestId: string;
+  orderDate?: string | null;
+  etaDate?: string | null;
+}
+
+export interface ReceiveRequest {
+  requestId: string;
+  warehouseId: string;
+  txDate: string;
+  close?: boolean;
+  lines: PurchaseReceiveLine[];
 }
 
 export interface PurchaseReceiveLine {

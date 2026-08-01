@@ -46,12 +46,14 @@ export class BoardController {
   }
 
   @Post()
+  @Permission(AppModule.BRD, 'C')
   async saveBoard(@Body() board: SaveBoardDto): Promise<BoardResponseDto> {
     const { companyId, userId, roleId } = getTenantContext();
     return this.boardService.saveBoard(companyId, board, userId, roleId);
   }
 
   @Put(':id')
+  @Permission(AppModule.BRD, 'U')
   async updateBoard(
     @Param('id', ParseIntPipe) id: number,
     @Body() board: SaveBoardDto,
@@ -63,6 +65,7 @@ export class BoardController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Permission(AppModule.BRD, 'D')
   async deleteBoard(
     @Param('id', ParseIntPipe) id: number,
   ): Promise<void> {
@@ -83,6 +86,7 @@ export class BoardController {
 
   @Delete(':id/comments/:commentNo')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Permission(AppModule.BRD, 'D')
   async deleteComment(
     @Param('id', ParseIntPipe) boardId: number,
     @Param('commentNo', ParseIntPipe) commentNo: number,

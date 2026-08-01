@@ -1,29 +1,37 @@
 import axiosInstance from '../../api/axios';
 import type {
-  PurchaseReceiveLine,
+  PlaceOrderRequest,
   PurchaseReceiptDetail,
   PurchaseReceiptRequestSummary,
   PurchaseRequest,
+  PurchaseRequestDetail,
   PurchaseRequestItem,
-  Vendor,
+  ReceiveRequest,
 } from './procurement.types';
 
-export interface PurchaseRequestDetail {
-  header: PurchaseRequest;
-  items: PurchaseRequestItem[];
-}
-
 export const procurementApi = {
-  async getRequests(management = false): Promise<PurchaseRequest[]> {
-    const path = management ? '/procurement/management/requests' : '/procurement/requests';
-    const response = await axiosInstance.get<PurchaseRequest[]>(path);
+  async getRequests(receivable = false, plantId?: string | null): Promise<PurchaseRequest[]> {
+    const response = await axiosInstance.get<PurchaseRequest[]>('/procurement/requests', {
+      params: { plantId: plantId || undefined, receivable: receivable ? 'Y' : undefined },
+    });
     return response.data;
   },
-  async getRequest(id: string, management = false): Promise<PurchaseRequestDetail> {
-    const path = management
-      ? `/procurement/management/requests/${id}`
-      : `/procurement/requests/${id}`;
-    const response = await axiosInstance.get<PurchaseRequestDetail>(path);
+  async getRequest(id: string, plantId?: string | null): Promise<PurchaseRequestDetail> {
+    const response = await axiosInstance.get<PurchaseRequestDetail>(`/procurement/requests/${id}`, {
+      params: { plantId: plantId || undefined },
+    });
+    return response.data;
+  },
+  async getOrders(receivable = false, plantId?: string | null): Promise<PurchaseRequest[]> {
+    const response = await axiosInstance.get<PurchaseRequest[]>('/procurement/orders', {
+      params: { plantId: plantId || undefined, receivable: receivable ? 'Y' : undefined },
+    });
+    return response.data;
+  },
+  async getOrder(id: string, plantId?: string | null): Promise<PurchaseRequestDetail> {
+    const response = await axiosInstance.get<PurchaseRequestDetail>(`/procurement/orders/${id}`, {
+      params: { plantId: plantId || undefined },
+    });
     return response.data;
   },
   async create(header: Partial<PurchaseRequest>, items: PurchaseRequestItem[]): Promise<PurchaseRequest> {
@@ -41,23 +49,20 @@ export const procurementApi = {
     await axiosInstance.delete(`/procurement/requests/${id}`);
   },
   async closeRequest(id: string): Promise<void> {
-    await axiosInstance.post(`/procurement/requests/${id}/actions/close`);
+    await axiosInstance.post(`/procurement/orders/${id}/actions/close`);
   },
-  async placeOrder(request: Record<string, unknown>): Promise<void> {
+  async placeOrder(request: PlaceOrderRequest): Promise<void> {
     const requestId = String(request.requestId);
-    const { requestId: _requestId, ...payload } = request;
-    await axiosInstance.post(`/procurement/requests/${requestId}/actions/order`, payload);
+    const payload = {
+      orderDate: request.orderDate,
+      etaDate: request.etaDate,
+    };
+    await axiosInstance.post(`/procurement/orders/${requestId}/actions/order`, payload);
   },
   async startShipping(requestId: string, shipStartDate: string): Promise<void> {
-    await axiosInstance.post(`/procurement/requests/${requestId}/actions/ship`, { shipStartDate });
+    await axiosInstance.post(`/procurement/orders/${requestId}/actions/ship`, { shipStartDate });
   },
-  async receive(request: {
-    requestId: string;
-    warehouseId: string;
-    txDate: string;
-    close?: boolean;
-    lines: PurchaseReceiveLine[];
-  }): Promise<void> {
+  async receive(request: ReceiveRequest): Promise<void> {
     const { requestId, ...payload } = request;
     await axiosInstance.post(`/procurement/requests/${requestId}/actions/receive`, payload);
   },
@@ -72,18 +77,5 @@ export const procurementApi = {
       `/procurement/receipts/request/${encodeURIComponent(id)}`,
     );
     return response.data;
-  },
-  async getVendors(): Promise<Vendor[]> {
-    const response = await axiosInstance.get<Vendor[]>('/procurement/vendors');
-    return response.data;
-  },
-  async createVendor(vendor: Vendor): Promise<void> {
-    await axiosInstance.post('/procurement/vendors', vendor);
-  },
-  async updateVendor(vendor: Vendor): Promise<void> {
-    await axiosInstance.put(`/procurement/vendors/${vendor.id}`, vendor);
-  },
-  async deleteVendor(id: string): Promise<void> {
-    await axiosInstance.delete(`/procurement/vendors/${id}`);
   },
 };

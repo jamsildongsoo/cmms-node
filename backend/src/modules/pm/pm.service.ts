@@ -52,8 +52,9 @@ export class PmService {
     searchType?: string,
     searchValue?: string,
     showAll?: string,
+    requestedPlantId?: string,
   ): Promise<PmRecordResponseDto[]> {
-    const plantId = await resolveActivePlantId(this.dataSource, companyId, operator);
+    const plantId = await resolveActivePlantId(this.dataSource, companyId, operator, requestedPlantId);
     const records = await this.pmRepository.findRecords({
       companyId,
       plantId: plantId ?? undefined,

@@ -5,7 +5,7 @@ import { requestConfirmation } from '../utils/userActionDialog';
 import { useAuthStore } from '../store/useAuthStore';
 import { getCommonStatusLabel as getStatusLabel } from '../constants/status';
 import { APP_MODULE } from '../constants/module';
-import { formatDateOnly, todayLocal } from '../utils/datetime';
+import { formatDateOnly, formatPrintStamp, todayLocal } from '../utils/datetime';
 import { toastApiError } from '../utils/apiError';
 import PrintHeader from '../components/PrintHeader';
 import WorkOrderPrint from '../components/WorkOrderPrint';
@@ -28,6 +28,7 @@ import {
 
 export default function WorkOrder() {
   const user = useAuthStore((s) => s.user);
+  const activePlantId = useAuthStore((s) => s.activePlantId);
   const [activeSubTab, setActiveSubTab] = useState<'plan' | 'history'>('plan');
   const [searchType, setSearchType] = useState<'id' | 'title' | 'worker'>('id');
   const [searchValue, setSearchValue] = useState('');
@@ -85,7 +86,7 @@ export default function WorkOrder() {
       }
       // 폼 선택값 구성을 위한 시스템 참조값 조회다. 작업지시 목록 R 권한을 대체하지 않는다.
       const [loadedWorkOrders, loadedEquipments, loadedDepartments, loadedUsers] = await Promise.all([
-        workOrderApi.getAll(params),
+        workOrderApi.getAll(params, activePlantId),
         masterReferenceApi.getEquipments(),
         referenceApi.getDepartmentOptions(),
         referenceApi.getUserOptions(),
@@ -108,7 +109,7 @@ export default function WorkOrder() {
     const timer = window.setTimeout(() => { void fetchData(); }, 0);
     return () => window.clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activePlantId]);
 
   const handleOpenCreate = () => {
     setWoNo('');
@@ -382,8 +383,7 @@ export default function WorkOrder() {
   const handlePrint = () => {
     const printRows = activeSubTab === 'plan' ? plans : history;
     if (printRows.length === 0) { toast.error('인쇄할 목록이 없습니다.'); return; }
-    const now = new Date();
-    const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+    const stamp = formatPrintStamp(new Date());
     const opened = openListPrint({
       title: '작업지시 현황',
       rows: printRows,

@@ -9,7 +9,6 @@ import { PurchaseRequestItem } from '../../entities/purchase-request-item.entity
 import { InventoryHistory } from '../../entities/inventory-history.entity';
 import { User } from '../../entities/users.entity';
 import { Role } from '../../entities/role.entity';
-import { Vendor } from '../../entities/vendor.entity';
 import { Warehouse } from '../../entities/warehouse.entity';
 import { FileModule } from '../file/file.module';
 
@@ -23,7 +22,6 @@ import { FileModule } from '../file/file.module';
       InventoryHistory,
       User,
       Role,
-      Vendor,
       Warehouse,
     ]),
   ],

@@ -16,6 +16,7 @@ import type {
 } from '../approval.types';
 import { toastApiError } from '../../../utils/apiError';
 import { requestConfirmation } from '../../../utils/userActionDialog';
+import { formatDateTimeSeconds } from '../../../utils/datetime';
 import {
   createEmptyRichTextDocument,
   isRichTextDocument,
@@ -122,7 +123,7 @@ export default function ApprovalDraftModal({
           try {
             const draft = JSON.parse(saved);
             const autoTime = draft.autoSavedAt
-              ? new Date(draft.autoSavedAt).toLocaleString('ko-KR')
+              ? formatDateTimeSeconds(draft.autoSavedAt)
               : '';
             if (
               (draft.title || draft.content) &&

@@ -17,5 +17,5 @@ npm run lint
 npm run build
 ```
 
-전체 화면 구조와 API 통신 방식은 [`../docs/ui_structure.md`](../docs/ui_structure.md),
-개발·운영 기동 방법은 [`../docs/run_guide.md`](../docs/run_guide.md)를 참고합니다.
+전체 화면 구조와 API 통신 방식은 [`../docs/tech_spec.md`](../docs/tech_spec.md),
+개발·운영 기동 방법은 [`../docs/server_spec.md`](../docs/server_spec.md)를 참고합니다.

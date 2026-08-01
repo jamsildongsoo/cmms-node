@@ -34,8 +34,9 @@ export class WorkPermitService {
     operator: string,
     searchType?: string,
     searchValue?: string,
+    requestedPlantId?: string,
   ): Promise<WorkPermitResponseDto[]> {
-    const plantId = await resolveActivePlantId(this.dataSource, companyId, operator);
+    const plantId = await resolveActivePlantId(this.dataSource, companyId, operator, requestedPlantId);
     return (
       await this.workPermitRepository.findAll(
         companyId,

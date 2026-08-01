@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarDays, Database, Download, RefreshCw, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { powerGenerationApi } from '../features/power-generation/power-generation.api';
@@ -33,18 +33,18 @@ export default function PowerGeneration() {
   const [monthly, setMonthly] = useState<PowerGenerationMonthly | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const loadMonth = async (month = viewMonth) => {
+  const loadMonth = useCallback(async (month = viewMonth) => {
     try {
       setMonthly(await powerGenerationApi.getMonthly(month.replace('-', '')));
     } catch (error) {
       toastApiError(error, '월간 발전량을 불러오지 못했습니다.');
     }
-  };
+  }, [viewMonth]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void loadMonth(); }, 0);
+    const timer = window.setTimeout(() => { void loadMonth(viewMonth); }, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [loadMonth, viewMonth]);
 
   const handleImport = async () => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(tradingDay)) {
@@ -94,7 +94,6 @@ export default function PowerGeneration() {
               value={viewMonth}
               onChange={(event) => {
                 setViewMonth(event.target.value);
-                void loadMonth(event.target.value);
               }}
               className="h-10 w-40 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm font-semibold text-slate-100 outline-none focus:border-emerald-500"
             />

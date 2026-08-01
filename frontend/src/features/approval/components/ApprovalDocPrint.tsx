@@ -1,6 +1,6 @@
 import RichTextViewer from '../../../components/RichTextViewer';
 import PrintHeader from '../../../components/PrintHeader';
-import { formatDateTime } from '../../../utils/datetime';
+import { formatDateCompact, formatDateTime } from '../../../utils/datetime';
 import { isRichTextEmpty, type RichTextDocument } from '../../../types/richText';
 import ApprovalSignatureBox, { type ApprovalSignatureStep } from './ApprovalSignatureBox';
 import {
@@ -24,14 +24,6 @@ interface ApprovalDocPrintProps {
   onDownloadAttachment?: (attachment: FileItem) => void;
 }
 
-const formatDateOnly = (value?: string | null) => {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const pad = (part: number) => String(part).padStart(2, '0');
-  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
-};
-
 const formatSize = (bytes: number) =>
   bytes < 1024
     ? `${bytes} B`
@@ -48,7 +40,7 @@ export default function ApprovalDocPrint(props: ApprovalDocPrintProps) {
       <section className="grid grid-cols-2 border-y-2 border-black mb-5">
         <dl className="border-r border-gray-500 p-3 text-[10px] space-y-2">
           <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">문서번호</dt><dd className="font-mono">{props.id}</dd></div>
-          <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">작성일자</dt><dd className="font-mono">{formatDateOnly(props.createdAt)}</dd></div>
+          <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">작성일자</dt><dd className="font-mono">{formatDateCompact(props.createdAt)}</dd></div>
           <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">기안부서</dt><dd>{props.drafterDepartment || '-'}</dd></div>
           <div className="grid grid-cols-[64px_1fr] gap-2"><dt className="font-semibold">기안자</dt><dd>{props.drafterName || '-'}</dd></div>
         </dl>

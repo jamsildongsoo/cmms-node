@@ -1,11 +1,11 @@
-export interface InventoryStatus {
+export interface StockStatus {
   warehouseId: string;
   inventoryId: string;
   qty: number;
   amount: number;
 }
 
-export interface InventoryHistory {
+export interface StockHistory {
   companyId: string;
   warehouseId: string;
   inventoryId: string;
@@ -23,10 +23,18 @@ export interface InventoryHistory {
   refLineNo: string | null;
 }
 
-export interface InventoryTransactionItem {
+export interface StockProcessingItem {
   warehouseId: string;
   inventoryId: string;
   qty: number;
   unitPrice: number;
   targetWarehouseId: string;
+}
+
+export interface ProcessStockRequest {
+  items: Array<StockProcessingItem & {
+    txTypeCode: string;
+    txReasonCode: string;
+    txDate: string;
+  }>;
 }

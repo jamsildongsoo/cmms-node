@@ -4,7 +4,8 @@ import type { WorkPermit } from './work-permit.types';
 type WorkPermitSaveRequest = Omit<Partial<WorkPermit>, 'id'> & { id?: string | null };
 
 export const workPermitApi = {
-  async getAll(params?: URLSearchParams): Promise<WorkPermit[]> {
+  async getAll(params?: URLSearchParams, plantId?: string | null): Promise<WorkPermit[]> {
+    if (plantId) params?.set('plantId', plantId);
     const response = await axiosInstance.get<WorkPermit[]>('/work-permit', { params });
     return response.data;
   },

@@ -17,7 +17,7 @@ import { MasterService, EquipmentSaveRequest } from './master.service';
 import { Equipment } from '../../entities/equipment.entity';
 import { Inventory } from '../../entities/inventory.entity';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { PermissionGuard, Permission } from '../../common/guards/permission.guard';
+import { PermissionGuard, Permission, RefPermission } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
@@ -62,6 +62,7 @@ export class MasterController {
 
   /** 업무 입력화면 설비 선택용 — 사용자 플랜트 범위만 반환한다. */
   @Get('refs/equipments')
+  @RefPermission()
   async getEquipmentsForUse(
     @Query('plantId') plantId?: string,
   ): Promise<Equipment[]> {
@@ -112,6 +113,7 @@ export class MasterController {
 
   /** 업무 입력화면 자재 선택용 읽기 전용 참조 API. */
   @Get('refs/inventories')
+  @RefPermission()
   async getInventoriesForUse(): Promise<Inventory[]> {
     const { companyId } = getTenantContext();
     return this.masterService.getInventoriesByCompany(companyId);

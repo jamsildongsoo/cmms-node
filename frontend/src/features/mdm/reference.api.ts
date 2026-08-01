@@ -39,7 +39,4 @@ export const referenceApi = {
   async getPmTypeOptions(): Promise<CodeItem[]> {
     return getCodeOptionsByGroup('PM_TYPE');
   },
-  async getInventoryTransactionReasonOptions(): Promise<CodeItem[]> {
-    return getCodeOptionsByGroup('TX_REASON');
-  },
 };

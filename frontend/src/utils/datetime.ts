@@ -6,6 +6,12 @@
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
+function asDate(value?: string | Date | null): Date | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 /** 오늘 날짜 (로컬) — date-only 필드 기본값. 'YYYY-MM-DD' */
 export function todayLocal(): string {
   const d = new Date();
@@ -26,17 +32,22 @@ export function nowLocalInput(): string {
 
 /** UTC(또는 date) 값 → 화면 표시 'YYYY-MM-DD HH:mm' (로컬). 시각 포함 표시용. */
 export function formatDateTime(value?: string | null): string {
-  if (!value) return '-';
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return String(value);
+  const d = asDate(value);
+  if (!d) return value ? String(value) : '-';
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** UTC(또는 date) 값 → 화면 표시 'YYYY-MM-DD HH:mm:ss' (로컬). 인쇄/로그 표시용. */
+export function formatDateTimeSeconds(value?: string | Date | null): string {
+  const d = asDate(value);
+  if (!d) return value ? String(value) : '-';
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 /** UTC(또는 date) 값 → 화면 표시 'YYYY-MM-DD' (로컬). 날짜만 표시용. */
 export function formatDate(value?: string | null): string {
-  if (!value) return '-';
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return String(value);
+  const d = asDate(value);
+  if (!d) return value ? String(value) : '-';
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
@@ -45,16 +56,28 @@ export function formatDateOnly(value?: string | null): string {
   if (!value) return '';
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
 
-  const date = new Date(value);
-  if (isNaN(date.getTime())) return value;
+  const date = asDate(value);
+  if (!date) return value;
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** 날짜값 → 'YYYYMMDD'. 결재/문서 출력용 compact 표시. */
+export function formatDateCompact(value?: string | Date | null): string {
+  const dateOnly = formatDateOnly(typeof value === 'string' ? value : value?.toISOString() ?? null);
+  return dateOnly ? dateOnly.replace(/-/g, '') : '';
+}
+
+/** 출력 로그용 로컬 시각 'YYYYMMDD HH:mm:ss'. */
+export function formatPrintStamp(value?: string | Date | null): string {
+  const d = asDate(value);
+  if (!d) return value ? String(value) : '-';
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 /** UTC ISO → datetime-local 입력값 'YYYY-MM-DDTHH:mm' (로컬, 편집 로드용) */
 export function utcToInput(value?: string | null): string {
-  if (!value) return '';
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return '';
+  const d = asDate(value);
+  if (!d) return '';
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 

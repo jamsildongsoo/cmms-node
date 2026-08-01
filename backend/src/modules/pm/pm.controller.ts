@@ -21,7 +21,7 @@ import {
   SavePmRecordDto,
 } from './dto/pm.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { PermissionGuard, Permission, PermissionSave } from '../../common/guards/permission.guard';
+import { PermissionGuard, Permission } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
@@ -47,9 +47,10 @@ export class PmController {
     @Query('searchType') searchType?: string,
     @Query('searchValue') searchValue?: string,
     @Query('showAll') showAll?: string,
+    @Query('plantId') plantId?: string,
   ): Promise<PmRecordResponseDto[]> {
     const { companyId, userId } = getTenantContext();
-    return this.pmService.getPmRecords(companyId, userId, stepStage, searchType, searchValue, showAll);
+    return this.pmService.getPmRecords(companyId, userId, stepStage, searchType, searchValue, showAll, plantId);
   }
 
   @Get('records/:id')
@@ -73,13 +74,14 @@ export class PmController {
   }
 
   @Post('records')
-  @PermissionSave(AppModule.PM, 'pmRecord.status')
+  @Permission(AppModule.PM, 'C')
   async savePmRecord(@Body() request: SavePmRecordDto): Promise<PmRecordResponseDto> {
     const { companyId, userId } = getTenantContext();
     return this.pmService.savePmRecord(companyId, request, userId, 'create');
   }
 
   @Put('records/:id')
+  @Permission(AppModule.PM, 'U')
   async updatePmRecord(
     @Param('id') id: string,
     @Body() request: SavePmRecordDto,
@@ -101,6 +103,7 @@ export class PmController {
 
   @Delete('records/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Permission(AppModule.PM, 'D')
   async deletePmRecord(
     @Param('id') id: string,
     @Query('plantId') plantId: string,

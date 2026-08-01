@@ -53,6 +53,9 @@
 *   검색 조건, 정렬, 필터, 접근 컨텍스트는 query param으로 전달합니다.
 *   동일한 값을 body와 path에 중복 전달하지 않습니다.
 
+API의 `path/query/body/actions` 구분과 `companyId`·`plantId` 범위 규칙은
+`docs/tech_spec.md`의 API 설계를 따릅니다.
+
 예시:
 
 *   자원 식별: `GET /work-permit/:id`
@@ -67,6 +70,8 @@
 *   `U/D`는 타인 문서를 포함한 일반 수정/삭제 권한을 의미합니다.
 *   `A`는 업무모듈의 직접확정/승인 권한입니다.
 *   전자결재(`APR`) 승인 행위는 모듈 권한 `A`가 아니라 결재선으로 판단합니다.
+*   `PermissionGuard`가 적용되는 API는 `@Permission`, `@RefPermission`, `@WorkflowPermission`, `@SystemPermission` 중 하나를 반드시 선언합니다.
+*   위 권한 metadata가 없는 API는 기본 거부(`deny all`)로 처리합니다.
 
 권한 예외는 서비스 계층에서 처리합니다.
 
@@ -88,6 +93,17 @@
 *   `updateX(id, request)`
 *   `deleteX(id, options)`
 *   `runXAction(id, action, payload)`
+
+---
+
+## 6-1. TypeScript 타입 정의 원칙
+
+*   공개 객체 계약(요청/응답 모델, props, DTO 대응 구조)은 `interface`를 기본으로 사용합니다.
+*   유니온 타입, 교차 타입, 매핑 타입, 유틸리티 타입 조합은 `type`을 사용합니다.
+*   단순 별칭이 아닌 객체 구조를 표현할 때는 `type`과 `interface`를 혼용하지 않고, 특별한 이유가 없으면 `interface`를 우선합니다.
+*   서비스 계층의 `params object` 입력은 재사용 가능성이 있으면 별도 `interface` 또는 `type`으로 분리합니다.
+*   FE/BE 계약 타입은 인라인 선언보다 모듈별 `*.types.ts` 또는 DTO 파일에 모아 관리합니다.
+*   동일한 의미의 타입을 여러 위치에 중복 선언하지 않습니다. 공통 계약은 단일 정의를 우선합니다.
 
 ---
 

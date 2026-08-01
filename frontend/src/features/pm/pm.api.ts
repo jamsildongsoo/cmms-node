@@ -1,13 +1,9 @@
 import axiosInstance from '../../api/axios';
-import type { PmRecord, PmRecordDetail, PmRecordItem } from './pm.types';
-
-interface PmSaveRequest {
-  pmRecord: Omit<Partial<PmRecord>, 'id'> & { id?: string | null };
-  checkItems: PmRecordItem[];
-}
+import type { PmRecord, PmRecordDetail, PmRecordItem, PmSaveRequest } from './pm.types';
 
 export const pmApi = {
-  async getAll(params: URLSearchParams): Promise<PmRecord[]> {
+  async getAll(params: URLSearchParams, plantId?: string | null): Promise<PmRecord[]> {
+    if (plantId) params.set('plantId', plantId);
     const response = await axiosInstance.get<PmRecord[]>('/pm/records', { params });
     return response.data;
   },

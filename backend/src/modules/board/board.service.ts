@@ -7,9 +7,8 @@ import { DataSource } from 'typeorm';
 import { Board } from '../../entities/board.entity';
 import { BoardComment } from '../../entities/board-comment.entity';
 import { User } from '../../entities/users.entity';
-import { RoleDetail } from '../../entities/role-detail.entity';
 import { AppModule } from '../../common/constants/module.constants';
-import type { PermAction } from '../../common/constants/permission.constants';
+import { PermissionPolicyService } from '../../common/permissions/permission-policy.service';
 import { BoardRepository } from './board.repository';
 import {
   BoardCommentResponseDto,
@@ -26,6 +25,7 @@ export class BoardService {
     private readonly dataSource: DataSource,
     private readonly boardRepository: BoardRepository,
     private readonly fileStorageService: FileStorageService,
+    private readonly permissionPolicyService: PermissionPolicyService,
   ) {}
 
   async getBoards(companyId: string): Promise<BoardResponseDto[]> {
@@ -57,7 +57,15 @@ export class BoardService {
     const rawId = input.id == null ? null : Number(input.id);
     let entity: Board;
     if (rawId == null) {
-      await this.assertPermission(companyId, roleId, 'C');
+      await this.permissionPolicyService.assertModulePermission(
+        {
+          companyId,
+          roleId,
+          module: AppModule.BRD,
+          action: 'C',
+          resourceLabel: '게시판',
+        },
+      );
       entity = repository.create({
         companyId,
         boardTypeCode: input.boardTypeCode,
@@ -77,14 +85,13 @@ export class BoardService {
       }) ?? (() => {
         throw new NotFoundException('게시글을 찾을 수 없습니다.');
       })();
-      if (
-        entity.createdBy !== operator
-        && !(await this.hasPermission(companyId, roleId, 'U'))
-      ) {
-        throw new ForbiddenException(
-          '본인 게시글이 아니거나 게시판 수정 권한이 없습니다.',
-        );
-      }
+      await this.permissionPolicyService.assertCanMutateBoard({
+        companyId,
+        roleId,
+        action: 'U',
+        ownerId: entity.createdBy,
+        operatorId: operator,
+      });
       Object.assign(entity, {
         boardTypeCode: input.boardTypeCode,
         title: input.title,
@@ -127,14 +134,13 @@ export class BoardService {
       where: { companyId, id, deleteYn: 'N' },
     });
     if (!entity) throw new NotFoundException('게시글을 찾을 수 없습니다.');
-    if (
-      entity.createdBy !== operator
-      && !(await this.hasPermission(companyId, roleId, 'D'))
-    ) {
-      throw new ForbiddenException(
-        '본인 게시글이 아니거나 게시판 삭제 권한이 없습니다.',
-      );
-    }
+    await this.permissionPolicyService.assertCanMutateBoard({
+      companyId,
+      roleId,
+      action: 'D',
+      ownerId: entity.createdBy,
+      operatorId: operator,
+    });
     const fileGroupId = entity.fileGroupId;
     entity.deleteYn = 'Y';
     entity.updatedBy = operator;
@@ -201,51 +207,23 @@ export class BoardService {
       where: { companyId, boardId, commentNo },
     });
     if (!comment) throw new NotFoundException('댓글을 찾을 수 없습니다.');
-    if (
-      comment.authorId !== operatorId
-      && !(await this.hasPermission(companyId, roleId, 'D'))
-    ) {
-      throw new ForbiddenException(
-        '본인 댓글이 아니거나 게시판 삭제 권한이 없습니다.',
-      );
-    }
-    await repository.remove(comment);
-  }
-
-  private async assertPermission(
-    companyId: string,
-    roleId: string,
-    action: PermAction,
-  ): Promise<void> {
-    if (!(await this.hasPermission(companyId, roleId, action))) {
-      throw new ForbiddenException(`게시판 ${action} 권한이 없습니다.`);
-    }
-  }
-
-  private async hasPermission(
-    companyId: string,
-    roleId: string,
-    action: PermAction,
-  ): Promise<boolean> {
-    if (companyId === 'SYSTEM' && roleId.toUpperCase() === 'SYSTEM') {
-      return true;
-    }
-    const permission = await this.dataSource.getRepository(RoleDetail).findOne({
-      where: {
+    try {
+      await this.permissionPolicyService.assertCanMutateBoard({
         companyId,
         roleId,
-        moduleDetail: AppModule.BRD,
-      },
-    });
-    if (!permission) return false;
-    const property: Record<PermAction, keyof RoleDetail> = {
-      C: 'permC',
-      R: 'permR',
-      U: 'permU',
-      D: 'permD',
-      A: 'permA',
-    };
-    return permission[property[action]] === 'Y';
+        action: 'D',
+        ownerId: comment.authorId,
+        operatorId,
+      });
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        throw new ForbiddenException(
+          '본인 댓글이 아니거나 게시판 삭제 권한이 없습니다.',
+        );
+      }
+      throw error;
+    }
+    await repository.remove(comment);
   }
 
   private toBoardResponse(entity: Board): BoardResponseDto {

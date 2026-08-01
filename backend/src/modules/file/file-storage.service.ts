@@ -27,18 +27,10 @@ import { DataSource, EntityManager, In } from 'typeorm';
 import { getTenantContext } from '../../common/context/tenant.context';
 import { AppModule } from '../../common/constants/module.constants';
 import type { PermAction } from '../../common/constants/permission.constants';
-import { DocStatus } from '../../common/constants/status.constants';
+import { PermissionPolicyService } from '../../common/permissions/permission-policy.service';
 import { S3_CLIENT, STORAGE_SETTINGS, StorageSettings } from './storage.config';
 import { FileAttachment } from '../../entities/file-attachment.entity';
 import { FileAttachmentItem } from '../../entities/file-attachment-item.entity';
-import { RoleDetail } from '../../entities/role-detail.entity';
-import { User } from '../../entities/users.entity';
-import { Approval } from '../../entities/approval.entity';
-import { WorkOrder } from '../../entities/work-order.entity';
-import { WorkPermit } from '../../entities/work-permit.entity';
-import { Board } from '../../entities/board.entity';
-import { PmRecord } from '../../entities/pm-record.entity';
-import { PurchaseRequest } from '../../entities/purchase-request.entity';
 
 export interface FileItemResponse {
   itemNo: number;
@@ -53,16 +45,13 @@ export interface UploadResponse {
   files: FileItemResponse[];
 }
 
-type GroupAccess =
-  | { kind: 'draft'; ownerId: string; module: AppModule }
-  | { kind: 'document'; ownerId: string; module: AppModule; editable: boolean };
-
 @Injectable()
 export class FileStorageService {
   constructor(
     @Inject(S3_CLIENT) private readonly s3: S3Client,
     @Inject(STORAGE_SETTINGS) private readonly settings: StorageSettings,
     private readonly dataSource: DataSource,
+    private readonly permissionPolicyService: PermissionPolicyService,
   ) {}
 
   // =========================================================================
@@ -370,11 +359,6 @@ export class FileStorageService {
     return module as AppModule;
   }
 
-  private async getGroupModule(companyId: string, groupNo: number): Promise<AppModule> {
-    const group = await this.getGroup(companyId, groupNo);
-    return this.parseAppModule(group.refModule);
-  }
-
   private async getGroup(companyId: string, groupNo: number): Promise<FileAttachment> {
     const group = await this.dataSource.getRepository(FileAttachment).findOne({
       where: { companyId, groupNo: String(groupNo), deleteYn: 'N' },
@@ -384,173 +368,41 @@ export class FileStorageService {
   }
 
   private async assertModulePermission(module: AppModule, actions: PermAction[]): Promise<void> {
-    const { companyId, userId, roleId } = getTenantContext();
-
-    if (companyId === 'SYSTEM' && roleId?.toUpperCase() === 'SYSTEM') {
-      const systemUser = await this.dataSource.getRepository(User).findOne({
-        where: {
-          companyId: 'SYSTEM',
-          id: userId,
-          useYn: 'Y',
-          deleteYn: 'N',
-        },
-      });
-      if (systemUser?.roleId?.toUpperCase() === 'SYSTEM') return;
-    }
-
+    const { companyId, roleId } = getTenantContext();
     if (!roleId) throw new ForbiddenException('파일 접근 권한이 없습니다.');
-
-    const permission = await this.dataSource.getRepository(RoleDetail).findOne({
-      where: { companyId, roleId, moduleDetail: module },
-    });
-    if (!permission) throw new ForbiddenException('파일 접근 권한이 없습니다.');
-
-    const allowed = actions.some((action) => {
-      switch (action) {
-        case 'C': return permission.permC === 'Y';
-        case 'R': return permission.permR === 'Y';
-        case 'U': return permission.permU === 'Y';
-        case 'D': return permission.permD === 'Y';
-        case 'A': return permission.permA === 'Y';
-        default: return false;
-      }
-    });
-
-    if (!allowed) throw new ForbiddenException('파일 접근 권한이 없습니다.');
+    await this.permissionPolicyService.assertAnyModulePermission(
+      {
+        companyId,
+        roleId,
+        module,
+        actions,
+        message: '파일 접근 권한이 없습니다.',
+      },
+    );
   }
 
   private async assertCanReadGroup(companyId: string, groupNo: number): Promise<void> {
     const group = await this.getGroup(companyId, groupNo);
-    const access = await this.resolveGroupAccess(group);
-    const { userId } = getTenantContext();
-
-    if (access.kind === 'draft') {
-      if (access.ownerId !== userId) {
-        throw new ForbiddenException('첨부파일 조회 권한이 없습니다.');
-      }
-      return;
-    }
-
-    if (access.editable && access.ownerId === userId) {
-      return;
-    }
-
-    await this.assertModulePermission(access.module, ['R']);
+    const { roleId, userId } = getTenantContext();
+    if (!roleId) throw new ForbiddenException('첨부파일 조회 권한이 없습니다.');
+    await this.permissionPolicyService.assertCanReadAttachmentGroup({
+      companyId,
+      roleId,
+      userId,
+      group,
+    });
   }
 
   private async assertCanMutateGroup(group: FileAttachment, action: 'U' | 'D'): Promise<void> {
-    const access = await this.resolveGroupAccess(group);
-    const { userId } = getTenantContext();
-
-    if (access.kind === 'draft') {
-      if (access.ownerId !== userId) {
-        throw new ForbiddenException('임시 첨부는 생성자 본인만 수정할 수 있습니다.');
-      }
-      return;
-    }
-
-    if (!access.editable) {
-      throw new ForbiddenException('현재 상태의 문서는 첨부를 수정할 수 없습니다.');
-    }
-
-    if (access.ownerId === userId) {
-      return;
-    }
-
-    await this.assertModulePermission(access.module, [action]);
-  }
-
-  private async resolveGroupAccess(group: FileAttachment): Promise<GroupAccess> {
-    const module = this.parseAppModule(group.refModule);
-    const refNo = group.refNo?.trim();
-    if (!refNo) {
-      return { kind: 'draft', ownerId: group.createdBy, module };
-    }
-
-    switch (module) {
-      case AppModule.APR: {
-        const approval = await this.dataSource.getRepository(Approval).findOne({
-          where: { companyId: group.companyId, id: refNo, deleteYn: 'N' },
-        });
-        if (!approval) throw new NotFoundException('연결된 전자결재 문서를 찾을 수 없습니다.');
-        return {
-          kind: 'document',
-          module,
-          ownerId: approval.drafterId,
-          editable: this.isEditableStatus(approval.status),
-        };
-      }
-      case AppModule.WO: {
-        const workOrder = await this.dataSource.getRepository(WorkOrder).findOne({
-          where: { companyId: group.companyId, id: refNo, deleteYn: 'N' },
-        });
-        if (!workOrder) throw new NotFoundException('연결된 작업지시 문서를 찾을 수 없습니다.');
-        return {
-          kind: 'document',
-          module,
-          ownerId: workOrder.createdBy,
-          editable: this.isEditableStatus(workOrder.status),
-        };
-      }
-      case AppModule.WP: {
-        const workPermit = await this.dataSource.getRepository(WorkPermit).findOne({
-          where: { companyId: group.companyId, id: refNo, deleteYn: 'N' },
-        });
-        if (!workPermit) throw new NotFoundException('연결된 작업허가 문서를 찾을 수 없습니다.');
-        return {
-          kind: 'document',
-          module,
-          ownerId: workPermit.createdBy,
-          editable: this.isEditableStatus(workPermit.status),
-        };
-      }
-      case AppModule.PM: {
-        const pmRecord = await this.dataSource.getRepository(PmRecord).findOne({
-          where: { companyId: group.companyId, id: refNo, deleteYn: 'N' },
-        });
-        if (!pmRecord) throw new NotFoundException('연결된 예방점검 문서를 찾을 수 없습니다.');
-        return {
-          kind: 'document',
-          module,
-          ownerId: pmRecord.createdBy,
-          editable: this.isEditableStatus(pmRecord.status),
-        };
-      }
-      case AppModule.PUR: {
-        const request = await this.dataSource.getRepository(PurchaseRequest).findOne({
-          where: { companyId: group.companyId, id: refNo, deleteYn: 'N' },
-        });
-        if (!request) throw new NotFoundException('연결된 구매 문서를 찾을 수 없습니다.');
-        return {
-          kind: 'document',
-          module,
-          ownerId: request.requesterId,
-          editable: this.isEditableStatus(request.status),
-        };
-      }
-      case AppModule.BRD: {
-        const boardId = Number(refNo);
-        if (!Number.isSafeInteger(boardId) || boardId <= 0) {
-          throw new BadRequestException('연결된 게시글 번호가 올바르지 않습니다.');
-        }
-        const board = await this.dataSource.getRepository(Board).findOne({
-          where: { companyId: group.companyId, id: boardId, deleteYn: 'N' },
-        });
-        if (!board) throw new NotFoundException('연결된 게시글을 찾을 수 없습니다.');
-        return {
-          kind: 'document',
-          module,
-          ownerId: board.createdBy,
-          editable: true,
-        };
-      }
-      default:
-        throw new ForbiddenException('지원하지 않는 첨부 참조 모듈입니다.');
-    }
-  }
-
-  private isEditableStatus(status: string | null | undefined): boolean {
-    return [DocStatus.TEMP, DocStatus.REJECTED].includes(status as DocStatus);
+    const { roleId, userId } = getTenantContext();
+    if (!roleId) throw new ForbiddenException('첨부파일 수정 권한이 없습니다.');
+    await this.permissionPolicyService.assertCanMutateAttachmentGroup({
+      companyId: group.companyId,
+      roleId,
+      userId,
+      action,
+      group,
+    });
   }
 
   private normalizeGroupNo(value: number | string): number {

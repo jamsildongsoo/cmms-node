@@ -1,5 +1,6 @@
 import PrintHeader from './PrintHeader';
 import { PrintSection, PrintTable } from './PrintDoc';
+import { formatQuantity } from '../utils/number';
 
 interface SlipPrintItem {
   warehouseName: string;
@@ -60,7 +61,7 @@ export default function SlipPrint(p: SlipPrintProps) {
             item.warehouseName,
             item.inventoryId,
             item.inventoryName,
-            Math.abs(Number(item.qty)).toLocaleString(),
+            formatQuantity(Math.abs(Number(item.qty))),
             item.unit || '-',
           ])}
         />

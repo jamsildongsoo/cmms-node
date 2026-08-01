@@ -10,7 +10,6 @@ import { DataSource } from 'typeorm';
 import { JwtPayload } from '../../modules/auth/auth.interfaces';
 import { AppModule, AppModuleLabel } from '../constants/module.constants';
 import { PermAction } from '../constants/permission.constants';
-import { DocStatus } from '../constants/status.constants';
 import { User } from '../../entities/users.entity';
 import { RoleDetail } from '../../entities/role-detail.entity';
 
@@ -20,12 +19,14 @@ export const PERMISSION_KEY = 'permission';
 export const Permission = (module: AppModule, action: PermAction) =>
   SetMetadata(PERMISSION_KEY, { module, action });
 
-/** 저장 권한(C/U)을 검사하고 status='S'면 직접확정 A 권한도 추가로 검사한다. */
-export const PermissionSave = (
-  module: AppModule,
-  statusParam?: string,
-  action: Extract<PermAction, 'C' | 'U'> = 'C',
-) => SetMetadata(PERMISSION_KEY, { module, action, saveMode: true, statusParam });
+export const REF_PERMISSION_KEY = 'ref_permission';
+export const RefPermission = () => SetMetadata(REF_PERMISSION_KEY, true);
+
+export const WORKFLOW_PERMISSION_KEY = 'workflow_permission';
+export const WorkflowPermission = () => SetMetadata(WORKFLOW_PERMISSION_KEY, true);
+
+export const SYSTEM_PERMISSION_KEY = 'system_permission';
+export const SystemPermission = () => SetMetadata(SYSTEM_PERMISSION_KEY, true);
 
 const ACTION_LABEL: Record<PermAction, string> = {
   C: '등록',
@@ -46,11 +47,47 @@ export class PermissionGuard implements CanActivate {
     const perm = this.reflector.getAllAndOverride<{
       module: string;
       action: PermAction;
-      saveMode?: boolean;
-      statusParam?: string;
     }>(PERMISSION_KEY, [ctx.getHandler(), ctx.getClass()]);
+    const isRefApi = this.reflector.getAllAndOverride<boolean>(
+      REF_PERMISSION_KEY,
+      [ctx.getHandler(), ctx.getClass()],
+    );
+    const isWorkflowApi = this.reflector.getAllAndOverride<boolean>(
+      WORKFLOW_PERMISSION_KEY,
+      [ctx.getHandler(), ctx.getClass()],
+    );
+    const isSystemApi = this.reflector.getAllAndOverride<boolean>(
+      SYSTEM_PERMISSION_KEY,
+      [ctx.getHandler(), ctx.getClass()],
+    );
 
-    if (!perm) return true; // 메타데이터 없으면 통과 (JwtAuthGuard만 적용)
+    // deny-all 기본 원칙: 모든 API는 명시적 권한 metadata 또는 허용 예외를 가져야 한다.
+    if (!perm) {
+      if (isRefApi || isWorkflowApi) return true;
+      if (isSystemApi) {
+        const req = ctx.switchToHttp().getRequest();
+        const user = req.user as JwtPayload;
+        if (!user) {
+          throw new ForbiddenException('요청을 처리할 사용자 권한 정보가 없습니다.');
+        }
+        if (user.roleId.toUpperCase() !== 'SYSTEM' || user.companyId !== 'SYSTEM') {
+          throw new ForbiddenException('SYSTEM 권한이 필요합니다.');
+        }
+        const systemUser = await this.dataSource.getRepository(User).findOne({
+          select: { roleId: true },
+          where: {
+            companyId: 'SYSTEM',
+            id: user.userId,
+            deleteYn: 'N',
+          },
+        });
+        if (systemUser?.roleId !== 'SYSTEM') {
+          throw new ForbiddenException('SYSTEM 관리자 권한을 확인할 수 없습니다.');
+        }
+        return true;
+      }
+      throw new ForbiddenException('권한 정책이 지정되지 않은 API입니다.');
+    }
 
     const req = ctx.switchToHttp().getRequest();
     const user = req.user as JwtPayload;
@@ -58,7 +95,7 @@ export class PermissionGuard implements CanActivate {
       throw new ForbiddenException('요청을 처리할 사용자 권한 정보가 없습니다.');
     }
 
-    // SYSTEM 역할은 전 모듈 통과 (테넌트 결속 + 서버 재검증)
+    // SYSTEM 역할은 모듈 매트릭스를 우회하되, SYSTEM 회사/사용자 재검증을 반드시 거친다.
     if (user.roleId.toUpperCase() === 'SYSTEM') {
       if (user.companyId !== 'SYSTEM') {
         throw new ForbiddenException('SYSTEM 역할의 회사 정보가 올바르지 않습니다.');
@@ -85,17 +122,6 @@ export class PermissionGuard implements CanActivate {
       throw this.permissionException(perm.module, perm.action);
     }
 
-    // saveMode: status='S'면 A 권한 추가 확인
-    if (perm.saveMode && perm.statusParam) {
-      const status = this.readPath(req.body, perm.statusParam) ?? req.query?.status;
-      if (status === DocStatus.SELF_CONFIRMED) {
-        const canApprove = await this.checkMatrix(user.companyId, user.roleId, perm.module, 'A');
-        if (!canApprove) {
-          throw new ForbiddenException(`${this.moduleLabel(perm.module)} 직접확정 권한이 없습니다.`);
-        }
-      }
-    }
-
     return true;
   }
 
@@ -105,13 +131,6 @@ export class PermissionGuard implements CanActivate {
 
   private moduleLabel(module: string): string {
     return AppModuleLabel[module as AppModule] ?? module;
-  }
-
-  private readPath(source: unknown, path: string): unknown {
-    return path.split('.').reduce<unknown>((value, key) => {
-      if (!value || typeof value !== 'object') return undefined;
-      return (value as Record<string, unknown>)[key];
-    }, source);
   }
 
   private async checkMatrix(

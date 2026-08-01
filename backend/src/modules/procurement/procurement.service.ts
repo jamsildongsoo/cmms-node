@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -20,7 +21,6 @@ import { InventoryHistory } from '../../entities/inventory-history.entity';
 import { User } from '../../entities/users.entity';
 import { Role } from '../../entities/role.entity';
 import { Warehouse } from '../../entities/warehouse.entity';
-import { Vendor } from '../../entities/vendor.entity';
 import { ProcurementRepository } from './procurement.repository';
 import { PermissionPolicyService } from '../../common/permissions/permission-policy.service';
 import { FileStorageService } from '../file/file-storage.service';
@@ -43,7 +43,6 @@ export interface SaveRequest {
     requestDate?: string | Date;
     requestType?: string | null;
     title?: string;
-    vendorId?: string | null;
     remarks?: string | null;
     status?: string;
   };
@@ -51,8 +50,7 @@ export interface SaveRequest {
 }
 export interface RequestDetail { header: PurchaseRequestResponse; items: ItemLine[] }
 export interface OrderRequest {
-  requestId: string; vendorId: string; purchaseManager: string;
-  purchaseManagerContact?: string | null; purchaseManagerRemarks?: string | null;
+  requestId: string;
   orderDate?: string | Date; etaDate?: string | Date;
 }
 export interface ShipRequest { requestId: string; shipStartDate?: string | Date }
@@ -66,8 +64,6 @@ export interface PurchaseRequestResponse {
   requesterId: string; departmentId: string | null; requestDate: string; requestType: string | null;
   fileGroupId: number | null;
   title: string; approvalId: string | null;
-  vendorId: string | null; purchaseManager: string | null; purchaseManagerContact: string | null;
-  purchaseManagerRemarks: string | null;
   orderDate: string | null; etaDate: string | null;
   shipStartDate: string | null; status: string; procStatus: string | null;
   remarks: string | null; createdAt: string; createdBy: string;
@@ -76,15 +72,6 @@ export interface ReceivableRequestResponse extends PurchaseRequestResponse {
   requestedQty: string;
   remainingQty: string;
 }
-export interface VendorRequest {
-  id?: string;
-  name?: string;
-  bizNo?: string | null;
-  contact?: string | null;
-  manager?: string | null;
-  remarks?: string | null;
-}
-
 const dateOnly = (value?: string | Date | null): string | null => {
   if (!value) return null;
   return value instanceof Date ? value.toISOString().slice(0, 10) : value.slice(0, 10);
@@ -105,90 +92,55 @@ export class ProcurementService {
   async getRequests(
     companyId: string,
     operator: string,
+    roleId: string,
     requestedPlantId?: string | null,
+    receivableOnly = false,
   ): Promise<PurchaseRequestResponse[]> {
-    return (await this.procurementRepository.findByRequester(
-      companyId, operator,
-    )).map((entity) => this.toResponse(entity));
-  }
-
-  async getManagementRequests(companyId: string): Promise<PurchaseRequestResponse[]> {
-    return (await this.procurementRepository.findAll(companyId))
-      .map((entity) => this.toResponse(entity));
-  }
-
-  getVendors(companyId: string): Promise<Vendor[]> {
-    return this.dataSource.getRepository(Vendor).find({
-      where: { companyId, deleteYn: 'N' },
-      order: { name: 'ASC' },
-    });
-  }
-
-  async createVendor(
-    companyId: string,
-    input: VendorRequest,
-    operator: string,
-  ): Promise<Vendor> {
-    const id = input.id?.trim().toUpperCase();
-    const name = input.name?.trim();
-    if (!id || !name) throw new BadRequestException('공급업체 코드와 이름은 필수입니다.');
-    const repository = this.dataSource.getRepository(Vendor);
-    const existing = await repository.findOne({ where: { companyId, id } });
-    if (existing?.deleteYn === 'N') throw new BadRequestException('이미 존재하는 공급업체 코드입니다.');
-    const vendor = existing ?? repository.create({
+    const activePlantId = await resolveActivePlantId(
+      this.dataSource,
       companyId,
-      id,
-      createdBy: operator,
-    });
-    Object.assign(vendor, {
-      name,
-      bizNo: input.bizNo?.trim() || null,
-      contact: input.contact?.trim() || null,
-      manager: input.manager?.trim() || null,
-      remarks: input.remarks?.trim() || null,
-      deleteYn: 'N',
-      updatedBy: operator,
-    });
-    return repository.save(vendor);
+      operator,
+      requestedPlantId,
+    );
+    let requests = await this.procurementRepository.findAll(companyId, activePlantId ?? undefined);
+    if (receivableOnly) {
+      const canReadStock = await this.permissionPolicyService.hasModulePermission(
+        {
+          companyId,
+          roleId,
+          module: AppModule.STK,
+          action: 'R',
+        },
+      );
+      if (!canReadStock) {
+        throw new ForbiddenException('구매입고 대상 조회 권한이 없습니다.');
+      }
+      requests = requests.filter((request) =>
+        [DocStatus.CONFIRMED, DocStatus.SELF_CONFIRMED].includes(request.status as DocStatus)
+        && [ProcStatus.ORDERED, ProcStatus.SHIPPING, ProcStatus.PARTIAL_RECEIVED]
+          .includes(request.procStatus as ProcStatus));
+    }
+    return requests.map((entity) => this.toResponse(entity));
   }
 
-  async updateVendor(
+  async getRequestDetail(
     companyId: string,
     id: string,
-    input: VendorRequest,
-    operator: string,
-  ): Promise<Vendor> {
-    const repository = this.dataSource.getRepository(Vendor);
-    const vendor = await repository.findOne({
-      where: { companyId, id: id.trim().toUpperCase(), deleteYn: 'N' },
-    });
-    if (!vendor) throw new NotFoundException('공급업체를 찾을 수 없습니다.');
-    const name = input.name?.trim();
-    if (!name) throw new BadRequestException('공급업체 이름은 필수입니다.');
-    Object.assign(vendor, {
-      name,
-      bizNo: input.bizNo?.trim() || null,
-      contact: input.contact?.trim() || null,
-      manager: input.manager?.trim() || null,
-      remarks: input.remarks?.trim() || null,
-      updatedBy: operator,
-    });
-    return repository.save(vendor);
-  }
-
-  async deleteVendor(companyId: string, id: string, operator: string): Promise<void> {
-    const repository = this.dataSource.getRepository(Vendor);
-    const vendor = await repository.findOne({
-      where: { companyId, id: id.trim().toUpperCase(), deleteYn: 'N' },
-    });
-    if (!vendor) throw new NotFoundException('공급업체를 찾을 수 없습니다.');
-    vendor.deleteYn = 'Y';
-    vendor.updatedBy = operator;
-    await repository.save(vendor);
-  }
-
-  async getRequestDetail(companyId: string, id: string): Promise<RequestDetail> {
+    operator?: string,
+    requestedPlantId?: string | null,
+  ): Promise<RequestDetail> {
     const request = await this.mustGetActive(companyId, id);
+    if (operator) {
+      const activePlantId = await resolveActivePlantId(
+        this.dataSource,
+        companyId,
+        operator,
+        requestedPlantId,
+      );
+      if (activePlantId && request.plantId !== activePlantId) {
+        throw new ForbiddenException('현재 선택한 플랜트 범위의 구매요청만 조회할 수 있습니다.');
+      }
+    }
     const items = await this.procurementRepository.findItems(companyId, id);
     return {
       header: this.toResponse(request),
@@ -203,17 +155,22 @@ export class ProcurementService {
     };
   }
 
-  async getReceivableRequest(companyId: string, id: string): Promise<RequestDetail> {
+  async getReceivableRequest(companyId: string, id: string, operator: string): Promise<RequestDetail> {
     const request = await this.mustGetConfirmed(companyId, id);
+    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator);
+    if (activePlantId && request.plantId !== activePlantId) {
+      throw new ForbiddenException('현재 선택한 플랜트 범위의 구매요청만 조회할 수 있습니다.');
+    }
     if (![ProcStatus.ORDERED, ProcStatus.SHIPPING, ProcStatus.PARTIAL_RECEIVED]
       .includes(request.procStatus as ProcStatus)) {
       throw new BadRequestException('발주·배송중·부분입고 상태의 구매요청만 입고할 수 있습니다.');
     }
-    return this.getRequestDetail(companyId, id);
+    return this.getRequestDetail(companyId, id, operator);
   }
 
-  async getReceivableRequests(companyId: string): Promise<ReceivableRequestResponse[]> {
-    const requests = (await this.procurementRepository.findAll(companyId))
+  async getReceivableRequests(companyId: string, operator: string): Promise<ReceivableRequestResponse[]> {
+    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator);
+    const requests = (await this.procurementRepository.findAll(companyId, activePlantId ?? undefined))
       .filter((request) =>
         [DocStatus.CONFIRMED, DocStatus.SELF_CONFIRMED].includes(request.status as DocStatus)
         && [ProcStatus.ORDERED, ProcStatus.SHIPPING, ProcStatus.PARTIAL_RECEIVED]
@@ -311,7 +268,6 @@ export class ProcurementService {
         fileGroupId: header.fileGroupId ?? null,
         title: header.title?.trim() || '',
         warehouseId: header.warehouseId,
-        vendorId: header.vendorId ?? null,
         requestType: header.requestType ?? null,
         remarks: header.remarks ?? null,
         status: entity.status,
@@ -376,16 +332,8 @@ export class ProcurementService {
   async placeOrder(
     companyId: string, req: OrderRequest, operator: string,
   ): Promise<PurchaseRequestResponse> {
-    const vendorId = req.vendorId?.trim();
-    const purchaseManager = req.purchaseManager?.trim();
-    if (!vendorId) throw new BadRequestException('벤더를 입력하세요.');
-    if (!purchaseManager) throw new BadRequestException('구매담당자를 입력하세요.');
     const entity = await this.mustGetConfirmed(companyId, req.requestId);
     Object.assign(entity, {
-      vendorId,
-      purchaseManager,
-      purchaseManagerContact: req.purchaseManagerContact?.trim() || null,
-      purchaseManagerRemarks: req.purchaseManagerRemarks?.trim() || null,
       orderDate: dateOnly(req.orderDate) || today(),
       etaDate: dateOnly(req.etaDate),
       procStatus: ProcStatus.ORDERED,
@@ -664,10 +612,6 @@ export class ProcurementService {
       title: entity.title,
       requestType: entity.requestType,
       approvalId: entity.approvalId,
-      vendorId: entity.vendorId,
-      purchaseManager: entity.purchaseManager,
-      purchaseManagerContact: entity.purchaseManagerContact,
-      purchaseManagerRemarks: entity.purchaseManagerRemarks,
       orderDate: entity.orderDate,
       etaDate: entity.etaDate,
       shipStartDate: entity.shipStartDate,

@@ -12,6 +12,7 @@ import { Plant } from '../../entities/plant.entity';
 import { Company } from '../../entities/company.entity';
 import { RoleDetail } from '../../entities/role-detail.entity';
 import { LoginHistory } from '../../entities/login-history.entity';
+import { AuthRefreshSession } from '../../entities/auth-refresh-session.entity';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { LoginHistory } from '../../entities/login-history.entity';
       Company,
       RoleDetail,
       LoginHistory,
+      AuthRefreshSession,
     ]),
     JwtModule.registerAsync({
       imports: [ConfigModule],

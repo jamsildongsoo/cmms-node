@@ -236,7 +236,7 @@ export class ApprovalService {
   ): Promise<ApprovalDetailResponseDto> {
     const approval = await this.approvalRepository.findDetail(companyId, id);
     if (!approval) throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
-    this.assertCanReadApproval(approval, userId);
+    this.permissionPolicyService.assertCanReadApproval({ approval, userId });
     return {
       approval: this.toApprovalResponse(approval),
       steps: [...(approval.steps || [])]
@@ -382,19 +382,6 @@ export class ApprovalService {
 
   private assertDraftOwner(approval: Approval, userId: string): void {
     if (approval.drafterId !== userId) {
-      throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
-    }
-  }
-
-  private assertCanReadApproval(approval: Approval, userId: string): void {
-    if (approval.drafterId === userId) return;
-    if (approval.status === DocStatus.TEMP) {
-      throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
-    }
-    const isParticipant = (approval.steps || []).some(
-      (step) => step.approverId === userId,
-    );
-    if (!isParticipant) {
       throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
     }
   }

@@ -1,25 +1,26 @@
 /* =========================================================================
    AuthService — 로그인, 토큰 발급, 사용자 관리
-   
-   [B안 확정] JWT 페이로드에 roleId, departmentId, lastLoginPlantId 포함
-   → 이후 요청에서 DB 조회 불필요
-   
-   roleId/departmentId 변경 시 기존 토큰은 만료(최대 30분)까지 구 값 유지.
-   30분 세션이므로 실운영에서 허용 가능한 지연.
+
+   Access token은 30분, refresh token은 3일을 기본값으로 사용한다.
+   Access token은 Authorization Bearer로만 전달하고, refresh token은
+   HttpOnly cookie + 서버 세션 테이블로 관리한다.
    ========================================================================= */
 import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
+import { createHash, randomUUID } from 'crypto';
 import {
   JwtPayload,
   LoginResponse,
+  RefreshJwtPayload,
   UserProfileResponse,
 } from './auth.interfaces';
 import {
@@ -35,12 +36,20 @@ import { Plant } from '../../entities/plant.entity';
 import { Company } from '../../entities/company.entity';
 import { RoleDetail } from '../../entities/role-detail.entity';
 import { LoginHistory } from '../../entities/login-history.entity';
+import { AuthRefreshSession } from '../../entities/auth-refresh-session.entity';
 
 @Injectable()
 export class AuthService {
   private readonly passwordExpiryDays: number;
   private readonly maxFailedAttempts: number;
   private readonly lockMinutes: number;
+  private readonly accessTokenSeconds: number;
+  private readonly refreshTokenSeconds: number;
+  private readonly refreshCookieName: string;
+  private readonly refreshCookieSecure: boolean;
+  private readonly refreshCookieSameSite: 'strict' | 'lax' | 'none';
+  private readonly refreshCookiePath: string;
+  private readonly refreshSecret: string;
 
   constructor(
     private readonly jwtService: JwtService,
@@ -57,19 +66,33 @@ export class AuthService {
     private readonly roleDetailRepository: Repository<RoleDetail>,
     @InjectRepository(LoginHistory)
     private readonly loginHistoryRepository: Repository<LoginHistory>,
+    @InjectRepository(AuthRefreshSession)
+    private readonly refreshSessionRepository: Repository<AuthRefreshSession>,
   ) {
     this.passwordExpiryDays = config.get<number>('PASSWORD_EXPIRY_DAYS', 90);
     this.maxFailedAttempts = config.get<number>('PASSWORD_MAX_FAILED', 5);
     this.lockMinutes = config.get<number>('PASSWORD_LOCK_MINUTES', 30);
+    this.accessTokenSeconds = Number(config.get<string>('JWT_EXPIRATION', '1800')) || 1800;
+    this.refreshTokenSeconds = Number(config.get<string>('JWT_REFRESH_EXPIRATION', '259200')) || 259200;
+    this.refreshCookieName = config.get<string>('JWT_REFRESH_COOKIE_NAME', 'cmms_refresh');
+    this.refreshCookieSecure = config.get<string>(
+      'JWT_REFRESH_COOKIE_SECURE',
+      config.get<string>('NODE_ENV') === 'production' ? 'true' : 'false',
+    ) === 'true';
+    this.refreshCookieSameSite = this.parseSameSite(
+      config.get<string>('JWT_REFRESH_COOKIE_SAMESITE', 'strict'),
+    );
+    this.refreshCookiePath = config.get<string>('JWT_REFRESH_COOKIE_PATH', '/api/auth');
+    this.refreshSecret = config.get<string>('JWT_REFRESH_SECRET')
+      || config.getOrThrow<string>('JWT_SECRET');
   }
 
-  // =========================================================================
-  // 로그인
-  // =========================================================================
-  async login(req: LoginRequestDto, ipAddress: string): Promise<LoginResponse> {
+  async login(
+    req: LoginRequestDto,
+    ipAddress: string,
+    userAgent?: string,
+  ): Promise<{ response: LoginResponse; refreshToken: string }> {
     const companyId = req.companyId.toUpperCase().trim();
-
-    // 1. 사용자 조회
     const { user, multiPlant } = await this.findActiveUser(companyId, req.id);
     if (!user) {
       await this.recordLoginHistory(companyId, req.id, ipAddress, 'FAIL');
@@ -77,8 +100,6 @@ export class AuthService {
     }
 
     const now = new Date();
-
-    // 2. 계정 잠금 확인
     if (user.accountLockedUntil && user.accountLockedUntil > now) {
       await this.recordLoginHistory(companyId, req.id, ipAddress, 'FAIL');
       throw new UnauthorizedException(
@@ -86,7 +107,6 @@ export class AuthService {
       );
     }
 
-    // 3. 비밀번호 검증
     const passwordMatch = await bcrypt.compare(req.password, user.passwordHash);
     if (!passwordMatch) {
       const fails = (user.failedLoginCount ?? 0) + 1;
@@ -111,7 +131,6 @@ export class AuthService {
       throw new UnauthorizedException(msg);
     }
 
-    // 4. 플랜트 자동 해소: lastLoginPlantId null이면 첫 활성 플랜트 자동 매핑
     let plantId: string | null = user.lastLoginPlantId;
     if (!plantId) {
       const plant = await this.plantRepository.findOne({
@@ -122,7 +141,6 @@ export class AuthService {
       plantId = plant?.id ?? null;
     }
 
-    // 5. 성공 처리
     await this.userRepository.update(
       { companyId, id: req.id },
       {
@@ -135,16 +153,12 @@ export class AuthService {
     );
     await this.recordLoginHistory(companyId, req.id, ipAddress, 'SUCCESS');
 
-    // 6. 비밀번호 만료 판단
-    const expired =
+    const expired = !!(
       user.passwordChangedAt &&
-      user.passwordChangedAt.getTime() +
-        this.passwordExpiryDays * 86400000 <
-        now.getTime();
-    const mustChange =
-      user.mustChangePassword === 'Y' || expired;
+      user.passwordChangedAt.getTime() + this.passwordExpiryDays * 86400000 < now.getTime()
+    );
+    const mustChange = user.mustChangePassword === 'Y' || expired;
 
-    // 7. [B안] JWT 페이로드에 roleId, departmentId, lastLoginPlantId 포함
     const payload: JwtPayload = {
       sub: `${companyId}:${req.id}`,
       companyId,
@@ -154,64 +168,90 @@ export class AuthService {
       lastLoginPlantId: plantId,
       multiPlant,
     };
-    const accessToken = this.jwtService.sign(payload);
-
-    // 8. 회사명 조회
+    const accessToken = this.signAccessToken(payload);
     const company = await this.companyRepository.findOne({
       select: { name: true },
       where: { id: companyId },
     });
-    const companyName = company?.name ?? companyId;
-    const permissionRows = user.roleId
-      ? await this.roleDetailRepository.find({
-          where: { companyId, roleId: user.roleId },
-        })
-      : [];
-    const permissions = user.roleId?.toUpperCase() === 'SYSTEM' && companyId === 'SYSTEM'
-      ? Object.fromEntries(Object.values(AppModule).map((module) => [
-          module,
-          { C: 'Y', R: 'Y', U: 'Y', D: 'Y', A: 'Y' },
-        ]))
-      : Object.fromEntries(permissionRows.map((row) => [
-          row.moduleDetail,
-          { C: row.permC, R: row.permR, U: row.permU, D: row.permD, A: row.permA },
-        ]));
-
-    return {
+    const permissions = await this.resolvePermissions(companyId, user.roleId ?? '');
+    const response = this.buildLoginResponse(
       accessToken,
       companyId,
-      companyName,
-      id: req.id,
-      name: user.name,
-      roleId: user.roleId ?? '',
-      departmentId: user.departmentId ?? null,
-      position: user.position ?? null,
-      title: user.title ?? null,
-      lastLoginPlantId: plantId,
+      company?.name ?? companyId,
+      req.id,
+      user,
+      plantId,
       multiPlant,
-      mustChangePassword: !!mustChange,
-      passwordExpired: !!expired,
+      mustChange,
+      expired,
       permissions,
-    };
+    );
+    const refresh = await this.issueRefreshSession(companyId, req.id, ipAddress, userAgent);
+
+    return { response, refreshToken: refresh.token };
   }
 
-  // =========================================================================
-  // 토큰 갱신 — [B안] DB 조회 후 최신 roleId/departmentId 재발급
-  // =========================================================================
-  async refresh(oldToken: string): Promise<string> {
-    let decoded: JwtPayload;
+  applyRefreshCookie(res: Response, refreshToken: string): void {
+    res.cookie(this.refreshCookieName, refreshToken, {
+      httpOnly: true,
+      secure: this.refreshCookieSecure,
+      sameSite: this.refreshCookieSameSite,
+      path: this.refreshCookiePath,
+      maxAge: this.refreshTokenSeconds * 1000,
+    });
+  }
+
+  clearRefreshCookie(res: Response): void {
+    res.clearCookie(this.refreshCookieName, {
+      httpOnly: true,
+      secure: this.refreshCookieSecure,
+      sameSite: this.refreshCookieSameSite,
+      path: this.refreshCookiePath,
+    });
+  }
+
+  async refresh(
+    cookieHeader: string,
+    ipAddress: string,
+    userAgent?: string,
+  ): Promise<{ response: LoginResponse; refreshToken: string }> {
+    const oldToken = this.extractCookie(cookieHeader, this.refreshCookieName);
+    if (!oldToken) throw new UnauthorizedException('refresh token이 없습니다.');
+
+    let decoded: RefreshJwtPayload;
     try {
-      decoded = this.jwtService.verify<JwtPayload>(oldToken);
+      decoded = this.jwtService.verify<RefreshJwtPayload>(oldToken, {
+        secret: this.refreshSecret,
+      });
     } catch {
-      throw new UnauthorizedException('만료되었거나 유효하지 않은 토큰입니다.');
+      throw new UnauthorizedException('만료되었거나 유효하지 않은 refresh token입니다.');
     }
 
-    // refresh 시 DB에서 최신 사용자 정보 재조회 → roleId 변경 즉시 반영
-    const { user, multiPlant } = await this.findActiveUser(
-      decoded.companyId,
-      decoded.userId,
-    );
-    if (!user) throw new UnauthorizedException('사용자를 찾을 수 없습니다.');
+    if (decoded.type !== 'refresh' || !decoded.sessionId) {
+      throw new UnauthorizedException('유효하지 않은 refresh token입니다.');
+    }
+
+    const session = await this.refreshSessionRepository.findOne({
+      where: {
+        companyId: decoded.companyId,
+        userId: decoded.userId,
+        sessionId: decoded.sessionId,
+        deleteYn: 'N',
+      },
+    });
+    if (!session || session.revokedAt || session.expiresAt.getTime() <= Date.now()) {
+      throw new UnauthorizedException('refresh 세션이 유효하지 않습니다.');
+    }
+    if (session.tokenHash !== this.hashToken(oldToken)) {
+      await this.revokeRefreshSession(session, 'SYSTEM');
+      throw new UnauthorizedException('refresh token 검증에 실패했습니다.');
+    }
+
+    const { user, multiPlant } = await this.findActiveUser(decoded.companyId, decoded.userId);
+    if (!user) {
+      await this.revokeRefreshSession(session, 'SYSTEM');
+      throw new UnauthorizedException('사용자를 찾을 수 없습니다.');
+    }
 
     const payload: JwtPayload = {
       sub: `${decoded.companyId}:${decoded.userId}`,
@@ -222,12 +262,58 @@ export class AuthService {
       lastLoginPlantId: user.lastLoginPlantId ?? null,
       multiPlant,
     };
-    return this.jwtService.sign(payload);
+    const accessToken = this.signAccessToken(payload);
+    const company = await this.companyRepository.findOne({
+      select: { name: true },
+      where: { id: decoded.companyId },
+    });
+    const permissions = await this.resolvePermissions(decoded.companyId, user.roleId ?? '');
+    const expired = !!(
+      user.passwordChangedAt &&
+      user.passwordChangedAt.getTime() + this.passwordExpiryDays * 86400000 < Date.now()
+    );
+    const response = this.buildLoginResponse(
+      accessToken,
+      decoded.companyId,
+      company?.name ?? decoded.companyId,
+      decoded.userId,
+      user,
+      user.lastLoginPlantId ?? null,
+      multiPlant,
+      user.mustChangePassword === 'Y' || expired,
+      expired,
+      permissions,
+    );
+    const rotated = await this.rotateRefreshSession(
+      session,
+      decoded.companyId,
+      decoded.userId,
+      ipAddress,
+      userAgent,
+    );
+
+    return { response, refreshToken: rotated.token };
   }
 
-  // =========================================================================
-  // 회원가입
-  // =========================================================================
+  async logout(cookieHeader: string): Promise<void> {
+    const token = this.extractCookie(cookieHeader, this.refreshCookieName);
+    if (!token) return;
+
+    const decoded = this.tryVerifyRefreshToken(token);
+    if (!decoded?.sessionId) return;
+
+    const session = await this.refreshSessionRepository.findOne({
+      where: {
+        companyId: decoded.companyId,
+        userId: decoded.userId,
+        sessionId: decoded.sessionId,
+        deleteYn: 'N',
+      },
+    });
+    if (!session) return;
+    await this.revokeRefreshSession(session, decoded.userId);
+  }
+
   async signUp(req: SignUpRequestDto): Promise<void> {
     const companyId = req.companyId.toUpperCase().trim();
 
@@ -266,9 +352,6 @@ export class AuthService {
     }));
   }
 
-  // =========================================================================
-  // 내 정보 조회
-  // =========================================================================
   async getMyProfile(companyId: string, userId: string): Promise<UserProfileResponse> {
     const user = await this.userRepository.findOne({
       where: { companyId, id: userId, deleteYn: 'N' },
@@ -292,9 +375,6 @@ export class AuthService {
     };
   }
 
-  // =========================================================================
-  // 내 정보 수정
-  // =========================================================================
   async updateMyProfile(
     companyId: string,
     userId: string,
@@ -313,9 +393,6 @@ export class AuthService {
     );
   }
 
-  // =========================================================================
-  // 비밀번호 변경
-  // =========================================================================
   async changePassword(
     companyId: string,
     userId: string,
@@ -340,11 +417,9 @@ export class AuthService {
         updatedBy: userId,
       },
     );
+    await this.revokeAllUserRefreshSessions(companyId, userId, userId);
   }
 
-  // =========================================================================
-  // 유틸
-  // =========================================================================
   private async recordLoginHistory(
     companyId: string,
     userId: string,
@@ -378,9 +453,7 @@ export class AuthService {
     });
     return {
       user,
-      multiPlant: user
-        ? await this.getMultiPlant(companyId, user.roleId)
-        : 'N',
+      multiPlant: user ? await this.getMultiPlant(companyId, user.roleId) : 'N',
     };
   }
 
@@ -394,5 +467,174 @@ export class AuthService {
       where: { companyId, id: roleId },
     });
     return role?.multiPlant === 'Y' ? 'Y' : 'N';
+  }
+
+  private signAccessToken(payload: JwtPayload): string {
+    return this.jwtService.sign(payload, { expiresIn: this.accessTokenSeconds });
+  }
+
+  private signRefreshToken(payload: RefreshJwtPayload): string {
+    return this.jwtService.sign(payload, {
+      secret: this.refreshSecret,
+      expiresIn: this.refreshTokenSeconds,
+    });
+  }
+
+  private hashToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
+  private parseSameSite(value: string): 'strict' | 'lax' | 'none' {
+    if (value === 'lax' || value === 'none') return value;
+    return 'strict';
+  }
+
+  private extractCookie(cookieHeader: string, name: string): string | null {
+    const cookies = cookieHeader.split(';').map((part) => part.trim()).filter(Boolean);
+    for (const cookie of cookies) {
+      const [key, ...rest] = cookie.split('=');
+      if (key === name) {
+        return decodeURIComponent(rest.join('='));
+      }
+    }
+    return null;
+  }
+
+  private tryVerifyRefreshToken(token: string): RefreshJwtPayload | null {
+    try {
+      return this.jwtService.verify<RefreshJwtPayload>(token, {
+        secret: this.refreshSecret,
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  private async issueRefreshSession(
+    companyId: string,
+    userId: string,
+    ipAddress: string,
+    userAgent?: string,
+  ): Promise<{ token: string; sessionId: string }> {
+    const sessionId = randomUUID();
+    const token = this.signRefreshToken({
+      sub: `${companyId}:${userId}`,
+      companyId,
+      userId,
+      sessionId,
+      type: 'refresh',
+    });
+    const now = new Date();
+    await this.refreshSessionRepository.save({
+      companyId,
+      userId,
+      sessionId,
+      tokenHash: this.hashToken(token),
+      expiresAt: new Date(now.getTime() + this.refreshTokenSeconds * 1000),
+      lastUsedAt: now,
+      revokedAt: null,
+      ipAddress,
+      userAgent: userAgent ?? null,
+      createdAt: now,
+      createdBy: userId,
+      updatedAt: now,
+      updatedBy: userId,
+      deleteYn: 'N',
+    });
+    return { token, sessionId };
+  }
+
+  private async rotateRefreshSession(
+    session: AuthRefreshSession,
+    companyId: string,
+    userId: string,
+    ipAddress: string,
+    userAgent?: string,
+  ): Promise<{ token: string; sessionId: string }> {
+    await this.revokeRefreshSession(session, userId);
+    return this.issueRefreshSession(companyId, userId, ipAddress, userAgent);
+  }
+
+  private async revokeRefreshSession(
+    session: AuthRefreshSession,
+    updatedBy: string,
+  ): Promise<void> {
+    await this.refreshSessionRepository.update(
+      { sessionNo: session.sessionNo },
+      {
+        revokedAt: new Date(),
+        updatedAt: new Date(),
+        updatedBy,
+      },
+    );
+  }
+
+  private async revokeAllUserRefreshSessions(
+    companyId: string,
+    userId: string,
+    updatedBy: string,
+  ): Promise<void> {
+    await this.refreshSessionRepository
+      .createQueryBuilder()
+      .update(AuthRefreshSession)
+      .set({
+        revokedAt: new Date(),
+        updatedAt: new Date(),
+        updatedBy,
+      })
+      .where('company_id = :companyId', { companyId })
+      .andWhere('user_id = :userId', { userId })
+      .andWhere('revoked_at IS NULL')
+      .execute();
+  }
+
+  private async resolvePermissions(
+    companyId: string,
+    roleId: string,
+  ): Promise<Record<string, { C: string; R: string; U: string; D: string; A: string }>> {
+    if (roleId?.toUpperCase() === 'SYSTEM' && companyId === 'SYSTEM') {
+      return Object.fromEntries(Object.values(AppModule).map((module) => [
+        module,
+        { C: 'Y', R: 'Y', U: 'Y', D: 'Y', A: 'Y' },
+      ]));
+    }
+
+    const permissionRows = roleId
+      ? await this.roleDetailRepository.find({ where: { companyId, roleId } })
+      : [];
+    return Object.fromEntries(permissionRows.map((row) => [
+      row.moduleDetail,
+      { C: row.permC, R: row.permR, U: row.permU, D: row.permD, A: row.permA },
+    ]));
+  }
+
+  private buildLoginResponse(
+    accessToken: string,
+    companyId: string,
+    companyName: string,
+    userId: string,
+    user: User,
+    lastLoginPlantId: string | null,
+    multiPlant: 'Y' | 'N',
+    mustChange: boolean,
+    expired: boolean,
+    permissions: Record<string, { C: string; R: string; U: string; D: string; A: string }>,
+  ): LoginResponse {
+    return {
+      accessToken,
+      companyId,
+      companyName,
+      id: userId,
+      name: user.name,
+      roleId: user.roleId ?? '',
+      departmentId: user.departmentId ?? null,
+      position: user.position ?? null,
+      title: user.title ?? null,
+      lastLoginPlantId,
+      multiPlant,
+      mustChangePassword: mustChange,
+      passwordExpired: expired,
+      permissions,
+    };
   }
 }

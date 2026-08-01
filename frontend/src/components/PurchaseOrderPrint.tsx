@@ -17,11 +17,6 @@ interface PurchaseOrderPrintProps {
   shipStartDate?: string | null;
   plantName: string;
   warehouseName: string;
-  vendorId?: string | null;
-  vendorName?: string | null;
-  vendorBizNo?: string | null;
-  vendorContact?: string | null;
-  vendorManager?: string | null;
   purchaseManager: string;
   purchaseManagerContact?: string | null;
   purchaseManagerRemarks?: string | null;
@@ -29,7 +24,7 @@ interface PurchaseOrderPrintProps {
   items: PurchaseOrderItem[];
 }
 
-/** 구매관리용 발주서 — 결재란 없이 공급업체·납품·품목 정보를 출력한다. */
+/** 구매재고관리용 발주서 — 결재란 없이 납품 일정과 품목 정보를 출력한다. */
 export default function PurchaseOrderPrint(p: PurchaseOrderPrintProps) {
   return (
     <article className="print-area print-portrait bg-white text-black border border-gray-500 p-5 print:border-0 print:p-0">
@@ -59,19 +54,6 @@ export default function PurchaseOrderPrint(p: PurchaseOrderPrintProps) {
           <div className="grid grid-cols-2 gap-4 py-2">
             <PrintField label="예정도착일" value={p.etaDate} />
             <PrintField label="배송시작일" value={p.shipStartDate} />
-          </div>
-        </div>
-      </PrintSection>
-
-      <PrintSection title="공급업체 정보">
-        <div className="divide-y divide-gray-300 border-y border-gray-400">
-          <div className="grid grid-cols-2 gap-4 py-2">
-            <PrintField label="공급업체" value={p.vendorId ? (p.vendorName ? `${p.vendorId} / ${p.vendorName}` : p.vendorId) : '-'} />
-            <PrintField label="사업자번호" value={p.vendorBizNo} />
-          </div>
-          <div className="grid grid-cols-2 gap-4 py-2">
-            <PrintField label="담당자" value={p.vendorManager} />
-            <PrintField label="연락처" value={p.vendorContact} />
           </div>
         </div>
       </PrintSection>

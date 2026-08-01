@@ -5,7 +5,14 @@ import { requestConfirmation } from '../utils/userActionDialog';
 import { useAuthStore } from '../store/useAuthStore';
 import { getCommonStatusLabel as getStatusLabel } from '../constants/status';
 import { APP_MODULE } from '../constants/module';
-import { formatDateTime, nowLocalInput, utcToInput, inputToUtc } from '../utils/datetime';
+import {
+  formatDateOnly,
+  formatDateTime,
+  formatPrintStamp,
+  nowLocalInput,
+  utcToInput,
+  inputToUtc,
+} from '../utils/datetime';
 import { toastApiError } from '../utils/apiError';
 import PrintHeader from '../components/PrintHeader';
 import WorkPermitPrint from '../components/WorkPermitPrint';
@@ -41,6 +48,7 @@ import {
 
 export default function WorkPermit() {
   const user = useAuthStore((s) => s.user);
+  const activePlantId = useAuthStore((s) => s.activePlantId);
   const [activeTab, setActiveTab] = useState<'plans' | 'results'>('plans');
   const [searchType, setSearchType] = useState<'id' | 'title' | 'supervisor'>('id');
   const [searchValue, setSearchValue] = useState('');
@@ -124,11 +132,11 @@ export default function WorkPermit() {
       }
       // 폼 선택값 구성을 위한 시스템 참조값 조회다. 작업허가서 목록 R 권한을 대체하지 않는다.
       const [loadedPermits, loadedEquipments, loadedDepartments, loadedUsers, loadedWorkOrders] = await Promise.all([
-        workPermitApi.getAll(params),
+        workPermitApi.getAll(params, activePlantId),
         masterReferenceApi.getEquipments(),
         referenceApi.getDepartmentOptions(),
         referenceApi.getUserOptions(),
-        workOrderApi.getAll(),
+        workOrderApi.getAll(undefined, activePlantId),
       ]);
       setPermits((loadedPermits || []).map((permit: WorkPermitModel & { step_stage?: string }) => ({
         ...permit,
@@ -148,7 +156,7 @@ export default function WorkPermit() {
     const timer = window.setTimeout(() => { void fetchData(); }, 0);
     return () => window.clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activePlantId]);
 
   const toggleAccordion = (type: string) => {
     setAccordionOpen(prev => ({ ...prev, [type]: !prev[type] }));
@@ -352,9 +360,7 @@ export default function WorkPermit() {
           content: createWorkPermitApprovalContent({
             wpNo: savedId,
             statusLabel: getStatusLabel('P'),
-            createdAt: saved.createdAt
-              ? formatDateTime(saved.createdAt).slice(0, 10)
-              : '-',
+            createdAt: formatDateOnly(saved.createdAt) || '-',
             departmentName: depts.find((dept) => dept.id === departmentId)?.name || departmentId,
             authorName:
               usersList.find((candidate) => candidate.id === saved.createdBy)?.name
@@ -439,7 +445,7 @@ export default function WorkPermit() {
             title={detail.title}
             status={detail.status}
             approvalId={detail.approvalId}
-            createdAt={detail.createdAt ? formatDateTime(detail.createdAt).slice(0, 10) : '-'}
+            createdAt={formatDateOnly(detail.createdAt) || '-'}
             authorName={usersList.find((item) => item.id === detail.createdBy)?.name || detail.createdBy || '-'}
             deptName={depts.find((item) => item.id === detail.departmentId)?.name || detail.departmentId}
             supervisorName={usersList.find((item) => item.id === detail.supervisorId)?.name || detail.supervisorId}
@@ -468,8 +474,7 @@ export default function WorkPermit() {
 
   const handlePrint = () => {
     if (currentPermits.length === 0) { toast.error('인쇄할 목록이 없습니다.'); return; }
-    const now = new Date();
-    const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+    const stamp = formatPrintStamp(new Date());
     const opened = openListPrint({
       title: '안전작업허가서 현황',
       rows: currentPermits,
@@ -672,7 +677,7 @@ export default function WorkPermit() {
                   </div>
                   <div>
                     <span className="text-slate-500 block mb-0.5">작성일</span>
-                    <span className="font-mono text-slate-300">{createdAt ? formatDateTime(createdAt).slice(0, 10) : (wpNo ? '-' : '저장 시 기록')}</span>
+                    <span className="font-mono text-slate-300">{formatDateOnly(createdAt) || (wpNo ? '-' : '저장 시 기록')}</span>
                   </div>
                   <div>
                     <span className="text-slate-500 block mb-0.5">부서</span>

@@ -18,18 +18,11 @@ import {
 } from './file-upload.config';
 import { FileAttachment } from '../../entities/file-attachment.entity';
 import { FileAttachmentItem } from '../../entities/file-attachment-item.entity';
-import { RoleDetail } from '../../entities/role-detail.entity';
-import { User } from '../../entities/users.entity';
 
 @Module({
   imports: [
     FileUploadConfigModule,
-    TypeOrmModule.forFeature([
-      FileAttachment,
-      FileAttachmentItem,
-      RoleDetail,
-      User,
-    ]),
+    TypeOrmModule.forFeature([FileAttachment, FileAttachmentItem]),
     MulterModule.registerAsync({
       imports: [FileUploadConfigModule],
       inject: [FILE_UPLOAD_SETTINGS],

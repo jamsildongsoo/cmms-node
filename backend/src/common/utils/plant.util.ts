@@ -3,10 +3,11 @@ import { User } from '../../entities/users.entity';
 import { Role } from '../../entities/role.entity';
 
 /**
- * 사용자의 권한 역할(Role)에 맞춰 접근 권한이 있는 플랜트 ID를 결정합니다.
- * - 단일 플랜트 사용자: 요청(reqPlantId)과 무관하게 사용자의 last_login_plant_id 고정
- * - 멀티 플랜트 사용자: 요청(reqPlantId)을 수용 (없으면 last_login_plant_id로 폴백)
- *   → 다른 플랜트를 보려면 reqPlantId로 명시 선택해야 한다.
+ * 조회 요청의 플랜트 범위를 결정합니다.
+ * - reqPlantId가 있으면 해당 플랜트로 조회합니다.
+ * - 멀티플랜트 역할에서 reqPlantId가 없으면 회사 전체 조회를 의미합니다.
+ * - 단일 플랜트 역할에서 reqPlantId가 없으면 사용자의 기본 플랜트로 제한합니다.
+ * - 저장/상세/삭제처럼 단일 플랜트가 필요한 업무는 호출부에서 별도 검증합니다.
  */
 export async function resolveActivePlantId(
   dataSource: DataSource,
@@ -26,21 +27,14 @@ export async function resolveActivePlantId(
   });
   if (!user) return null;
 
-  if (!user.roleId) {
-    return user.lastLoginPlantId;
-  }
-
-  const role = await dataSource.getRepository(Role).findOne({
-    select: { multiPlant: true },
-    where: {
-      companyId,
-      id: user.roleId,
-    },
-  });
-  const isMulti = role?.multiPlant === 'Y';
-
-  if (!isMulti) {
-    return user.lastLoginPlantId;
-  }
-  return reqPlantId ?? user.lastLoginPlantId ?? null;
+  if (!user) return null;
+  const role = user.roleId
+    ? await dataSource.getRepository(Role).findOne({
+      select: { multiPlant: true },
+      where: { companyId, id: user.roleId },
+    })
+    : null;
+  return role?.multiPlant === 'Y'
+    ? (reqPlantId?.trim() || null)
+    : user.lastLoginPlantId;
 }

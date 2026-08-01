@@ -10,7 +10,6 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
-  ForbiddenException,
 } from '@nestjs/common';
 import { MdmService } from './mdm.service';
 import { Plant } from '../../entities/plant.entity';
@@ -22,7 +21,12 @@ import { Warehouse } from '../../entities/warehouse.entity';
 import { CodeGroup } from '../../entities/code-group.entity';
 import { CodeItem } from '../../entities/code-item.entity';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { PermissionGuard, Permission } from '../../common/guards/permission.guard';
+import {
+  PermissionGuard,
+  Permission,
+  RefPermission,
+  SystemPermission,
+} from '../../common/guards/permission.guard';
 import { AppModule, AppModuleLabel } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 import { Company } from '../../entities/company.entity';
@@ -36,16 +40,6 @@ import {
 export class MdmController {
   constructor(private readonly mdmService: MdmService) {}
 
-  private async validateSystemAdmin(companyId: string, roleId: string, userId: string): Promise<void> {
-    if (companyId !== 'SYSTEM' || roleId?.toUpperCase() !== 'SYSTEM') {
-      throw new ForbiddenException('SYSTEM 권한이 필요합니다.');
-    }
-    const isValid = await this.mdmService.validateSystemAdminUser(userId);
-    if (!isValid) {
-      throw new ForbiddenException('유효하지 않은 SYSTEM 사용자입니다.');
-    }
-  }
-
   // =========================================================================
   // 2. 플랜트 (Plant)
   // =========================================================================
@@ -58,12 +52,14 @@ export class MdmController {
 
   /** 업무 입력화면의 선택 목록용 — 인증된 사용자는 회사 내 플랜트를 조회할 수 있다. */
   @Get('refs/plants')
+  @RefPermission()
   async getPlantsForUse(@Query('plantId') plantId?: string): Promise<Plant[]> {
     const { companyId, userId } = getTenantContext();
     return this.mdmService.getPlantsForUse(companyId, userId, plantId);
   }
 
   @Get('refs/departments')
+  @RefPermission()
   async getDepartmentsForUse(): Promise<Department[]> {
     const { companyId } = getTenantContext();
     return this.mdmService.getDepartmentsByCompany(companyId);
@@ -220,6 +216,7 @@ export class MdmController {
 
   /** 결재선·작성자 표시 등 업무화면에서 사용하는 읽기 전용 사용자 참조 API. */
   @Get('refs/users')
+  @RefPermission()
   async getUsersForUse(): Promise<Partial<User>[]> {
     const { companyId } = getTenantContext();
     return this.mdmService.getUsersForUse(companyId);
@@ -227,6 +224,7 @@ export class MdmController {
 
   /** 업무 입력화면의 선택 목록용 — 변경 권한과 분리된 읽기 전용 참조 API. */
   @Get('refs/warehouses')
+  @RefPermission()
   async getWarehousesForUse(@Query('plantId') plantId?: string): Promise<Warehouse[]> {
     const { companyId, userId } = getTenantContext();
     return this.mdmService.getWarehousesForUse(companyId, userId, plantId);
@@ -294,6 +292,7 @@ export class MdmController {
   }
 
   @Get('codes/items/:groupId')
+  @RefPermission()
   async getCodeItemsForUse(@Param('groupId') groupId: string): Promise<CodeItem[]> {
     const { companyId } = getTenantContext();
     return this.mdmService.getCodeItems(companyId, groupId);
@@ -332,18 +331,17 @@ export class MdmController {
   }
 
   @Get('companies')
+  @SystemPermission()
   async getCompanies(): Promise<Company[]> {
-    const { companyId, roleId, userId } = getTenantContext();
-    await this.validateSystemAdmin(companyId, roleId || '', userId);
     return this.mdmService.getCompanies();
   }
 
   @Post('companies')
+  @SystemPermission()
   async createCompany(
     @Body() body: CreateCompanyDto,
   ): Promise<CreateCompanyResponseDto> {
-    const { companyId, roleId, userId } = getTenantContext();
-    await this.validateSystemAdmin(companyId, roleId || '', userId);
+    const { userId } = getTenantContext();
     return this.mdmService.createCompany(body, userId);
   }
 }

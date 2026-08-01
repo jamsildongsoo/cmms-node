@@ -4,9 +4,10 @@
    ========================================================================= */
 import {
   Controller, Post, Put, Get, Body, Headers,
-  UseGuards, Request, Ip,
+  UseGuards, Request, Ip, Res, Req,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { Request as ExpressRequest, Response } from 'express';
 import { AuthService } from './auth.service';
 import {
   LoginRequestDto,
@@ -22,8 +23,15 @@ export class AuthController {
 
   /** POST /api/auth/login */
   @Post('login')
-  async login(@Body() body: LoginRequestDto, @Ip() ip: string) {
-    return this.authService.login(body, ip);
+  async login(
+    @Body() body: LoginRequestDto,
+    @Ip() ip: string,
+    @Headers('user-agent') userAgent: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.login(body, ip, userAgent);
+    this.authService.applyRefreshCookie(res, result.refreshToken);
+    return result.response;
   }
 
   /** POST /api/auth/signup */
@@ -35,14 +43,29 @@ export class AuthController {
 
   /**
    * POST /api/auth/refresh
-   * 응답: 새 토큰 string (FE useAuthStore.extendSession이 response.data로 직접 받음)
-   *
-   * [B안] refresh 시 DB 재조회 → roleId/departmentId 변경 즉시 반영
+   * refresh cookie 검증 후 access token 재발급
    */
   @Post('refresh')
-  async refresh(@Headers('authorization') auth: string) {
-    const token = auth?.replace('Bearer ', '');
-    return this.authService.refresh(token);
+  async refresh(
+    @Req() req: ExpressRequest,
+    @Ip() ip: string,
+    @Headers('user-agent') userAgent: string | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.refresh(req.headers.cookie ?? '', ip, userAgent);
+    this.authService.applyRefreshCookie(res, result.refreshToken);
+    return result.response;
+  }
+
+  /** POST /api/auth/logout */
+  @Post('logout')
+  async logout(
+    @Req() req: ExpressRequest,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.authService.logout(req.headers.cookie ?? '');
+    this.authService.clearRefreshCookie(res);
+    return '로그아웃되었습니다.';
   }
 
   /** GET /api/auth/me */

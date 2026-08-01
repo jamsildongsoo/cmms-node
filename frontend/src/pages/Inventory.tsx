@@ -11,6 +11,7 @@ import { referenceApi } from '../features/mdm/reference.api';
 import type { CodeItem, Department } from '../features/mdm/mdm.types';
 import { downloadBlob } from '../utils/downloadBlob';
 import { openListPrint } from '../utils/listPrint';
+import { formatPrintStamp } from '../utils/datetime';
 import InventoryFormModal from '../features/inventory/components/InventoryFormModal';
 import {
   Package, Plus, Edit2, Trash2, Printer, FileSpreadsheet
@@ -154,8 +155,7 @@ export default function Inventory() {
   };
 
   const handlePrint = () => {
-    const now = new Date();
-    const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+    const stamp = formatPrintStamp(new Date());
     const opened = openListPrint({
       title: '자재 마스터 목록',
       rows: inventories,

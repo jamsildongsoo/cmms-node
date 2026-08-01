@@ -14,6 +14,7 @@ async function bootstrap() {
     origin: corsOrigins === '*'
       ? true
       : corsOrigins.split(',').map((origin) => origin.trim()).filter(Boolean),
+    credentials: true,
   });
 
   // DTO 검증 및 자동 형변환 전역 파이프 등록

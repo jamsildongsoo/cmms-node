@@ -9,6 +9,7 @@ export const APP_MODULE = {
   EQP: 'EQP',
   INV: 'INV',
   STK: 'STK',
+  POR: 'POR',
   PM: 'PM',
   WO: 'WO',
   WP: 'WP',

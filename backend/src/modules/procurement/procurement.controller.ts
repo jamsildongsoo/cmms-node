@@ -11,7 +11,15 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ProcurementService, SaveRequest, OrderRequest, ShipRequest, ReceiveRequest, RequestDetail, VendorRequest } from './procurement.service';
+import {
+  ProcurementService,
+  SaveRequest,
+  OrderRequest,
+  ShipRequest,
+  ReceiveRequest,
+  RequestDetail,
+  PurchaseRequestResponse,
+} from './procurement.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionGuard, Permission } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
@@ -22,79 +30,44 @@ import { getTenantContext } from '../../common/context/tenant.context';
 export class ProcurementController {
   constructor(private readonly procurementService: ProcurementService) {}
 
-  @Get('vendors')
-  async getVendors(): Promise<any[]> {
-    const { companyId } = getTenantContext();
-    return this.procurementService.getVendors(companyId);
-  }
-
-  @Post('vendors')
-  @Permission(AppModule.PUR, 'C')
-  async createVendor(@Body() request: VendorRequest): Promise<any> {
-    const { companyId, userId } = getTenantContext();
-    return this.procurementService.createVendor(companyId, request, userId);
-  }
-
-  @Put('vendors/:id')
-  @Permission(AppModule.PUR, 'U')
-  async updateVendor(
-    @Param('id') id: string,
-    @Body() request: VendorRequest,
-  ): Promise<any> {
-    const { companyId, userId } = getTenantContext();
-    return this.procurementService.updateVendor(companyId, id, request, userId);
-  }
-
-  @Delete('vendors/:id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @Permission(AppModule.PUR, 'D')
-  async deleteVendor(@Param('id') id: string): Promise<void> {
-    const { companyId, userId } = getTenantContext();
-    await this.procurementService.deleteVendor(companyId, id, userId);
-  }
-
   @Get('requests')
   @Permission(AppModule.PUR, 'R')
   async getRequests(
     @Query('plantId') plantId?: string,
-  ): Promise<any[]> {
-    const { companyId, userId } = getTenantContext();
-    return this.procurementService.getRequests(companyId, userId, plantId);
-  }
-
-  @Get('management/requests')
-  @Permission(AppModule.PUR, 'A')
-  async getManagementRequests(): Promise<any[]> {
-    const { companyId } = getTenantContext();
-    return this.procurementService.getManagementRequests(companyId);
-  }
-
-  @Get('management/requests/:id')
-  @Permission(AppModule.PUR, 'A')
-  async getManagementRequest(@Param('id') id: string): Promise<RequestDetail> {
-    const { companyId } = getTenantContext();
-    return this.procurementService.getRequestDetail(companyId, id);
+    @Query('receivable') receivable?: string,
+  ): Promise<PurchaseRequestResponse[]> {
+    const { companyId, userId, roleId } = getTenantContext();
+    return this.procurementService.getRequests(
+      companyId,
+      userId,
+      roleId,
+      plantId,
+      receivable === 'Y',
+    );
   }
 
   @Get('receipts/request/:id')
-  @Permission(AppModule.STK, 'C')
+  @Permission(AppModule.STK, 'R')
   async getReceivableRequest(@Param('id') id: string): Promise<RequestDetail> {
-    const { companyId } = getTenantContext();
-    return this.procurementService.getReceivableRequest(companyId, id);
+    const { companyId, userId } = getTenantContext();
+    return this.procurementService.getReceivableRequest(companyId, id, userId);
   }
 
   @Get('receipts/requests')
-  @Permission(AppModule.STK, 'C')
+  @Permission(AppModule.STK, 'R')
   async getReceivableRequests(): Promise<any[]> {
-    const { companyId } = getTenantContext();
-    return this.procurementService.getReceivableRequests(companyId);
+    const { companyId, userId } = getTenantContext();
+    return this.procurementService.getReceivableRequests(companyId, userId);
   }
 
   @Get('requests/:id')
   @Permission(AppModule.PUR, 'R')
-  async getRequest(@Param('id') id: string): Promise<RequestDetail> {
-    const { companyId } = getTenantContext();
-    return this.procurementService.getRequestDetail(companyId, id);
+  async getRequest(
+    @Param('id') id: string,
+    @Query('plantId') plantId?: string,
+  ): Promise<RequestDetail> {
+    const { companyId, userId } = getTenantContext();
+    return this.procurementService.getRequestDetail(companyId, id, userId, plantId);
   }
 
   @Post('requests')
@@ -105,6 +78,7 @@ export class ProcurementController {
   }
 
   @Put('requests/:id')
+  @Permission(AppModule.PUR, 'U')
   async updateRequest(
     @Param('id') id: string,
     @Body() request: SaveRequest,
@@ -123,8 +97,34 @@ export class ProcurementController {
     return this.procurementService.confirm(companyId, id, userId);
   }
 
-  @Post('requests/:id/actions/order')
-  @Permission(AppModule.PUR, 'A')
+  @Get('orders')
+  @Permission(AppModule.POR, 'R')
+  async getOrders(
+    @Query('plantId') plantId?: string,
+    @Query('receivable') receivable?: string,
+  ): Promise<PurchaseRequestResponse[]> {
+    const { companyId, userId, roleId } = getTenantContext();
+    return this.procurementService.getRequests(
+      companyId,
+      userId,
+      roleId,
+      plantId,
+      receivable === 'Y',
+    );
+  }
+
+  @Get('orders/:id')
+  @Permission(AppModule.POR, 'R')
+  async getOrder(
+    @Param('id') id: string,
+    @Query('plantId') plantId?: string,
+  ): Promise<RequestDetail> {
+    const { companyId, userId } = getTenantContext();
+    return this.procurementService.getRequestDetail(companyId, id, userId, plantId);
+  }
+
+  @Post('orders/:id/actions/order')
+  @Permission(AppModule.POR, 'U')
   async placeOrder(
     @Param('id') id: string,
     @Body() request: OrderRequest,
@@ -134,8 +134,8 @@ export class ProcurementController {
     return this.procurementService.placeOrder(companyId, request, userId);
   }
 
-  @Post('requests/:id/actions/ship')
-  @Permission(AppModule.PUR, 'A')
+  @Post('orders/:id/actions/ship')
+  @Permission(AppModule.POR, 'U')
   async startShipping(
     @Param('id') id: string,
     @Body() request: ShipRequest,
@@ -170,8 +170,8 @@ export class ProcurementController {
     await this.procurementService.cancelSlip(companyId, docNo, userId);
   }
 
-  @Post('requests/:id/actions/close')
-  @Permission(AppModule.PUR, 'A')
+  @Post('orders/:id/actions/close')
+  @Permission(AppModule.POR, 'U')
   async close(@Param('id') id: string): Promise<any> {
     const { companyId, userId } = getTenantContext();
     return this.procurementService.close(companyId, id, userId);
@@ -179,6 +179,7 @@ export class ProcurementController {
 
   @Delete('requests/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Permission(AppModule.PUR, 'D')
   async deleteRequest(@Param('id') id: string): Promise<void> {
     const { companyId, userId, roleId } = getTenantContext();
     await this.procurementService.deleteRequest(companyId, id, userId, roleId);

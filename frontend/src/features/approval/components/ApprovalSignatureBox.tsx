@@ -4,6 +4,7 @@ import {
   type ApprovalResult,
   type ApprovalStepType,
 } from '../../../constants/approval';
+import { formatDateCompact } from '../../../utils/datetime';
 
 export interface ApprovalSignatureStep {
   stepNo: number;
@@ -14,14 +15,6 @@ export interface ApprovalSignatureStep {
   comments?: string | null;
   actionAt?: string | null;
 }
-
-const formatDateOnly = (value?: string | null) => {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const pad = (part: number) => String(part).padStart(2, '0');
-  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
-};
 
 const getResultSuffix = (
   approvalType: ApprovalStepType,
@@ -70,7 +63,7 @@ function SignatureGrid({
               {step ? `${step.approverName}${getResultSuffix(step.approvalType, step.approvalResult)}` : ''}
             </div>
             <div className="flex min-w-0 items-center justify-center overflow-hidden whitespace-nowrap px-1 text-[9px] font-mono leading-none">
-              {step ? formatDateOnly(step.approvalType === APPROVAL_STEP_TYPE.DRAFT ? (step.actionAt || drafterDate) : step.actionAt) : ''}
+              {step ? formatDateCompact(step.approvalType === APPROVAL_STEP_TYPE.DRAFT ? (step.actionAt || drafterDate) : step.actionAt) : ''}
             </div>
           </div>
         ))}

@@ -1,4 +1,5 @@
 import { useAuthStore } from '../store/useAuthStore';
+import { formatPrintStamp } from '../utils/datetime';
 
 /**
  * 인쇄 전용 공통 헤더 — 보안 워터마크(출처 추적). 모든 출력물 **필수**.
@@ -12,15 +13,9 @@ interface PrintHeaderProps {
   approvalNo?: string | null;
 }
 
-/** 출력일시: YYYYMMDD HH:MM:SS (로컬/KST 기준) */
-function formatStamp(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
-
 export default function PrintHeader({ approvalNo }: PrintHeaderProps) {
   const user = useAuthStore((s) => s.user);
-  const stamp = formatStamp(new Date());
+  const stamp = formatPrintStamp(new Date());
 
   // 첫 페이지만 상단에 출력 로그 표시 (브라우저 페이지 분할에 맡김)
   return (

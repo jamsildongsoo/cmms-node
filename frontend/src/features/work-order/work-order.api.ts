@@ -2,7 +2,8 @@ import axiosInstance from '../../api/axios';
 import type { WorkOrder, WorkOrderDetail, WorkOrderSaveRequest } from './work-order.types';
 
 export const workOrderApi = {
-  async getAll(params?: URLSearchParams): Promise<WorkOrder[]> {
+  async getAll(params?: URLSearchParams, plantId?: string | null): Promise<WorkOrder[]> {
+    if (plantId) params?.set('plantId', plantId);
     const response = await axiosInstance.get<WorkOrder[]>('/work-order', { params });
     return response.data;
   },

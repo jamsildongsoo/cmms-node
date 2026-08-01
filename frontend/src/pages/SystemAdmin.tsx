@@ -5,12 +5,12 @@ import { formatDateTime } from '../utils/datetime';
 import { ShieldCheck, Users, History, Building2, Plus } from 'lucide-react';
 import ListBadge from '../components/ListBadge';
 import { toastApiError } from '../utils/apiError';
-import {
-  systemAdminApi,
-  type Company,
-  type LoginHistory,
-  type SystemUser,
-} from '../features/system/system-admin.api';
+import { systemAdminApi } from '../features/system/system-admin.api';
+import type {
+  Company,
+  LoginHistory,
+  SystemUser,
+} from '../features/system/system-admin.types';
 
 export default function SystemAdmin() {
   const [tab, setTab] = useState<'companies' | 'users' | 'history'>('companies');

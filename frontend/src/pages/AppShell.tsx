@@ -12,9 +12,10 @@ const Inventory = lazy(() => import('./Inventory'));
 const PmRecord = lazy(() => import('./PmRecord'));
 const WorkOrder = lazy(() => import('./WorkOrder'));
 const WorkPermit = lazy(() => import('./WorkPermit'));
-const InventoryTransaction = lazy(() => import('./InventoryTransaction'));
-const Procurement = lazy(() => import('./Procurement'));
-const PurchaseReceipt = lazy(() => import('./PurchaseReceipt'));
+const InventoryOverview = lazy(() => import('./InventoryOverview'));
+const InventoryProcessing = lazy(() => import('./InventoryProcessing'));
+const ProcurementRequest = lazy(() => import('./ProcurementRequest'));
+const ProcurementManagement = lazy(() => import('./ProcurementManagement'));
 const Approval = lazy(() => import('./Approval'));
 const SystemAdmin = lazy(() => import('./SystemAdmin'));
 const PowerGeneration = lazy(() => import('./PowerGeneration'));
@@ -27,11 +28,17 @@ function PageLoading() {
   );
 }
 
-export default function Dashboard() {
+export default function AppShell() {
   const [activeTab, setActiveTab] = useState('board');
+  const [receiptRequestId, setReceiptRequestId] = useState<string | null>(null);
   const user = useAuthStore((s) => s.user);
   // 비밀번호 변경 안내 모달 — 로그인 시 플래그면 표시, 세션 내 닫으면 재표시 안 함
   const [showPwNotice, setShowPwNotice] = useState(!!user?.mustChangePassword);
+
+  const openReceiptRequest = (requestId: string) => {
+    setReceiptRequestId(requestId);
+    setActiveTab('stock-process');
+  };
 
   const renderContent = () => {
     switch (activeTab) {
@@ -50,13 +57,14 @@ export default function Dashboard() {
       case 'wp':
         return <WorkPermit />;
       case 'stock':
-        return <InventoryTransaction />;
+      case 'stock-overview':
+        return <InventoryOverview />;
+      case 'stock-process':
+        return <InventoryProcessing initialRequestId={receiptRequestId} />;
       case 'procurement-request':
-        return <Procurement mode="request" />;
+        return <ProcurementRequest onOpenReceiptRequest={openReceiptRequest} />;
       case 'procurement-management':
-        return <Procurement mode="management" />;
-      case 'purchase-receipt':
-        return <PurchaseReceipt />;
+        return <ProcurementManagement onOpenReceiptRequest={openReceiptRequest} />;
       case 'approval':
         return <Approval />;
       case 'board':

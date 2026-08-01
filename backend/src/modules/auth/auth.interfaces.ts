@@ -18,6 +18,16 @@ export interface JwtPayload {
   exp?: number;
 }
 
+export interface RefreshJwtPayload {
+  sub: string;
+  companyId: string;
+  userId: string;
+  sessionId: string;
+  type: 'refresh';
+  iat?: number;
+  exp?: number;
+}
+
 /**
  * 로그인 응답 — FE useAuthStore가 기대하는 정확한 구조
  * useAuthStore.ts:58-71 참조

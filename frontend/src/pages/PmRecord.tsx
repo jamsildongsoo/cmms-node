@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { useAuthStore } from '../store/useAuthStore';
 import { getCommonStatusLabel as getStatusLabel, getJudgeLabel } from '../constants/status';
 import { APP_MODULE } from '../constants/module';
-import { formatDateOnly, todayLocal } from '../utils/datetime';
+import { formatDateOnly, formatDateTimeSeconds, todayLocal } from '../utils/datetime';
 import { toastApiError } from '../utils/apiError';
 import PrintHeader from '../components/PrintHeader';
 import PmReportPrint from '../components/PmReportPrint';
@@ -30,6 +30,7 @@ const isConfirmed = (status: string) => status === 'S' || status === 'C';
 
 export default function PmRecord() {
   const user = useAuthStore((s) => s.user);
+  const activePlantId = useAuthStore((s) => s.activePlantId);
   const [activeTab, setActiveTab] = useState<PmTab>('plans');
   const [plans, setPlans] = useState<PmRecord[]>([]);
   const [results, setResults] = useState<PmRecord[]>([]);
@@ -105,7 +106,7 @@ export default function PmRecord() {
 
       // 폼 선택값 구성을 위한 시스템 참조값 조회다. 예방점검 목록 R 권한을 대체하지 않는다.
       const [loadedRecords, loadedDepartments, loadedEquipments, loadedUsers, loadedPmTypes] = await Promise.all([
-        pmApi.getAll(params),
+        pmApi.getAll(params, activePlantId),
         referenceApi.getDepartmentOptions(),
         masterReferenceApi.getEquipments(),
         referenceApi.getUserOptions(),
@@ -134,7 +135,7 @@ export default function PmRecord() {
     const timer = window.setTimeout(() => { void fetchData(); }, 0);
     return () => window.clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, showAll]);
+  }, [activePlantId, activeTab, showAll]);
 
   const resetForm = (stage: PmStage) => {
     setStepStage(stage);
@@ -362,8 +363,7 @@ export default function PmRecord() {
   const handlePrint = () => {
     const list = activeTab === 'plans' ? plans : results;
     if (list.length === 0) { toast.error('인쇄할 목록이 없습니다.'); return; }
-    const now = new Date();
-    const stamp = now.toLocaleString('sv-SE');
+    const stamp = formatDateTimeSeconds(new Date());
     const tabLabel = activeTab === 'plans' ? '예방점검 계획' : '예방점검 실적';
     const opened = openListPrint({
       title: `${tabLabel} 현황`,

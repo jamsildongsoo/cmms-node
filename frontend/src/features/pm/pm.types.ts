@@ -43,3 +43,8 @@ export interface PmRecordDetail {
   pmRecord: PmRecord;
   checkItems: PmRecordItem[];
 }
+
+export interface PmSaveRequest {
+  pmRecord: Omit<Partial<PmRecord>, 'id'> & { id?: string | null };
+  checkItems: PmRecordItem[];
+}

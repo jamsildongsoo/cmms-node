@@ -36,8 +36,9 @@ export class WorkOrderService {
     operator: string,
     searchType?: string,
     searchValue?: string,
+    requestedPlantId?: string,
   ): Promise<WorkOrderResponseDto[]> {
-    const plantId = await resolveActivePlantId(this.dataSource, companyId, operator);
+    const plantId = await resolveActivePlantId(this.dataSource, companyId, operator, requestedPlantId);
     return (
       await this.workOrderRepository.findAll(
         companyId,

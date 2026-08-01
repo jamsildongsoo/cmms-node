@@ -2,13 +2,12 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import { useThemeStore } from '../store/useThemeStore';
 import { referenceApi } from '../features/mdm/reference.api';
-import { LogOut, Clock, RefreshCw, UserCheck, Sun, Moon, Building2 } from 'lucide-react';
-import SessionExpiryNotice from '../features/auth/components/SessionExpiryNotice';
+import { LogOut, UserCheck, Sun, Moon, Building2 } from 'lucide-react';
 
 interface PlantOption { id: string; name: string }
 
 export default function Header() {
-  const { user, timeRemaining, extendSession, logout, activePlantId, setActivePlantId } = useAuthStore();
+  const { user, logout, activePlantId, setActivePlantId } = useAuthStore();
   const isLightMode = useThemeStore((s) => s.isLight);
   const toggleTheme = useThemeStore((s) => s.toggle);
 
@@ -22,12 +21,6 @@ export default function Header() {
         .catch(() => setPlants([]));
     }
   }, [user?.multiPlant]);
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
 
   return (
     <header className="bg-slate-900 border-b border-slate-800 h-14 pr-5 flex items-center justify-between text-slate-300 shrink-0 select-none w-full z-50 print:hidden">
@@ -75,23 +68,8 @@ export default function Header() {
         </div>
       </div>
 
-      {/* 우측: 세션 + 테마 + 로그아웃 */}
+      {/* 우측: 테마 + 로그아웃 */}
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 text-xs">
-          <Clock size={13} className="text-slate-500" />
-          <span className="text-slate-400">세션:</span>
-          <span className={`font-mono font-semibold ${timeRemaining < 180 ? 'text-rose-500' : 'text-slate-300'}`}>
-            {formatTime(timeRemaining)}
-          </span>
-          <button
-            onClick={extendSession}
-            title="세션 시간 연장"
-            className="ml-1 p-1 hover:bg-slate-800 rounded text-blue-400 hover:text-blue-300 transition-colors cursor-pointer outline-none border-0 bg-transparent"
-          >
-            <RefreshCw size={11} />
-          </button>
-        </div>
-
         <button
           onClick={toggleTheme}
           title={isLightMode ? "다크 모드로 전환" : "라이트 모드로 전환"}
@@ -101,21 +79,13 @@ export default function Header() {
         </button>
 
         <button
-          onClick={logout}
+          onClick={() => void logout()}
           className="flex items-center gap-1.5 bg-rose-950/20 hover:bg-rose-950/40 border border-rose-900/40 hover:border-rose-900/60 text-rose-400 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer outline-none"
         >
           <LogOut size={13} />
           로그아웃
         </button>
       </div>
-
-      {timeRemaining > 0 && timeRemaining <= 180 && (
-        <SessionExpiryNotice
-          remainingSeconds={timeRemaining}
-          onExtend={extendSession}
-          onLogout={logout}
-        />
-      )}
     </header>
   );
 }

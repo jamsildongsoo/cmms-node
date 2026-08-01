@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
 import { useAuthStore } from '../store/useAuthStore';
 import { toastApiError } from '../utils/apiError';
-import { formatDateOnly } from '../utils/datetime';
+import { formatDateOnly, formatPrintStamp } from '../utils/datetime';
 import { APP_MODULE } from '../constants/module';
 import { equipmentApi } from '../features/equipment/equipment.api';
 import type { Equipment as EquipmentModel, EquipmentFormValues } from '../features/equipment/equipment.types';
@@ -205,8 +205,7 @@ export default function Equipment() {
   };
 
   const handlePrint = () => {
-    const now = new Date();
-    const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+    const stamp = formatPrintStamp(new Date());
     const opened = openListPrint({
       title: '설비 마스터 목록',
       rows: filteredEquipments,
