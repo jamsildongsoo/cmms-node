@@ -65,7 +65,10 @@ export interface PurchaseRequestResponse {
   fileGroupId: number | null;
   title: string; approvalId: string | null;
   orderDate: string | null; etaDate: string | null;
-  shipStartDate: string | null; status: string; procStatus: string | null;
+  shipStartDate: string | null;
+  purchaseManager: string | null; purchaseManagerContact: string | null;
+  purchaseManagerRemarks: string | null;
+  status: string; procStatus: string | null;
   remarks: string | null; createdAt: string; createdBy: string;
 }
 export interface ReceivableRequestResponse extends PurchaseRequestResponse {
@@ -89,7 +92,7 @@ export class ProcurementService {
     private readonly fileStorageService: FileStorageService,
   ) {}
 
-  async getRequests(
+  private async getRequests(
     companyId: string,
     operator: string,
     roleId: string,
@@ -123,7 +126,34 @@ export class ProcurementService {
     return requests.map((entity) => this.toResponse(entity));
   }
 
-  async getRequestDetail(
+  async getPurchaseRequests(
+    companyId: string,
+    operator: string,
+    roleId: string,
+    requestedPlantId?: string | null,
+    receivableOnly = false,
+  ): Promise<PurchaseRequestResponse[]> {
+    return this.getRequests(
+      companyId, operator, roleId, requestedPlantId, receivableOnly,
+    );
+  }
+
+  async getPurchaseOrders(
+    companyId: string,
+    operator: string,
+    roleId: string,
+    requestedPlantId?: string | null,
+    receivableOnly = false,
+  ): Promise<PurchaseRequestResponse[]> {
+    const requests = await this.getRequests(
+      companyId, operator, roleId, requestedPlantId, receivableOnly,
+    );
+    return requests.filter((request) =>
+      [DocStatus.CONFIRMED, DocStatus.SELF_CONFIRMED]
+        .includes(request.status as DocStatus));
+  }
+
+  private async getRequestDetail(
     companyId: string,
     id: string,
     operator?: string,
@@ -153,6 +183,29 @@ export class ProcurementService {
         remarks: item.remarks,
       })),
     };
+  }
+
+  async getPurchaseRequestDetail(
+    companyId: string,
+    id: string,
+    operator?: string,
+    requestedPlantId?: string | null,
+  ): Promise<RequestDetail> {
+    return this.getRequestDetail(companyId, id, operator, requestedPlantId);
+  }
+
+  async getPurchaseOrderDetail(
+    companyId: string,
+    id: string,
+    operator?: string,
+    requestedPlantId?: string | null,
+  ): Promise<RequestDetail> {
+    const detail = await this.getRequestDetail(companyId, id, operator, requestedPlantId);
+    if (![DocStatus.CONFIRMED, DocStatus.SELF_CONFIRMED]
+      .includes(detail.header.status as DocStatus)) {
+      throw new NotFoundException('구매관리 대상 문서를 찾을 수 없습니다.');
+    }
+    return detail;
   }
 
   async getReceivableRequest(companyId: string, id: string, operator: string): Promise<RequestDetail> {
@@ -333,6 +386,15 @@ export class ProcurementService {
     companyId: string, req: OrderRequest, operator: string,
   ): Promise<PurchaseRequestResponse> {
     const entity = await this.mustGetConfirmed(companyId, req.requestId);
+    if (!entity.purchaseManager) {
+      const manager = await this.dataSource.getRepository(User).findOne({
+        select: { id: true, phone: true },
+        where: { companyId, id: operator, deleteYn: 'N' },
+      });
+      if (!manager) throw new BadRequestException('구매담당자 정보를 찾을 수 없습니다.');
+      entity.purchaseManager = manager.id;
+      entity.purchaseManagerContact = manager.phone;
+    }
     Object.assign(entity, {
       orderDate: dateOnly(req.orderDate) || today(),
       etaDate: dateOnly(req.etaDate),
@@ -615,6 +677,9 @@ export class ProcurementService {
       orderDate: entity.orderDate,
       etaDate: entity.etaDate,
       shipStartDate: entity.shipStartDate,
+      purchaseManager: entity.purchaseManager,
+      purchaseManagerContact: entity.purchaseManagerContact,
+      purchaseManagerRemarks: entity.purchaseManagerRemarks,
       status: entity.status,
       procStatus: entity.procStatus,
       remarks: entity.remarks,

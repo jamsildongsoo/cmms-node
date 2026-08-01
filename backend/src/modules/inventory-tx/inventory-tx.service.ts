@@ -3,7 +3,7 @@ import {
   ConflictException,
   Injectable,
 } from '@nestjs/common';
-import { Between, DataSource, QueryRunner } from 'typeorm';
+import { Between, DataSource, LessThan, QueryRunner } from 'typeorm';
 import Decimal from 'decimal.js';
 import { SequenceService, AppModule } from '../../common/sequence/sequence.service';
 import { getTenantContext } from '../../common/context/tenant.context';
@@ -15,6 +15,7 @@ import {
 import { InventoryStatus } from '../../entities/inventory-status.entity';
 import { InventoryHistory } from '../../entities/inventory-history.entity';
 import { InventoryMonthlyClosing } from '../../entities/inventory-monthly-closing.entity';
+import { InventoryClosing } from '../../entities/inventory-closing.entity';
 import { User } from '../../entities/users.entity';
 import { Warehouse } from '../../entities/warehouse.entity';
 
@@ -55,18 +56,9 @@ export class InventoryTxService {
     const tenant = context ?? getTenantContext();
     const { companyId, userId } = tenant;
     if (!request.items?.length) return;
-    const closingRepository = this.dataSource.getRepository(InventoryMonthlyClosing);
     const transactionMonths = new Set(
       request.items.map((item) => this.toDateOnly(item.txDate ?? new Date()).slice(0, 7).replace('-', '')),
     );
-    for (const closingYm of transactionMonths) {
-      const closed = await closingRepository.count({
-        where: { companyId, closingYm, deleteYn: 'N' },
-      });
-      if (closed > 0) {
-        throw new BadRequestException(`${closingYm.slice(0, 4)}-${closingYm.slice(4)}월은 이미 마감되어 재고 처리할 수 없습니다.`);
-      }
-    }
     const userDept = await this.getUserDept(companyId, userId);
     const generated = request.items.find((item) => item.docNo)?.docNo
       ?? await this.sequenceService.generateNextNo(companyId, AppModule.STK, userDept);
@@ -79,6 +71,26 @@ export class InventoryTxService {
       await runner.startTransaction('READ COMMITTED');
     }
     try {
+      for (const closingYm of [...transactionMonths].sort()) {
+        // 월마감과 같은 키를 잠가 마감 집계 중 수불이 끼어들지 못하게 한다.
+        await runner.query(
+          'SELECT pg_advisory_xact_lock(hashtext($1))',
+          [`inventory-closing:${companyId}:${closingYm}`],
+        );
+        const [closed, legacyClosed] = await Promise.all([
+          runner.manager.getRepository(InventoryClosing).count({
+            where: { companyId, closingYm, status: 'CLOSED', deleteYn: 'N' },
+          }),
+          runner.manager.getRepository(InventoryMonthlyClosing).count({
+            where: { companyId, closingYm, deleteYn: 'N' },
+          }),
+        ]);
+        if (closed > 0 || legacyClosed > 0) {
+          throw new BadRequestException(
+            `${closingYm.slice(0, 4)}-${closingYm.slice(4)}월은 이미 마감되어 재고 처리할 수 없습니다.`,
+          );
+        }
+      }
       const statuses = new Map<string, InventoryStatus | null>();
       for (const key of keys) {
         const status = await runner.manager.getRepository(InventoryStatus)
@@ -294,65 +306,114 @@ export class InventoryTxService {
 
   async closeMonth(closingYm: string, operator: string): Promise<void> {
     const { companyId } = getTenantContext();
+    if (!/^\d{6}$/.test(closingYm)) {
+      throw new BadRequestException('마감 년월은 YYYYMM 형식이어야 합니다.');
+    }
     const year = Number(closingYm.slice(0, 4));
     const month = Number(closingYm.slice(4, 6));
+    if (month < 1 || month > 12) {
+      throw new BadRequestException('마감 월은 01부터 12 사이여야 합니다.');
+    }
     const start = `${year}-${String(month).padStart(2, '0')}-01`;
     const lastDay = new Date(year, month, 0).getDate();
     const end = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-    const statuses = await this.dataSource.getRepository(InventoryStatus).find({
-      where: { companyId, deleteYn: 'N' },
-    });
-    const historyRepository = this.dataSource.getRepository(InventoryHistory);
-    const closingRepository = this.dataSource.getRepository(InventoryMonthlyClosing);
-    for (const status of statuses) {
-      const histories = await historyRepository.find({
-        where: {
-          companyId,
-          warehouseId: status.warehouseId,
-          inventoryId: status.inventoryId,
-          txDate: Between(start, end),
-          deleteYn: 'N',
-        },
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction('SERIALIZABLE');
+    try {
+      // 동일 회사·월의 중복 마감을 직렬화한다.
+      await runner.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        [`inventory-closing:${companyId}:${closingYm}`],
+      );
+      const headerRepository = runner.manager.getRepository(InventoryClosing);
+      const existingHeader = await headerRepository.findOne({
+        where: { companyId, closingYm, status: 'CLOSED', deleteYn: 'N' },
       });
-      let inQty = new Decimal(0), inAmt = new Decimal(0);
-      let outQty = new Decimal(0), outAmt = new Decimal(0);
-      let moveQty = new Decimal(0), moveAmt = new Decimal(0);
-      let adjQty = new Decimal(0), adjAmt = new Decimal(0);
-      histories.forEach((history) => {
-        const qty = new Decimal(history.qty);
-        const amount = new Decimal(history.amount);
-        if (history.txTypeCode === TxType.IN) { inQty = inQty.add(qty); inAmt = inAmt.add(amount); }
-        else if (history.txTypeCode === TxType.OUT) { outQty = outQty.add(qty.abs()); outAmt = outAmt.add(amount.abs()); }
-        else if ([MoveTxType.MOVE_IN, MoveTxType.MOVE_OUT].includes(history.txTypeCode as MoveTxType)) {
-          moveQty = moveQty.add(qty); moveAmt = moveAmt.add(amount);
-        } else if (history.txTypeCode === TxType.ADJ) { adjQty = adjQty.add(qty); adjAmt = adjAmt.add(amount); }
+      if (existingHeader) {
+        throw new BadRequestException(`${closingYm.slice(0, 4)}-${closingYm.slice(4)}월은 이미 마감되었습니다.`);
+      }
+
+      const statuses = await runner.manager.getRepository(InventoryStatus).find({
+        where: { companyId, deleteYn: 'N' },
       });
-      const existing = await closingRepository.findOne({
-        where: {
+      const historyRepository = runner.manager.getRepository(InventoryHistory);
+      const detailRepository = runner.manager.getRepository(InventoryMonthlyClosing);
+      for (const status of statuses) {
+        const [openingHistories, histories] = await Promise.all([
+          historyRepository.find({
+            where: {
+              companyId,
+              warehouseId: status.warehouseId,
+              inventoryId: status.inventoryId,
+              txDate: LessThan(start),
+              deleteYn: 'N',
+            },
+          }),
+          historyRepository.find({
+            where: {
+              companyId,
+              warehouseId: status.warehouseId,
+              inventoryId: status.inventoryId,
+              txDate: Between(start, end),
+              deleteYn: 'N',
+            },
+          }),
+        ]);
+        const openingQty = openingHistories.reduce(
+          (sum, history) => sum.add(history.qty), new Decimal(0),
+        );
+        const openingAmount = openingHistories.reduce(
+          (sum, history) => sum.add(history.amount), new Decimal(0),
+        );
+        let inQty = new Decimal(0), inAmt = new Decimal(0);
+        let outQty = new Decimal(0), outAmt = new Decimal(0);
+        let moveQty = new Decimal(0), moveAmt = new Decimal(0);
+        let adjQty = new Decimal(0), adjAmt = new Decimal(0);
+        histories.forEach((history) => {
+          const qty = new Decimal(history.qty);
+          const amount = new Decimal(history.amount);
+          if (history.txTypeCode === TxType.IN) { inQty = inQty.add(qty); inAmt = inAmt.add(amount); }
+          else if (history.txTypeCode === TxType.OUT) { outQty = outQty.add(qty.abs()); outAmt = outAmt.add(amount.abs()); }
+          else if ([MoveTxType.MOVE_IN, MoveTxType.MOVE_OUT].includes(history.txTypeCode as MoveTxType)) {
+            moveQty = moveQty.add(qty); moveAmt = moveAmt.add(amount);
+          } else if (history.txTypeCode === TxType.ADJ) { adjQty = adjQty.add(qty); adjAmt = adjAmt.add(amount); }
+        });
+        const closing = detailRepository.create({
           companyId,
           warehouseId: status.warehouseId,
           inventoryId: status.inventoryId,
           closingYm,
-        },
-      });
-      const closing = existing ?? closingRepository.create({
+          openingQty: openingQty.toFixed(4),
+          openingAmount: openingAmount.toFixed(4),
+          inQty: inQty.toFixed(4), inAmount: inAmt.toFixed(4),
+          outQty: outQty.toFixed(4), outAmount: outAmt.toFixed(4),
+          moveQty: moveQty.toFixed(4), moveAmount: moveAmt.toFixed(4),
+          adjQty: adjQty.toFixed(4), adjAmount: adjAmt.toFixed(4),
+          closingQty: openingQty.add(inQty).sub(outQty).add(moveQty).add(adjQty).toFixed(4),
+          closingAmount: openingAmount.add(inAmt).sub(outAmt).add(moveAmt).add(adjAmt).toFixed(4),
+          createdBy: operator,
+          updatedBy: operator,
+          deleteYn: 'N',
+        });
+        await detailRepository.save(closing);
+      }
+      await headerRepository.save(headerRepository.create({
         companyId,
-        warehouseId: status.warehouseId,
-        inventoryId: status.inventoryId,
         closingYm,
+        status: 'CLOSED',
+        closedAt: new Date(),
+        closedBy: operator,
         createdBy: operator,
-        deleteYn: 'N',
-      });
-      Object.assign(closing, {
-        inQty: inQty.toFixed(4), inAmount: inAmt.toFixed(4),
-        outQty: outQty.toFixed(4), outAmount: outAmt.toFixed(4),
-        moveQty: moveQty.toFixed(4), moveAmount: moveAmt.toFixed(4),
-        adjQty: adjQty.toFixed(4), adjAmount: adjAmt.toFixed(4),
-        closingQty: inQty.sub(outQty).add(moveQty).add(adjQty).toFixed(4),
-        closingAmount: inAmt.sub(outAmt).add(moveAmt).add(adjAmt).toFixed(4),
         updatedBy: operator,
-      });
-      await closingRepository.save(closing);
+        deleteYn: 'N',
+      }));
+      await runner.commitTransaction();
+    } catch (error) {
+      await runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await runner.release();
     }
   }
 

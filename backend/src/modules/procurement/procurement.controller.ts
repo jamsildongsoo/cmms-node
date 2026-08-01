@@ -37,7 +37,7 @@ export class ProcurementController {
     @Query('receivable') receivable?: string,
   ): Promise<PurchaseRequestResponse[]> {
     const { companyId, userId, roleId } = getTenantContext();
-    return this.procurementService.getRequests(
+    return this.procurementService.getPurchaseRequests(
       companyId,
       userId,
       roleId,
@@ -67,7 +67,7 @@ export class ProcurementController {
     @Query('plantId') plantId?: string,
   ): Promise<RequestDetail> {
     const { companyId, userId } = getTenantContext();
-    return this.procurementService.getRequestDetail(companyId, id, userId, plantId);
+    return this.procurementService.getPurchaseRequestDetail(companyId, id, userId, plantId);
   }
 
   @Post('requests')
@@ -104,7 +104,7 @@ export class ProcurementController {
     @Query('receivable') receivable?: string,
   ): Promise<PurchaseRequestResponse[]> {
     const { companyId, userId, roleId } = getTenantContext();
-    return this.procurementService.getRequests(
+    return this.procurementService.getPurchaseOrders(
       companyId,
       userId,
       roleId,
@@ -120,7 +120,7 @@ export class ProcurementController {
     @Query('plantId') plantId?: string,
   ): Promise<RequestDetail> {
     const { companyId, userId } = getTenantContext();
-    return this.procurementService.getRequestDetail(companyId, id, userId, plantId);
+    return this.procurementService.getPurchaseOrderDetail(companyId, id, userId, plantId);
   }
 
   @Post('orders/:id/actions/order')

@@ -5,6 +5,7 @@ import { InventoryTxService } from './inventory-tx.service';
 import { InventoryStatus } from '../../entities/inventory-status.entity';
 import { InventoryHistory } from '../../entities/inventory-history.entity';
 import { InventoryMonthlyClosing } from '../../entities/inventory-monthly-closing.entity';
+import { InventoryClosing } from '../../entities/inventory-closing.entity';
 import { User } from '../../entities/users.entity';
 
 @Module({
@@ -13,6 +14,7 @@ import { User } from '../../entities/users.entity';
       InventoryStatus,
       InventoryHistory,
       InventoryMonthlyClosing,
+      InventoryClosing,
       User,
     ]),
   ],

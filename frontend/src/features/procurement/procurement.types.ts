@@ -9,6 +9,9 @@ export interface PurchaseRequest {
   orderDate?: string | null;
   etaDate?: string | null;
   shipStartDate?: string | null;
+  purchaseManager?: string | null;
+  purchaseManagerContact?: string | null;
+  purchaseManagerRemarks?: string | null;
   status: string;
   procStatus?: string | null;
   remarks?: string;

@@ -15,6 +15,12 @@ export class InventoryMonthlyClosing extends BaseEntity {
   @PrimaryColumn({ name: 'closing_ym', type: 'char', length: 6 })
   closingYm!: string;
 
+  @Column({ name: 'opening_qty', type: 'numeric', precision: 15, scale: 4, default: '0' })
+  openingQty!: string;
+
+  @Column({ name: 'opening_amount', type: 'numeric', precision: 19, scale: 4, default: '0' })
+  openingAmount!: string;
+
   @Column({ name: 'in_qty', type: 'numeric', precision: 15, scale: 4, default: '0' })
   inQty!: string;
 

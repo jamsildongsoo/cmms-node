@@ -269,17 +269,12 @@ export default function Procurement({
         { header: '요청일', render: (request) => request.requestDate || '-' },
         { header: '플랜트/창고', render: (request) => `${request.plantId || '-'} / ${request.warehouseId || '-'}` },
         { header: '유형', render: (request) => prTypes.find((type) => type.id === request.requestType)?.name || request.requestType || '-' },
+        { header: '문서상태', render: (request) => getCommonStatusLabel(request.status) },
         {
-          header: '구매상태',
-          render: (request) => request.status === 'T'
-            ? '저장'
-            : request.status === 'C'
-              ? '확정'
-              : request.status === 'O'
-                ? '발주'
-                : request.status === 'S'
-                  ? '배송'
-                  : request.status,
+          header: '구매진행상태',
+          render: (request) => request.procStatus
+            ? getProcStatusLabel(request.procStatus)
+            : '발주대기',
         },
         { header: '결재번호', render: (request) => request.approvalId || '-' },
       ],
@@ -299,7 +294,9 @@ export default function Procurement({
     }
     const { printWindow, container } = printTarget;
     try {
-      const detail = await procurementApi.getRequest(id);
+      const detail = mode === 'management'
+        ? await procurementApi.getOrder(id, activePlantId)
+        : await procurementApi.getRequest(id, activePlantId);
       const header = detail.header;
       const requester = usersList.find((candidate) => candidate.id === header.requesterId);
       createRoot(container).render(
@@ -316,7 +313,11 @@ export default function Procurement({
                 shipStartDate={formatDateOnly(header.shipStartDate)}
                 plantName={plant ? `${plant.id} / ${plant.name}` : header.plantId}
                 warehouseName={warehouse ? `${warehouse.id} / ${warehouse.name}` : header.warehouseId}
-                purchaseManager="-"
+                purchaseManager={usersList.find(
+                  (candidate) => candidate.id === header.purchaseManager,
+                )?.name || header.purchaseManager || '-'}
+                purchaseManagerContact={header.purchaseManagerContact}
+                purchaseManagerRemarks={header.purchaseManagerRemarks}
                 remarks={header.remarks}
                 items={detail.items.map((item) => ({
                   ...item,
