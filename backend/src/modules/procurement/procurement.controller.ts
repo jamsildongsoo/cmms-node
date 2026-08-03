@@ -21,7 +21,7 @@ import {
   PurchaseRequestResponse,
 } from './procurement.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { PermissionGuard, Permission } from '../../common/guards/permission.guard';
+import { PermissionGuard, Permission, WorkflowPermission } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
@@ -78,7 +78,7 @@ export class ProcurementController {
   }
 
   @Put('requests/:id')
-  @Permission(AppModule.PUR, 'U')
+  @WorkflowPermission()
   async updateRequest(
     @Param('id') id: string,
     @Body() request: SaveRequest,
@@ -179,7 +179,7 @@ export class ProcurementController {
 
   @Delete('requests/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Permission(AppModule.PUR, 'D')
+  @WorkflowPermission()
   async deleteRequest(@Param('id') id: string): Promise<void> {
     const { companyId, userId, roleId } = getTenantContext();
     await this.procurementService.deleteRequest(companyId, id, userId, roleId);

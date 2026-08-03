@@ -17,7 +17,7 @@ import {
   WorkPermitResponseDto,
 } from './dto/work-permit.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { PermissionGuard, Permission } from '../../common/guards/permission.guard';
+import { PermissionGuard, Permission, WorkflowPermission } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
@@ -52,12 +52,12 @@ export class WorkPermitController {
   async saveWorkPermit(
     @Body() permit: SaveWorkPermitDto,
   ): Promise<WorkPermitResponseDto> {
-    const { companyId, userId } = getTenantContext();
-    return this.workPermitService.saveWorkPermit(companyId, permit, userId, 'create');
+    const { companyId, userId, roleId } = getTenantContext();
+    return this.workPermitService.saveWorkPermit(companyId, permit, userId, 'create', roleId);
   }
 
   @Put(':id')
-  @Permission(AppModule.WP, 'U')
+  @WorkflowPermission()
   async updateWorkPermit(
     @Param('id') id: string,
     @Body() permit: SaveWorkPermitDto,
@@ -69,7 +69,7 @@ export class WorkPermitController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Permission(AppModule.WP, 'D')
+  @WorkflowPermission()
   async deleteWorkPermit(
     @Param('id') id: string,
     @Query('plantId') plantId: string,

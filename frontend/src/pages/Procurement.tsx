@@ -408,8 +408,10 @@ export default function Procurement({
   const canManageOrder = orderPermission?.U === 'Y';
   const canReceive = user?.permissions?.STK?.C === 'Y';
   const isRequestDraftLike = !formHeader.id || ['T', 'R'].includes(formHeader.status || '');
-  const formEditable = detailMode !== 'management' && isRequestDraftLike && (!formHeader.id ? canCreate : canUpdate);
-  const canSaveRequest = formHeader.id ? canUpdate : canCreate;
+  const isOwnTempRequest = formHeader.status === 'T' && formHeader.requesterId === user?.id;
+  const canEditRequest = !formHeader.id ? canCreate : canUpdate || isOwnTempRequest;
+  const formEditable = detailMode !== 'management' && isRequestDraftLike && canEditRequest;
+  const canSaveRequest = canEditRequest;
   const isConfirmedRequest = ['S', 'C'].includes(formHeader.status || '');
   const canManageFlow = detailMode === 'management' && isConfirmedRequest && canManageOrder;
   const canCloseRequest = detailMode === 'management'
@@ -608,7 +610,7 @@ export default function Procurement({
           </div>
           <div className="flex justify-end gap-2 mt-6 pt-6 border-t border-slate-800">
             <button onClick={() => setFormOpen(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg py-2 px-4 text-xs font-semibold transition-colors border-0 cursor-pointer">닫기</button>
-            {formHeader.id && canDelete && detailMode === 'request' && formHeader.status === 'T' && (
+            {formHeader.id && detailMode === 'request' && formHeader.status === 'T' && (canDelete || isOwnTempRequest) && (
               <button
                 onClick={() => void deleteRequest(formHeader.id!)}
                 className="bg-rose-900/70 hover:bg-rose-800 text-rose-100 rounded-lg py-2 px-4 text-xs font-semibold transition-colors border-0 cursor-pointer"

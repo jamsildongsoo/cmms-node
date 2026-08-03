@@ -40,6 +40,7 @@ export interface MdmUser {
   title: string | null;
   useYn: YesNo;
   lastLoginPlantId?: string | null;
+  initialPassword?: string;
 }
 
 export interface ReferenceUser {

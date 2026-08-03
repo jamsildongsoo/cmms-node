@@ -38,6 +38,7 @@ export interface LoginResponse {
   companyName: string;
   id: string;
   name: string;
+  avatarKey: string;
   roleId: string;
   departmentId: string | null;
   position: string | null;
@@ -55,6 +56,7 @@ export interface UserProfileResponse {
   companyId: string;
   id: string;
   name: string;
+  avatarKey: string;
   email: string | null;
   phone: string | null;
   position: string | null;

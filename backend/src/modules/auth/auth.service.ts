@@ -37,6 +37,7 @@ import { Company } from '../../entities/company.entity';
 import { RoleDetail } from '../../entities/role-detail.entity';
 import { LoginHistory } from '../../entities/login-history.entity';
 import { AuthRefreshSession } from '../../entities/auth-refresh-session.entity';
+import { DEFAULT_AVATAR_KEY, isAvatarKey } from '../../common/constants/avatar.constants';
 
 @Injectable()
 export class AuthService {
@@ -367,6 +368,7 @@ export class AuthService {
       phone: user.phone ?? null,
       position: user.position ?? null,
       title: user.title ?? null,
+      avatarKey: user.avatarKey || DEFAULT_AVATAR_KEY,
       departmentId: user.departmentId ?? null,
       roleId: user.roleId ?? '',
       lastLoginPlantId: user.lastLoginPlantId ?? null,
@@ -388,6 +390,9 @@ export class AuthService {
         ...(req.phone !== undefined ? { phone: req.phone ?? null } : {}),
         ...(req.position !== undefined ? { position: req.position ?? null } : {}),
         ...(req.title !== undefined ? { title: req.title ?? null } : {}),
+        ...(req.avatarKey !== undefined
+          ? { avatarKey: isAvatarKey(req.avatarKey) ? req.avatarKey : DEFAULT_AVATAR_KEY }
+          : {}),
         updatedBy: userId,
       },
     );
@@ -626,6 +631,7 @@ export class AuthService {
       companyName,
       id: userId,
       name: user.name,
+      avatarKey: user.avatarKey || DEFAULT_AVATAR_KEY,
       roleId: user.roleId ?? '',
       departmentId: user.departmentId ?? null,
       position: user.position ?? null,

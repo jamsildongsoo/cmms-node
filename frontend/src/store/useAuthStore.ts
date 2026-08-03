@@ -9,6 +9,7 @@ interface User {
   companyName: string;
   id: string;
   name: string;
+  avatarKey: string;
   roleId: string;
   departmentId: string | null;
   position: string | null;
@@ -38,6 +39,7 @@ interface AuthResponse {
   companyName: string;
   id: string;
   name: string;
+  avatarKey: string;
   roleId: string;
   departmentId: string | null;
   position: string | null;
@@ -156,6 +158,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       companyName: data.companyName || data.companyId,
       id: data.id,
       name: data.name,
+      avatarKey: data.avatarKey || 'user-blue',
       roleId: data.roleId,
       departmentId: data.departmentId,
       position: data.position,

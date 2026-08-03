@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { useAuthStore } from '../store/useAuthStore';
-import { User, Mail, Phone, Briefcase, Lock, Save, Shield } from 'lucide-react';
+import { Mail, Phone, Briefcase, Lock, Save, Shield, Check, Palette } from 'lucide-react';
 import { toastApiError } from '../utils/apiError';
 import { accountApi } from '../features/account/account.api';
+import UserAvatar from '../components/UserAvatar';
+import { AVATAR_CATEGORIES, AVATAR_OPTIONS } from '../features/account/avatar-options';
 
 export default function MyPage() {
   const user = useAuthStore((s) => s.user);
@@ -14,6 +16,8 @@ export default function MyPage() {
   const [phone, setPhone] = useState('');
   const [position, setPosition] = useState('');
   const [title, setTitle] = useState('');
+  const [avatarKey, setAvatarKey] = useState(user?.avatarKey || 'user-blue');
+  const [avatarCategory, setAvatarCategory] = useState('전체');
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -31,6 +35,7 @@ export default function MyPage() {
           setPhone(data.phone || '');
           setPosition(data.position || '');
           setTitle(data.title || '');
+          setAvatarKey(data.avatarKey || 'user-blue');
         })
         .catch(err => {
           console.error('Failed to load profile', err);
@@ -47,9 +52,10 @@ export default function MyPage() {
         email,
         phone,
         position,
-        title
+        title,
+        avatarKey,
       });
-      updateUser({ name, position, title });
+      updateUser({ name, position, title, avatarKey });
       toast.success('프로필 정보가 수정되었습니다.');
     } catch (err: unknown) {
       toastApiError(err, '프로필 수정에 실패했습니다.');
@@ -99,8 +105,8 @@ export default function MyPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col items-center justify-center text-center">
-          <div className="w-24 h-24 rounded-full bg-slate-950 border border-slate-800 flex items-center justify-center text-blue-500 mb-4 shadow-inner">
-            <User size={48} />
+          <div className="w-24 h-24 rounded-full bg-slate-950 border border-slate-800 flex items-center justify-center mb-4 shadow-inner">
+            <UserAvatar avatarKey={avatarKey} size={48} />
           </div>
           <h2 className="text-lg font-bold text-slate-100">{name}</h2>
           <p className="text-xs text-slate-400 mt-1">{user.id} ({user.companyId})</p>
@@ -131,7 +137,47 @@ export default function MyPage() {
         <div className="md:col-span-2 space-y-6">
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
             <h3 className="text-sm font-bold text-slate-200 mb-4 flex items-center gap-2">
-              <User size={16} className="text-slate-400" />
+              <Palette size={16} className="text-slate-400" />
+              아바타 선택
+            </h3>
+            <div className="flex flex-wrap gap-1.5 mb-4">
+              {AVATAR_CATEGORIES.map((category) => (
+                <button
+                  key={category}
+                  type="button"
+                  onClick={() => setAvatarCategory(category)}
+                  className={`px-3 py-1.5 rounded-lg text-xs border cursor-pointer ${avatarCategory === category ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'}`}
+                >
+                  {category}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+              {AVATAR_OPTIONS
+                .filter((option) => avatarCategory === '전체' || option.category === avatarCategory)
+                .map((option) => {
+                  const Icon = option.icon;
+                  const selected = option.key === avatarKey;
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      title={option.label}
+                      onClick={() => setAvatarKey(option.key)}
+                      className={`relative flex flex-col items-center gap-1 rounded-xl p-2 border cursor-pointer ${selected ? 'border-blue-500 bg-blue-950/40' : 'border-slate-800 bg-slate-950 hover:border-slate-600'}`}
+                    >
+                      <Icon size={26} className={option.color} />
+                      <span className="text-[10px] text-slate-400 truncate max-w-full">{option.label}</span>
+                      {selected && <Check size={12} className="absolute right-1 top-1 text-blue-400" />}
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+            <h3 className="text-sm font-bold text-slate-200 mb-4 flex items-center gap-2">
+              <Palette size={16} className="text-slate-400" />
               기본 정보 수정
             </h3>
             <form onSubmit={handleProfileSubmit} className="space-y-4">

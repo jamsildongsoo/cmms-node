@@ -85,6 +85,7 @@ export default function WorkPermit() {
   const [approvalId, setApprovalId] = useState('');
   const [createdAt, setCreatedAt] = useState('');
   const [createdBy, setCreatedBy] = useState('');
+  const [recordStatus, setRecordStatus] = useState('T');
 
   // JSON Checksheets
   const [genChecks, setGenChecks] = useState<CheckItem[]>(INITIAL_GENERAL);
@@ -118,7 +119,9 @@ export default function WorkPermit() {
   const canUpdate = permission?.U === 'Y';
   const canDelete = permission?.D === 'Y';
   const canDirectConfirm = permission?.A === 'Y';
-  const canSave = wpNo ? canUpdate : canCreate;
+  const canEditCurrent = !wpNo
+    ? canCreate
+    : canUpdate || (recordStatus === 'T' && createdBy === user?.id);
   const currentPermits = permits.filter((permit) =>
     activeTab === 'plans' ? permit.stepStage === 'P' : permit.stepStage === 'R',
   );
@@ -216,6 +219,7 @@ export default function WorkPermit() {
     setApprovalId('');
     setCreatedAt('');
     setCreatedBy('');
+    setRecordStatus('T');
 
     // Reset checksheets
     setGenChecks(INITIAL_GENERAL);
@@ -261,6 +265,7 @@ export default function WorkPermit() {
       setApprovalId(w.status === 'R' ? '' : (w.approvalId || ''));
       setCreatedAt(w.createdAt || '');
       setCreatedBy(w.createdBy || '');
+      setRecordStatus(w.status || 'T');
 
       // Parse JSON checksheets
       setGenChecks(parseCheckItems(w.jsonGeneral, INITIAL_GENERAL));
@@ -619,7 +624,7 @@ export default function WorkPermit() {
                     <td className="p-3 font-mono text-slate-400">{formatDateTime(wp.startAt)}</td>
                     <td className="p-3 font-mono text-slate-400">{formatDateTime(wp.endAt)}</td>
                     <td className="p-3 text-right space-x-2 print:hidden">
-                      {canUpdate && ['T', 'R'].includes(wp.status) && (
+                      {(canUpdate || (wp.status === 'T' && wp.createdBy === user?.id)) && ['T', 'R'].includes(wp.status) && (
                         <ListIconButton
                           onClick={() => handleOpenEdit(wp)}
                           label="상세/수정"
@@ -627,7 +632,7 @@ export default function WorkPermit() {
                           tone="accent"
                         />
                       )}
-                      {canDelete && wp.status === 'T' && (
+                      {(canDelete || (wp.status === 'T' && wp.createdBy === user?.id)) && wp.status === 'T' && (
                           <ListIconButton
                             onClick={() => handleDelete(wp)}
                             label="삭제"
@@ -957,21 +962,21 @@ export default function WorkPermit() {
                 >
                   닫기
                 </button>
-                {canSave && <button
+                {canEditCurrent && <button
                   onClick={() => handleSave('T')}
                   disabled={isLoading}
                   className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-750 rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
                 >
                   임시 저장
                 </button>}
-                {canSave && <button
+                {canEditCurrent && <button
                   onClick={() => handleSave('P')}
                   disabled={isLoading}
                   className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer border-0 disabled:opacity-50"
                 >
                   결재 상신
                 </button>}
-                {canSave && canDirectConfirm && (
+                {canEditCurrent && canDirectConfirm && (
                   <button
                     onClick={() => handleSave('S')}
                     disabled={isLoading}

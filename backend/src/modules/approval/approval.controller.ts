@@ -34,7 +34,7 @@ export class ApprovalController {
   }
 
   @Put(':id')
-  @Permission(AppModule.APR, 'U')
+  @WorkflowPermission()
   async updateApproval(
     @Param('id') id: string,
     @Body() request: ApprovalSubmitDto,
@@ -44,7 +44,7 @@ export class ApprovalController {
   }
 
   @Delete(':id')
-  @Permission(AppModule.APR, 'D')
+  @WorkflowPermission()
   async deleteApproval(@Param('id') id: string): Promise<void> {
     const { companyId, userId, roleId } = getTenantContext();
     await this.approvalService.deleteApproval(companyId, id, userId, roleId);

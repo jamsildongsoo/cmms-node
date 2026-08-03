@@ -339,7 +339,8 @@ export default function Approval() {
                     </td>
                     <td className="p-3 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        {app.status === DOC_STATUS.TEMP && app.drafterId === user?.id && canUpdate && (
+                        {app.status === DOC_STATUS.TEMP
+                          && (app.drafterId === user?.id || canUpdate) && (
                           <ListIconButton
                             onClick={() => handleEditDraft(app)}
                             label={`${app.id} 수정`}
@@ -347,7 +348,8 @@ export default function Approval() {
                             tone="accent"
                           />
                         )}
-                        {app.status === DOC_STATUS.TEMP && app.drafterId === user?.id && canDelete && (
+                        {app.status === DOC_STATUS.TEMP
+                          && (app.drafterId === user?.id || canDelete) && (
                           <ListIconButton
                             onClick={() => void handleDeleteDraft(app)}
                             label={`${app.id} 삭제`}
@@ -436,6 +438,20 @@ export default function Approval() {
 
             {/* Footer */}
             <div className="p-6 border-t border-slate-800 flex justify-end gap-2 shrink-0 print:hidden">
+              {selectedApproval.status === DOC_STATUS.TEMP
+                && (selectedApproval.drafterId === user?.id || canUpdate) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsDetailOpen(false);
+                    handleEditDraft(selectedApproval);
+                  }}
+                  className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border-0"
+                >
+                  <Pencil size={14} />
+                  수정
+                </button>
+              )}
               {selectedApproval.status !== DOC_STATUS.TEMP && selectedApproval.status !== DOC_STATUS.IN_PROGRESS && (
                 <button
                   type="button"

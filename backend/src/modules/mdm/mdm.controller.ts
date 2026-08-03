@@ -11,7 +11,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { MdmService } from './mdm.service';
+import { MdmService, MdmUserResponse } from './mdm.service';
 import { Plant } from '../../entities/plant.entity';
 import { Department } from '../../entities/department.entity';
 import { Role } from '../../entities/role.entity';
@@ -184,7 +184,7 @@ export class MdmController {
 
   @Post('users')
   @Permission(AppModule.MDM, 'C')
-  async createUser(@Body() user: Partial<User>): Promise<User> {
+  async createUser(@Body() user: Partial<User>): Promise<MdmUserResponse> {
     const { companyId, userId } = getTenantContext();
     return this.mdmService.saveUser(companyId, user, userId);
   }

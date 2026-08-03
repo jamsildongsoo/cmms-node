@@ -161,11 +161,25 @@ export class ApprovalService {
             stepNo: 0,
             approverId: operator,
             approvalType: ApprovalStepType.DRAFT,
-            approvalResult: ApprovalResult.APPROVED,
-            actionAt: new Date(),
-            comments: '상신함',
+            approvalResult: status === DocStatus.IN_PROGRESS
+              ? ApprovalResult.APPROVED
+              : null,
+            actionAt: status === DocStatus.IN_PROGRESS ? new Date() : null,
+            comments: status === DocStatus.IN_PROGRESS ? '상신함' : '임시저장',
           }),
         );
+      } else {
+        const draftStep = await stepRepository.findOne({
+          where: { companyId, approvalId, stepNo: 0 },
+        });
+        if (draftStep) {
+          draftStep.approvalResult = status === DocStatus.IN_PROGRESS
+            ? ApprovalResult.APPROVED
+            : null;
+          draftStep.actionAt = status === DocStatus.IN_PROGRESS ? new Date() : null;
+          draftStep.comments = status === DocStatus.IN_PROGRESS ? '상신함' : '임시저장';
+          await stepRepository.save(draftStep);
+        }
       }
       if (steps?.length) {
         await stepRepository.save(

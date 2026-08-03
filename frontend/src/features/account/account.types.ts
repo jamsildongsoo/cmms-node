@@ -2,6 +2,7 @@ export interface MyProfile {
   companyId: string;
   id: string;
   name: string;
+  avatarKey: string;
   departmentId: string | null;
   email: string | null;
   phone: string | null;
@@ -15,6 +16,7 @@ export interface UpdateMyProfileRequest {
   phone: string;
   position: string;
   title: string;
+  avatarKey: string;
 }
 
 export interface ChangeMyPasswordRequest {

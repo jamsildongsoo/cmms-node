@@ -117,7 +117,8 @@ export class PermissionPolicyService {
   }
 
   async assertModulePermission(params: AssertModulePermissionParams): Promise<void> {
-    // SYSTEM 사용자는 모듈 매트릭스를 우회하되, 별도 SYSTEM 재검증 규칙을 따른다.
+    // 일반 모듈 권한 검사 진입점이다.
+    // SYSTEM 사용자는 RoleDetail을 보지 않고 별도 SYSTEM 검증만 수행한다.
     if (await this.isSystemAdmin(params)) return;
 
     // 일반 사용자는 요청한 모듈/행위의 단일 권한 보유 여부로 판정한다.
@@ -270,7 +271,10 @@ export class PermissionPolicyService {
   private async assertCanMutateOwnTempOrPermission(
     params: OwnTempOrPermissionParams & { action: 'U' | 'D' },
   ): Promise<boolean> {
-    // 본인 임시저장 문서는 모듈 U/D 없이도 수정/삭제를 허용한다.
+    // 문서 수정·삭제 규칙:
+    // 1) 본인이 작성한 임시저장(T) 문서는 U/D 권한 없이 허용
+    // 2) 그 외 문서는 해당 모듈의 U 또는 D 권한 필요
+    // 반환값은 호출부가 소유자 검사를 추가로 수행해야 하는지 나타낸다.
     const isOwnTemp = params.status === DocStatus.TEMP && params.ownerId === params.operatorId;
     if (isOwnTemp) return true;
 

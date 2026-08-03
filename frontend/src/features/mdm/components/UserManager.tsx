@@ -96,8 +96,11 @@ export default function UserManager({
         await userApi.update(editingId, payload);
         notify('success', '사용자 정보가 수정되었습니다.');
       } else {
-        await userApi.create(payload);
-        notify('success', '새로운 사용자가 등록되었습니다. (임시 비밀번호: 1234)');
+        const createdUser = await userApi.create(payload);
+        notify(
+          'success',
+          `새로운 사용자가 등록되었습니다. (임시 비밀번호: ${createdUser.initialPassword ?? '관리자에게 확인하세요'})`,
+        );
       }
       resetForm();
       fetchData();

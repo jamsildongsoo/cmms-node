@@ -83,6 +83,15 @@ export class WorkPermitService {
       input.plantId,
     );
     if (!plantId) throw new BadRequestException('사업장을 확인할 수 없습니다.');
+    if (input.status === DocStatus.SELF_CONFIRMED) {
+      await this.permissionPolicyService.assertModulePermission({
+        companyId,
+        roleId: roleId ?? '',
+        module: AppModule.WP,
+        action: 'A',
+        resourceLabel: '작업허가 직접 확정',
+      });
+    }
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();
     await runner.startTransaction();

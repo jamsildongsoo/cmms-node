@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not, DataSource } from 'typeorm';
 import { Plant } from '../../entities/plant.entity';
@@ -95,9 +96,14 @@ const DEFAULT_CODE_GROUPS = [
   },
 ] as const;
 
+export type MdmUserResponse = Omit<User, 'passwordHash'> & {
+  initialPassword?: string;
+};
+
 @Injectable()
 export class MdmService {
   constructor(
+    private readonly config: ConfigService,
     private readonly dataSource: DataSource,
     @InjectRepository(Plant) private readonly plantRepo: Repository<Plant>,
     @InjectRepository(Department) private readonly departmentRepo: Repository<Department>,
@@ -446,7 +452,11 @@ export class MdmService {
     })) as Partial<User>[];
   }
 
-  async saveUser(companyId: string, userDto: Partial<User>, operator: string): Promise<User> {
+  async saveUser(companyId: string, userDto: Partial<User>, operator: string): Promise<MdmUserResponse> {
+    const initialPassword = this.config.get<string>('INITIAL_USER_PASSWORD', 'init1234');
+    if (initialPassword.length < 8) {
+      throw new Error('INITIAL_USER_PASSWORD must be at least 8 characters long.');
+    }
     const id = userDto.id?.trim();
     if (!id) throw new BadRequestException('사용자 ID는 필수입니다.');
 
@@ -470,15 +480,17 @@ export class MdmService {
         exists.position = userDto.position || null;
         exists.title = userDto.title || null;
         exists.lastLoginPlantId = CodeUtil.normalizeOrNull(userDto.lastLoginPlantId);
-        exists.passwordHash = await bcrypt.hash('init1234', 12); // 복구 시에도 8자 이상 임시 비번으로 리셋
+        exists.passwordHash = await bcrypt.hash(initialPassword, 12);
         exists.useYn = 'Y';
         exists.deleteYn = 'N';
         exists.updatedBy = operator;
-        return this.userRepo.save(exists);
+        const saved = await this.userRepo.save(exists);
+        const { passwordHash: _passwordHash, ...safeUser } = saved;
+        return { ...safeUser, initialPassword };
       }
     }
 
-    const hash = await bcrypt.hash('init1234', 12);
+    const hash = await bcrypt.hash(initialPassword, 12);
     const user = this.userRepo.create({
       companyId,
       id,
@@ -496,7 +508,9 @@ export class MdmService {
       createdBy: operator,
       updatedBy: operator,
     });
-    return this.userRepo.save(user);
+    const saved = await this.userRepo.save(user);
+    const { passwordHash: _passwordHash, ...safeUser } = saved;
+    return { ...safeUser, initialPassword };
   }
 
   async updateUser(companyId: string, id: string, userDto: Partial<User>, operator: string): Promise<User> {

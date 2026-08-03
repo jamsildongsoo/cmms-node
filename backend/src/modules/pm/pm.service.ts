@@ -135,6 +135,17 @@ export class PmService {
       const refNo = pmRecord.refNo?.trim() || null;
       this.validateStage(stage, refModule, refNo);
 
+      // 직접 확정(S)은 임시저장 수정 권한과 별도로 PM:A 권한이 필요하다.
+      if (pmRecord.status === DocStatus.SELF_CONFIRMED) {
+        await this.permissionPolicyService.assertModulePermission({
+          companyId,
+          roleId: roleId ?? '',
+          module: AppModule.PM,
+          action: 'A',
+          resourceLabel: '예방점검 직접 확정',
+        });
+      }
+
       if (stage === 'R' && refNo) {
         await this.requireConfirmedPlan(
           queryRunner.manager,

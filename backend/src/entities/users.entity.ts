@@ -14,6 +14,9 @@ export class User extends BaseEntity {
   @Column({ length: 100 })
   name!: string;
 
+  @Column({ name: 'avatar_key', type: 'varchar', length: 50, default: 'user-blue' })
+  avatarKey!: string;
+
   @Column({ name: 'password_hash', length: 256 })
   passwordHash!: string;
 

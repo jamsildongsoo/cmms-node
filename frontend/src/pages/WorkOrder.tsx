@@ -61,6 +61,7 @@ export default function WorkOrder() {
   const [approvalId, setApprovalId] = useState('');
   const [createdAt, setCreatedAt] = useState('');
   const [createdBy, setCreatedBy] = useState('');
+  const [recordStatus, setRecordStatus] = useState('T');
 
   const [workItems, setWorkItems] = useState<WorkOrderItemModel[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -75,7 +76,9 @@ export default function WorkOrder() {
   const canUpdate = permission?.U === 'Y';
   const canDelete = permission?.D === 'Y';
   const canDirectConfirm = permission?.A === 'Y';
-  const canSave = woNo ? canUpdate : canCreate;
+  const canEditCurrent = !woNo
+    ? canCreate
+    : canUpdate || (recordStatus === 'T' && createdBy === user?.id);
 
   const fetchData = async () => {
     try {
@@ -131,6 +134,7 @@ export default function WorkOrder() {
     setApprovalId('');
     setCreatedAt('');
     setCreatedBy('');
+    setRecordStatus('T');
     setWorkItems([]);
     setIsFormOpen(true);
   };
@@ -162,6 +166,7 @@ export default function WorkOrder() {
       setApprovalId(w.status === 'R' ? '' : (w.approvalId || ''));
       setCreatedAt(w.createdAt || '');
       setCreatedBy(w.createdBy || '');
+      setRecordStatus(w.status || 'T');
       setWorkItems(data.workItems || []);
 
       setIsFormOpen(true);
@@ -542,7 +547,7 @@ export default function WorkOrder() {
                           tone="success"
                         />
                       )}
-                      {canUpdate && ['T', 'R'].includes(wo.status) && (
+                      {(canUpdate || (wo.status === 'T' && wo.createdBy === user?.id)) && ['T', 'R'].includes(wo.status) && (
                         <ListIconButton
                           onClick={() => handleOpenEdit(wo)}
                           label="상세/수정"
@@ -550,7 +555,7 @@ export default function WorkOrder() {
                           tone="accent"
                         />
                       )}
-                      {canDelete && wo.status === 'T' && (
+                      {(canDelete || (wo.status === 'T' && wo.createdBy === user?.id)) && wo.status === 'T' && (
                           <ListIconButton
                             onClick={() => handleDelete(wo)}
                             label="삭제"
@@ -841,21 +846,21 @@ export default function WorkOrder() {
                 >
                   닫기
                 </button>
-                {canSave && <button
+                {canEditCurrent && <button
                   onClick={() => handleSave('T')}
                   disabled={isLoading}
                   className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-750 rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
                 >
                   임시 저장
                 </button>}
-                {canSave && <button
+                {canEditCurrent && <button
                   onClick={() => handleSave('P')}
                   disabled={isLoading}
                   className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer border-0 disabled:opacity-50"
                 >
                   결재 상신
                 </button>}
-                {canSave && canDirectConfirm && (
+                {canEditCurrent && canDirectConfirm && (
                   <button
                     onClick={() => handleSave('S')}
                     disabled={isLoading}

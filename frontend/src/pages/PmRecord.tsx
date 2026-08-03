@@ -67,6 +67,7 @@ export default function PmRecord() {
   const [refNo, setRefNo] = useState('');
   const [createdAt, setCreatedAt] = useState('');
   const [createdBy, setCreatedBy] = useState('');
+  const [recordStatus, setRecordStatus] = useState('T');
   const [checkItems, setCheckItems] = useState<PmRecordItem[]>([]);
   const [pendingAction, setPendingAction] = useState<{ type: 'close' | 'delete'; record: PmRecord } | null>(null);
 
@@ -82,7 +83,9 @@ export default function PmRecord() {
   const canUpdate = permission?.U === 'Y';
   const canDelete = permission?.D === 'Y';
   const canDirectConfirm = permission?.A === 'Y';
-  const canSave = pmNo ? canUpdate : canCreate;
+  const canEditCurrent = !pmNo
+    ? canCreate
+    : canUpdate || (recordStatus === 'T' && createdBy === user?.id);
 
   const normalizeRecord = (record: PmRecord): PmRecord => ({
     ...record,
@@ -160,6 +163,7 @@ export default function PmRecord() {
     setRefNo('');
     setCreatedAt('');
     setCreatedBy('');
+    setRecordStatus('T');
     setCheckItems([]);
   };
 
@@ -197,6 +201,7 @@ export default function PmRecord() {
       setRefNo(r.refNo || '');
       setCreatedAt(r.createdAt || '');
       setCreatedBy(r.createdBy || '');
+      setRecordStatus(r.status || 'T');
       setCheckItems(detail.checkItems || []);
       setIsFormOpen(true);
     } catch (err) {
@@ -746,7 +751,7 @@ export default function PmRecord() {
                               tone="warning"
                             />
                           )}
-                          {canUpdate && ['T', 'R'].includes(rec.status) && (
+                          {(canUpdate || (rec.status === 'T' && rec.createdBy === user?.id)) && ['T', 'R'].includes(rec.status) && (
                             <ListIconButton
                               onClick={() => loadRecordIntoForm(rec)}
                               label="상세/수정"
@@ -754,7 +759,7 @@ export default function PmRecord() {
                               tone="accent"
                             />
                           )}
-                          {canDelete && rec.status === 'T' && (
+                          {(canDelete || (rec.status === 'T' && rec.createdBy === user?.id)) && rec.status === 'T' && (
                               <ListIconButton
                                 onClick={() => setPendingAction({ type: 'delete', record: rec })}
                                 label="삭제"
@@ -1073,21 +1078,21 @@ export default function PmRecord() {
                 >
                   닫기
                 </button>
-                {canSave && <button
+                {canEditCurrent && <button
                   onClick={() => handleSave('T')}
                   disabled={isLoading}
                   className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-750 rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
                 >
                   임시 저장
                 </button>}
-                {canSave && <button
+                {canEditCurrent && <button
                   onClick={() => handleSave('P')}
                   disabled={isLoading}
                   className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer border-0 disabled:opacity-50"
                 >
                   결재 상신
                 </button>}
-                {canSave && canDirectConfirm && (
+                {canEditCurrent && canDirectConfirm && (
                   <button
                     onClick={() => handleSave('S')}
                     disabled={isLoading}

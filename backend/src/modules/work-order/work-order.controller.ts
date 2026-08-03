@@ -18,7 +18,7 @@ import {
   WorkOrderResponseDto,
 } from './dto/work-order.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { PermissionGuard, Permission } from '../../common/guards/permission.guard';
+import { PermissionGuard, Permission, WorkflowPermission } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
@@ -53,12 +53,12 @@ export class WorkOrderController {
   async saveWorkOrder(
     @Body() request: SaveWorkOrderDto,
   ): Promise<WorkOrderResponseDto> {
-    const { companyId, userId } = getTenantContext();
-    return this.workOrderService.saveWorkOrder(companyId, request, userId, 'create');
+    const { companyId, userId, roleId } = getTenantContext();
+    return this.workOrderService.saveWorkOrder(companyId, request, userId, 'create', roleId);
   }
 
   @Put(':id')
-  @Permission(AppModule.WO, 'U')
+  @WorkflowPermission()
   async updateWorkOrder(
     @Param('id') id: string,
     @Body() request: SaveWorkOrderDto,
@@ -70,7 +70,7 @@ export class WorkOrderController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Permission(AppModule.WO, 'D')
+  @WorkflowPermission()
   async deleteWorkOrder(
     @Param('id') id: string,
     @Query('plantId') plantId: string,

@@ -15,10 +15,12 @@ import { RoleDetail } from '../../entities/role-detail.entity';
 
 export type { PermAction };
 
+// 컨트롤러와 메서드에 권한 검사 조건을 메타데이터로 등록한다.
 export const PERMISSION_KEY = 'permission';
 export const Permission = (module: AppModule, action: PermAction) =>
   SetMetadata(PERMISSION_KEY, { module, action });
 
+// 아래 메타데이터는 Guard의 기본 deny-all 정책에서 허용되는 특수 API를 표시한다.
 export const REF_PERMISSION_KEY = 'ref_permission';
 export const RefPermission = () => SetMetadata(REF_PERMISSION_KEY, true);
 
@@ -44,6 +46,10 @@ export class PermissionGuard implements CanActivate {
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
+    // 권한 메타데이터 종류:
+    // - @Permission: 역할별 모듈 권한(C/R/U/D/A)을 이 Guard에서 검사
+    // - @WorkflowPermission: 결재선·소유자·문서상태를 서비스에서 검사
+    // - @RefPermission: 참조 조회 API. 세부 접근 조건은 서비스에서 검사
     const perm = this.reflector.getAllAndOverride<{
       module: string;
       action: PermAction;
@@ -61,7 +67,7 @@ export class PermissionGuard implements CanActivate {
       [ctx.getHandler(), ctx.getClass()],
     );
 
-    // deny-all 기본 원칙: 모든 API는 명시적 권한 metadata 또는 허용 예외를 가져야 한다.
+    // 기본은 deny-all이다. 명시적인 권한이 없는 API는 허용된 예외만 통과시킨다.
     if (!perm) {
       if (isRefApi || isWorkflowApi) return true;
       if (isSystemApi) {
@@ -95,7 +101,7 @@ export class PermissionGuard implements CanActivate {
       throw new ForbiddenException('요청을 처리할 사용자 권한 정보가 없습니다.');
     }
 
-    // SYSTEM 역할은 모듈 매트릭스를 우회하되, SYSTEM 회사/사용자 재검증을 반드시 거친다.
+    // SYSTEM 역할은 모듈 매트릭스를 우회하지만, 실제 SYSTEM 사용자 여부는 DB로 재검증한다.
     if (user.roleId.toUpperCase() === 'SYSTEM') {
       if (user.companyId !== 'SYSTEM') {
         throw new ForbiddenException('SYSTEM 역할의 회사 정보가 올바르지 않습니다.');
@@ -114,7 +120,7 @@ export class PermissionGuard implements CanActivate {
       return true;
     }
 
-    // 기본 권한 체크
+    // 일반 사용자는 회사·역할·모듈·행위 조합으로 RoleDetail을 검사한다.
     const hasAction = await this.checkMatrix(
       user.companyId, user.roleId, perm.module, perm.action,
     );
@@ -129,6 +135,7 @@ export class PermissionGuard implements CanActivate {
     return new ForbiddenException(`${this.moduleLabel(module)} ${ACTION_LABEL[action]} 권한이 없습니다.`);
   }
 
+  // 내부 모듈 코드를 사용자에게 표시할 한글 모듈명으로 변환한다.
   private moduleLabel(module: string): string {
     return AppModuleLabel[module as AppModule] ?? module;
   }
@@ -136,10 +143,13 @@ export class PermissionGuard implements CanActivate {
   private async checkMatrix(
     companyId: string, roleId: string, module: string, action: PermAction,
   ): Promise<boolean> {
+    // 회사·역할·모듈에 해당하는 권한 행을 조회한 뒤 요청 행위의 허용 여부를 확인한다.
     const permission = await this.dataSource.getRepository(RoleDetail).findOne({
       where: { companyId, roleId, moduleDetail: module },
     });
     if (!permission) return false;
+
+    // 행위 코드(C/R/U/D/A)를 RoleDetail의 실제 권한 컬럼으로 매핑한다.
     const actionProperty: Record<PermAction, keyof RoleDetail> = {
       C: 'permC',
       R: 'permR',

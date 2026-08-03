@@ -69,6 +69,7 @@ export class SignUpRequestDto {
   @IsString()
   @MaxLength(100)
   title?: string;
+
 }
 
 export class PasswordChangeRequestDto {
@@ -108,4 +109,9 @@ export class UserUpdateRequestDto {
   @IsString()
   @MaxLength(100)
   title?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  avatarKey?: string;
 }

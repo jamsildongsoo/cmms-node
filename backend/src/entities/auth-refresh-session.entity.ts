@@ -29,10 +29,10 @@ export class AuthRefreshSession {
   @Column({ name: 'revoked_at', type: 'timestamptz', nullable: true })
   revokedAt!: Date | null;
 
-  @Column({ name: 'ip_address', length: 100, nullable: true })
+  @Column({ name: 'ip_address', type: 'varchar', length: 100, nullable: true })
   ipAddress!: string | null;
 
-  @Column({ name: 'user_agent', length: 500, nullable: true })
+  @Column({ name: 'user_agent', type: 'varchar', length: 500, nullable: true })
   userAgent!: string | null;
 
   @Column({ name: 'created_at', type: 'timestamptz' })
