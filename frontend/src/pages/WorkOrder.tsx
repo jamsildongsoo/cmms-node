@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
 import { useAuthStore } from '../store/useAuthStore';
+import { hasModuleManage } from '../utils/moduleAccess';
 import { getCommonStatusLabel as getStatusLabel } from '../constants/status';
 import { APP_MODULE } from '../constants/module';
 import { formatDateOnly, formatPrintStamp, todayLocal } from '../utils/datetime';
@@ -32,6 +33,7 @@ export default function WorkOrder() {
   const [activeSubTab, setActiveSubTab] = useState<'plan' | 'history'>('plan');
   const [searchType, setSearchType] = useState<'id' | 'title' | 'worker'>('id');
   const [searchValue, setSearchValue] = useState('');
+  const [tempOnly, setTempOnly] = useState(false);
 
   const [workOrders, setWorkOrders] = useState<WorkOrderModel[]>([]);
   const [equipments, setEquipments] = useState<{ id: string; name: string; plantId: string }[]>([]);
@@ -71,11 +73,9 @@ export default function WorkOrder() {
     content: RichTextDocument;
   } | null>(null);
 
-  const permission = user?.permissions?.[APP_MODULE.WO];
-  const canCreate = permission?.C === 'Y';
-  const canUpdate = permission?.U === 'Y';
-  const canDelete = permission?.D === 'Y';
-  const canDirectConfirm = permission?.A === 'Y';
+  const canCreate = hasModuleManage(user?.moduleAccess, APP_MODULE.WO);
+  const canUpdate = canCreate;
+  const canDelete = canCreate;
   const canEditCurrent = !woNo
     ? canCreate
     : canUpdate || (recordStatus === 'T' && createdBy === user?.id);
@@ -87,6 +87,7 @@ export default function WorkOrder() {
         params.set('searchType', searchType);
         params.set('searchValue', searchValue);
       }
+      if (tempOnly) params.set('tempOnly', 'Y');
       // 폼 선택값 구성을 위한 시스템 참조값 조회다. 작업지시 목록 R 권한을 대체하지 않는다.
       const [loadedWorkOrders, loadedEquipments, loadedDepartments, loadedUsers] = await Promise.all([
         workOrderApi.getAll(params, activePlantId),
@@ -112,7 +113,7 @@ export default function WorkOrder() {
     const timer = window.setTimeout(() => { void fetchData(); }, 0);
     return () => window.clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePlantId]);
+  }, [activePlantId, activeSubTab, tempOnly]);
 
   const handleOpenCreate = () => {
     setWoNo('');
@@ -144,11 +145,12 @@ export default function WorkOrder() {
     try {
       const data = await workOrderApi.getDetail(wo.plantId, wo.id);
       const w = data.workOrder;
+      const isRejected = w.status === 'R';
 
       const matchedEq = equipments.find(e => e.id === w.equipmentId);
       setEquipmentName(matchedEq ? matchedEq.name : w.equipmentId);
 
-      setWoNo(w.id);
+      setWoNo(isRejected ? '' : w.id);
       setPlantId(w.plantId);
       setEquipmentId(w.equipmentId);
       setTitle(w.title);
@@ -163,10 +165,10 @@ export default function WorkOrder() {
       setRemarks(w.remarks || '');
       setRefNo(w.refNo || '');
       setRefModule(w.refModule || '');
-      setApprovalId(w.status === 'R' ? '' : (w.approvalId || ''));
-      setCreatedAt(w.createdAt || '');
-      setCreatedBy(w.createdBy || '');
-      setRecordStatus(w.status || 'T');
+      setApprovalId('');
+      setCreatedAt(isRejected ? '' : (w.createdAt || ''));
+      setCreatedBy(isRejected ? '' : (w.createdBy || ''));
+      setRecordStatus(isRejected ? 'T' : (w.status || 'T'));
       setWorkItems(data.workItems || []);
 
       setIsFormOpen(true);
@@ -210,7 +212,7 @@ export default function WorkOrder() {
     }));
   };
 
-  const handleSave = async (submitStatus: 'T' | 'S' | 'P') => {
+  const handleSave = async (submitStatus: 'T' | 'P') => {
     if (!title.trim()) {
       toast.error('지시명을 입력해주세요.');
       return;
@@ -272,7 +274,7 @@ export default function WorkOrder() {
         });
         return;
       }
-      toast.success(submitStatus === 'T' ? '임시저장 되었습니다.' : '작업지시가 직접 확정 완료되었습니다.');
+      toast.success('임시저장 되었습니다.');
       setIsFormOpen(false);
       fetchData();
     } catch (err) {
@@ -302,7 +304,7 @@ export default function WorkOrder() {
   };
 
   const openResultFromPlan = async (plan: WorkOrderModel) => {
-    if (plan.status !== 'S' && plan.status !== 'C') {
+    if (plan.status !== 'C') {
       toast.error('확정된 작업지시 계획에 대해서만 실적을 입력할 수 있습니다.');
       return;
     }
@@ -358,6 +360,7 @@ export default function WorkOrder() {
       createRoot(container).render(
         <PrintWindowLayout printWindow={printWindow} contentClassName="max-w-[180mm]">
           <WorkOrderPrint
+            stepStage={detail.stepStage === 'R' ? 'R' : 'P'}
             woNo={detail.id}
             title={detail.title}
             status={detail.status}
@@ -393,17 +396,17 @@ export default function WorkOrder() {
       title: '작업지시 현황',
       rows: printRows,
       getRowKey: (wo) => wo.id,
-      companyName: user?.companyName || user?.companyId || 'CMMS',
+      companyName: user?.companyId || 'CMMS',
       printerName: user?.name || '-',
       printedAt: stamp,
       columns: [
-        { header: '지시번호', render: (wo) => wo.id, className: 'font-mono' },
-        { header: '지시명', render: (wo) => wo.title },
-        { header: '설비명', render: (wo) => equipments.find((item) => item.id === wo.equipmentId)?.name || wo.equipmentId },
-        { header: '작업유형', render: (wo) => getWoTypeLabel(wo.woTypeCode) },
+        { header: '문서번호', render: (wo) => wo.id, className: 'font-mono' },
+        { header: '제목', render: (wo) => wo.title },
+        { header: '대상설비', render: (wo) => equipments.find((item) => item.id === wo.equipmentId)?.name || wo.equipmentId },
+        { header: '유형', render: (wo) => getWoTypeLabel(wo.woTypeCode) },
         { header: '담당자', render: (wo) => usersList.find((item) => item.id === wo.workerId)?.name || wo.workerId || '-' },
         { header: '계획/수행일자', render: (wo) => wo.workDate || '-' },
-        { header: '결재상태', render: (wo) => getStatusLabel(wo.status) },
+        { header: '상태', render: (wo) => getStatusLabel(wo.status) },
       ],
     });
     if (!opened) toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
@@ -490,6 +493,13 @@ export default function WorkOrder() {
           >
             검색
           </button>
+          <button
+            type="button"
+            onClick={() => setTempOnly((current) => !current)}
+            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold cursor-pointer ${tempOnly ? 'border-blue-500 bg-blue-600 text-white' : 'border-slate-800 bg-slate-950 text-slate-400'}`}
+          >
+            임시저장 {tempOnly ? 'ON' : 'OFF'}
+          </button>
         </div>
       </div>
 
@@ -504,13 +514,13 @@ export default function WorkOrder() {
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-900 text-slate-400 border-b border-slate-800 select-none print:bg-slate-100 print:text-slate-800 print:border-slate-300">
-                <th className="p-3 font-semibold">지시번호</th>
-                <th className="p-3 font-semibold">지시명</th>
-                <th className="p-3 font-semibold">설비명</th>
-                <th className="p-3 font-semibold">작업유형</th>
+                <th className="p-3 font-semibold">문서번호</th>
+                <th className="p-3 font-semibold">제목</th>
+                <th className="p-3 font-semibold">대상설비</th>
+                <th className="p-3 font-semibold">유형</th>
                 <th className="p-3 font-semibold">담당자</th>
                 <th className="p-3 font-semibold">계획/수행일자</th>
-                <th className="p-3 font-semibold">결재상태</th>
+                <th className="p-3 font-semibold">상태</th>
                 <th className="p-3 font-semibold text-right print:hidden">작업</th>
               </tr>
             </thead>
@@ -539,7 +549,7 @@ export default function WorkOrder() {
                       <ListBadge>{getStatusLabel(wo.status)}</ListBadge>
                     </td>
                     <td className="p-3 text-right space-x-2 print:hidden">
-                      {canCreate && activeSubTab === 'plan' && (wo.status === 'S' || wo.status === 'C') && (
+                      {canCreate && activeSubTab === 'plan' && wo.status === 'C' && (
                         <ListIconButton
                           onClick={() => openResultFromPlan(wo)}
                           label="실적 입력"
@@ -860,15 +870,6 @@ export default function WorkOrder() {
                 >
                   결재 상신
                 </button>}
-                {canEditCurrent && canDirectConfirm && (
-                  <button
-                    onClick={() => handleSave('S')}
-                    disabled={isLoading}
-                    className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg py-2 px-5 text-xs font-semibold transition-all cursor-pointer border-0 disabled:opacity-50 shadow-md shadow-emerald-950/20"
-                  >
-                    직접 확정 (Save)
-                  </button>
-                )}
               </div>
             </div>
           </div>

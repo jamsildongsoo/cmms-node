@@ -31,6 +31,7 @@ export class TenantInterceptor implements NestInterceptor {
       userId: user.userId,
       roleId: user.roleId,
       departmentId: user.departmentId ?? null,
+      activePlantId: req.headers['x-active-plant-id']?.trim() || null,
     };
 
     return new Observable((subscriber) => {

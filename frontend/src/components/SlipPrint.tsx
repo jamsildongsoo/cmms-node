@@ -35,7 +35,7 @@ export default function SlipPrint(p: SlipPrintProps) {
       <section className="border-y-2 border-black mb-5 text-[10px]">
         <dl className="grid grid-cols-2">
           <div className="grid grid-cols-[72px_1fr] gap-2 border-r border-b border-gray-400 p-3">
-            <dt className="font-semibold">전표번호</dt>
+            <dt className="font-semibold">문서번호</dt>
             <dd className="font-mono">{p.docNo || '-'}</dd>
           </div>
           <div className="grid grid-cols-[72px_1fr] gap-2 border-b border-gray-400 p-3">
@@ -47,13 +47,21 @@ export default function SlipPrint(p: SlipPrintProps) {
             <dd>{p.departmentName || '-'}</dd>
           </div>
           <div className="grid grid-cols-[72px_1fr] gap-2 p-3">
-            <dt className="font-semibold">담당자명</dt>
+            <dt className="font-semibold">작성자</dt>
             <dd>{p.managerName || '-'}</dd>
+          </div>
+          <div className="grid grid-cols-[72px_1fr] gap-2 border-r border-gray-400 p-3">
+            <dt className="font-semibold">전표 유형</dt>
+            <dd>{p.txTypeCode === 'IN' ? '입고' : p.txTypeCode === 'OUT' ? '출고' : p.txTypeCode === 'ADJ' ? '조정' : '이동'}</dd>
+          </div>
+          <div className="grid grid-cols-[72px_1fr] gap-2 p-3">
+            <dt className="font-semibold">처리창고</dt>
+            <dd>{Array.from(new Set(p.items.map((item) => item.warehouseName))).join(', ') || '-'}</dd>
           </div>
         </dl>
       </section>
 
-      <PrintSection title="요청 자재 목록">
+      <PrintSection title="자재 목록">
         <PrintTable
           columns={['No', '창고', '자재코드', '자재명', '수량', '단위']}
           rows={p.items.map((item, index) => [

@@ -1,5 +1,7 @@
 export interface PurchaseRequest {
   id: string;
+  purchaseRequestId?: string;
+  purchaseOrderId?: string;
   plantId: string;
   warehouseId: string;
   requesterId: string;
@@ -21,7 +23,7 @@ export interface PurchaseRequest {
 }
 
 export interface PurchaseRequestItem {
-  lineNo?: number;
+  itemNo?: number;
   inventoryId: string;
   qty: number;
   unit?: string;
@@ -32,6 +34,16 @@ export interface PurchaseRequestItem {
 export interface PurchaseRequestDetail {
   header: PurchaseRequest;
   items: PurchaseRequestItem[];
+}
+
+export interface PurchaseOrderAllocation {
+  docId: string;
+  docItemNo: number;
+  prId: string;
+  prItemNo: number;
+  warehouseId: string;
+  inventoryId: string;
+  allocatedQty: string | number;
 }
 
 export interface PlaceOrderRequest {
@@ -49,13 +61,13 @@ export interface ReceiveRequest {
 }
 
 export interface PurchaseReceiveLine {
-  lineNo: number;
+  itemNo: number;
   qty: number;
   unitPrice?: number | null;
 }
 
 export interface PurchaseReceiveModalLine {
-  lineNo: number;
+  itemNo: number;
   inventoryId: string;
   qty: number;
   unit?: string;
@@ -82,7 +94,7 @@ export interface PurchaseReceiptRequestSummary extends PurchaseReceiptRequest {
 }
 
 export interface PurchaseReceiptItem {
-  lineNo: number;
+  itemNo: number;
   inventoryId: string;
   qty: number;
   receivedQty: number;
@@ -95,7 +107,7 @@ export interface PurchaseReceiptItem {
 export interface PurchaseReceiptDetail {
   header: PurchaseReceiptRequest;
   items: Array<{
-    lineNo: number;
+    itemNo: number;
     inventoryId: string;
     qty: number | string;
     receivedQty?: number | string | null;

@@ -30,7 +30,6 @@ import {
 } from 'lucide-react';
 import ListBadge from '../components/ListBadge';
 import ListIconButton from '../components/ListIconButton';
-import { APP_MODULE } from '../constants/module';
 import { requestConfirmation } from '../utils/userActionDialog';
 import { referenceApi } from '../features/mdm/reference.api';
 
@@ -43,10 +42,10 @@ const loadApprovalPageData = (inbox: ApprovalInbox) =>
 
 export default function Approval() {
   const user = useAuthStore((s) => s.user);
-  const approvalPermission = user?.permissions?.[APP_MODULE.APR];
-  const canCreate = approvalPermission?.C === 'Y';
-  const canUpdate = approvalPermission?.U === 'Y';
-  const canDelete = approvalPermission?.D === 'Y';
+  // APR은 모듈 권한 없이 로그인·결재선·문서상태로 서버가 판정한다.
+  const canCreate = true;
+  const canUpdate = true;
+  const canDelete = true;
   const [activeTab, setActiveTab] = useState<ApprovalInbox>('pending');
 
   const [approvals, setApprovals] = useState<ApprovalDocument[]>([]);

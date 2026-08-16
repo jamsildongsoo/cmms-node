@@ -7,11 +7,12 @@
      · role          SYSTEM/SYSTEM     (시스템관리자, multi_plant='Y')
      · users         SYSTEM/system     (bcryptjs 해시, role_id='SYSTEM')
 
-   이후 로그인 → 화면의 '회사 생성'(POST /api/mdm/companies, SYSTEM 권한)으로
-   실제 회사를 만들면 createCompany 가 ADMIN/MANAGER/PURCHASER/USER
+   이후 로그인 → 화면의 '회사 생성'(POST /api/system/companies, SYSTEM 권한)으로
+   실제 회사를 만들면 createCompany 가 ADMIN/MANAGER/USER
    롤·권한·관리자·기본 공통코드를 자동 시드한다.
 
    실행:  cd backend && node scripts/seed-system.js [비밀번호]
+   초기화: cd backend && node scripts/seed-system.js --reset [비밀번호]
           (비밀번호 미지정 시 개발 기본값 'init1234')
    전제:  백엔드를 한 번 기동(synchronize)해 테이블이 생성된 상태여야 함.
    재실행: ON CONFLICT DO NOTHING — 여러 번 실행해도 안전(중복 미삽입).
@@ -100,7 +101,8 @@ function buildConnection(env) {
 }
 
 async function main() {
-  const password = process.argv[2] || 'init1234';
+  const reset = process.argv[2] === '--reset';
+  const password = process.argv[reset ? 3 : 2] || 'init1234';
   const env = loadEnv();
   const conn = buildConnection(env);
   const client = new Client(conn);
@@ -122,7 +124,35 @@ async function main() {
     );
   }
 
+  if (reset) {
+    const hash = await bcrypt.hash(password, 12);
+    const result = await client.query(
+      `UPDATE users
+          SET password_hash = $1,
+              password_changed_at = CURRENT_TIMESTAMP,
+              must_change_password = 'Y',
+              failed_login_count = 0,
+              account_locked_until = NULL,
+              updated_by = $2
+        WHERE company_id = 'SYSTEM'
+          AND id = 'system'
+          AND delete_yn = 'N'`,
+      [hash, 'RESET'],
+    );
+    await client.end();
+    if (result.rowCount !== 1) {
+      throw new Error(
+        'SYSTEM/system 계정이 없습니다. 2번 메뉴로 최초 계정을 먼저 생성하세요.',
+      );
+    }
+    console.log('✅ SYSTEM 비밀번호 초기화 완료');
+    console.log('   로그인 → 회사코드: SYSTEM   아이디: system');
+    console.log('   최초 로그인 후 새 비밀번호로 변경해야 합니다.');
+    return;
+  }
+
   const OP = 'SEED';
+  let userCreated = false;
   await client.query('BEGIN');
   try {
     // 회사
@@ -143,14 +173,16 @@ async function main() {
 
     // 관리자 계정 (bcryptjs 해시 — 앱과 동일 라이브러리)
     const hash = await bcrypt.hash(password, 12);
-    await client.query(
+    const userResult = await client.query(
       `INSERT INTO users (
          company_id, id, name, password_hash, use_yn, role_id,
          must_change_password, failed_login_count, created_by, updated_by, delete_yn
        ) VALUES ('SYSTEM', 'system', '시스템관리자', $1, 'Y', 'SYSTEM', 'Y', 0, $2, $2, 'N')
-       ON CONFLICT (company_id, id) DO NOTHING`,
+       ON CONFLICT (company_id, id) DO NOTHING
+       RETURNING id`,
       [hash, OP],
     );
+    userCreated = userResult.rowCount === 1;
 
     await client.query('COMMIT');
   } catch (e) {
@@ -160,10 +192,15 @@ async function main() {
     await client.end();
   }
 
-  console.log('✅ SYSTEM 부트스트랩 시드 완료 (재실행 안전 / 중복 미삽입)');
-  console.log('   로그인 →  회사코드: SYSTEM   아이디: system   비밀번호: ' + password);
+  if (userCreated) {
+    console.log('✅ SYSTEM 부트스트랩 계정 신규 생성 완료');
+  } else {
+    console.log('✅ SYSTEM 부트스트랩 완료 (기존 SYSTEM/system 계정 유지)');
+    console.log('   기존 계정의 비밀번호는 변경되지 않았습니다. 변경하려면 3번을 사용하세요.');
+  }
+  console.log('   로그인 →  회사코드: SYSTEM   아이디: system');
   console.log('   이후 화면의 [회사 생성]으로 실제 테스트 회사를 만들면');
-  console.log('   ADMIN/MANAGER/PURCHASER/USER 롤·권한·관리자가 자동 생성됩니다.');
+  console.log('   ADMIN/MANAGER/USER 롤·권한·관리자가 자동 생성됩니다.');
 }
 
 main().catch((e) => {

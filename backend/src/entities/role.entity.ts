@@ -12,6 +12,7 @@ export class Role extends BaseEntity {
   @Column({ name: 'role_name', length: 100 })
   roleName!: string;
 
-  @Column({ name: 'multi_plant', length: 1, default: 'N' })
+  @Column({ name: 'multi_plant', type: 'char', length: 1, default: 'N' })
   multiPlant!: string;
+
 }

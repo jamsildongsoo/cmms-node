@@ -5,17 +5,18 @@ import { Board } from '../../entities/board.entity';
 import { FileAttachment } from '../../entities/file-attachment.entity';
 import { PmRecord } from '../../entities/pm-record.entity';
 import { PurchaseRequest } from '../../entities/purchase-request.entity';
-import { RoleDetail } from '../../entities/role-detail.entity';
 import { User } from '../../entities/users.entity';
 import { WorkOrder } from '../../entities/work-order.entity';
 import { WorkPermit } from '../../entities/work-permit.entity';
 import { AppModule } from '../constants/module.constants';
 import type { PermAction } from '../constants/permission.constants';
 import { DocStatus } from '../constants/status.constants';
+import { DepartmentAccessService } from './department-access.service';
 
 interface ModulePermissionParams {
   companyId: string;
   roleId: string;
+  userId?: string;
   module: AppModule;
   action: PermAction;
 }
@@ -27,6 +28,7 @@ interface AssertModulePermissionParams extends ModulePermissionParams {
 interface AnyModulePermissionParams {
   companyId: string;
   roleId: string;
+  userId?: string;
   module: AppModule;
   actions: PermAction[];
   message?: string;
@@ -58,6 +60,7 @@ interface ApprovalReadParams {
 interface OwnTempOrPermissionParams {
   companyId: string;
   roleId: string;
+  userId?: string;
   module: AppModule;
   status: string | null | undefined;
   ownerId: string | null | undefined;
@@ -93,36 +96,24 @@ const ACTION_LABEL: Record<PermAction, string> = {
 
 @Injectable()
 export class PermissionPolicyService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly departmentAccessService: DepartmentAccessService,
+  ) {}
 
-  async hasModulePermission(params: ModulePermissionParams): Promise<boolean> {
-    // 일반 모듈 권한은 role-detail 매트릭스의 C/R/U/D/A 플래그로만 판정한다.
-    const permission = await this.dataSource.getRepository(RoleDetail).findOne({
-      where: {
-        companyId: params.companyId,
-        roleId: params.roleId,
-        moduleDetail: params.module,
-      },
-    });
-    if (!permission) return false;
-
-    const actionProperty: Record<PermAction, keyof RoleDetail> = {
-      C: 'permC',
-      R: 'permR',
-      U: 'permU',
-      D: 'permD',
-      A: 'permA',
-    };
-    return permission[actionProperty[params.action]] === 'Y';
+  async hasActionPermission(params: ModulePermissionParams): Promise<boolean> {
+    if (!params.userId) return false;
+    return this.departmentAccessService.hasAction(
+      params.companyId,
+      params.userId,
+      params.module,
+      params.action,
+    );
   }
 
-  async assertModulePermission(params: AssertModulePermissionParams): Promise<void> {
+  async assertActionPermission(params: AssertModulePermissionParams): Promise<void> {
     // 일반 모듈 권한 검사 진입점이다.
-    // SYSTEM 사용자는 RoleDetail을 보지 않고 별도 SYSTEM 검증만 수행한다.
-    if (await this.isSystemAdmin(params)) return;
-
-    // 일반 사용자는 요청한 모듈/행위의 단일 권한 보유 여부로 판정한다.
-    const allowed = await this.hasModulePermission(params);
+    const allowed = await this.hasActionPermission(params);
     if (!allowed) {
       if (!params.resourceLabel) {
         throw new ForbiddenException('권한이 없습니다.');
@@ -133,14 +124,13 @@ export class PermissionPolicyService {
     }
   }
 
-  async assertAnyModulePermission(params: AnyModulePermissionParams): Promise<void> {
+  async assertAnyActionPermission(params: AnyModulePermissionParams): Promise<void> {
     // 여러 행위 중 하나라도 허용되면 통과시키는 any-of 규칙이다.
-    if (await this.isSystemAdmin(params)) return;
-
     const allowed = await Promise.all(
-      params.actions.map((action) => this.hasModulePermission({
+      params.actions.map((action) => this.hasActionPermission({
         companyId: params.companyId,
         roleId: params.roleId,
+        userId: params.userId,
         module: params.module,
         action,
       })),
@@ -169,21 +159,9 @@ export class PermissionPolicyService {
   }
 
   async assertCanMutateBoard(params: BoardMutationParams): Promise<void> {
-    // 게시판은 본인 글/댓글이면 허용하고, 타인 글/댓글이면 BRD U/D 권한으로 판정한다.
+    // 컨트롤러에서 BRD U/D 권한을 확인한 뒤, 게시글은 작성자 본인만 수정·삭제할 수 있다.
     if (params.ownerId === params.operatorId) return;
-
-    const hasPermission = await this.hasModulePermission({
-      companyId: params.companyId,
-      roleId: params.roleId,
-      module: AppModule.BRD,
-      action: params.action,
-    });
-    if (!hasPermission) {
-      const actionLabel = params.action === 'U' ? '수정' : '삭제';
-      throw new ForbiddenException(
-        `본인 게시글이 아니거나 게시판 ${actionLabel} 권한이 없습니다.`,
-      );
-    }
+    throw new ForbiddenException('본인이 작성한 게시글만 수정·삭제할 수 있습니다.');
   }
 
   assertCanReadApproval(params: ApprovalReadParams): void {
@@ -228,9 +206,10 @@ export class PermissionPolicyService {
     }
 
     // 그 외 조회는 원문서 모듈의 R 권한을 따른다.
-    await this.assertAnyModulePermission({
+    await this.assertAnyActionPermission({
       companyId: params.companyId,
       roleId: params.roleId,
+      userId: params.userId,
       module: access.module,
       actions: ['R'],
       message: '첨부파일 조회 권한이 없습니다.',
@@ -259,9 +238,10 @@ export class PermissionPolicyService {
     }
 
     // 타인 문서 첨부 수정/삭제는 원문서 모듈의 U/D 권한을 따른다.
-    await this.assertAnyModulePermission({
+    await this.assertAnyActionPermission({
       companyId: params.companyId,
       roleId: params.roleId,
+      userId: params.userId,
       module: access.module,
       actions: [params.action],
       message: '첨부파일 수정 권한이 없습니다.',
@@ -271,22 +251,10 @@ export class PermissionPolicyService {
   private async assertCanMutateOwnTempOrPermission(
     params: OwnTempOrPermissionParams & { action: 'U' | 'D' },
   ): Promise<boolean> {
-    // 문서 수정·삭제 규칙:
-    // 1) 본인이 작성한 임시저장(T) 문서는 U/D 권한 없이 허용
-    // 2) 그 외 문서는 해당 모듈의 U 또는 D 권한 필요
-    // 반환값은 호출부가 소유자 검사를 추가로 수행해야 하는지 나타낸다.
-    const isOwnTemp = params.status === DocStatus.TEMP && params.ownerId === params.operatorId;
-    if (isOwnTemp) return true;
-
-    // 그 외 경우에는 일반 모듈 권한 규칙을 그대로 적용한다.
-    await this.assertModulePermission({
-      companyId: params.companyId,
-      roleId: params.roleId,
-      module: params.module,
-      action: params.action,
-      resourceLabel: params.resourceLabel,
-    });
-    return false;
+    // 모듈 U/D는 PermissionGuard에서 먼저 확인한다.
+    // 여기서는 문서 상태와 소유권만 확인하며, 반려문서는 기존 문서를 직접 수정하지 않는다.
+    if (params.status === DocStatus.TEMP && params.ownerId === params.operatorId) return true;
+    throw new ForbiddenException('본인이 작성한 임시저장 문서만 수정·삭제할 수 있습니다.');
   }
 
   private async resolveAttachmentDocumentAccess(

@@ -1,12 +1,11 @@
 import { useState, type FormEvent } from 'react';
 import { Save, X } from 'lucide-react';
-import type { CodeItem, Department } from '../../mdm/mdm.types';
+import type { CodeItem } from '../../mdm/mdm.types';
 import type { InventoryFormValues } from '../inventory.types';
 
 interface InventoryFormModalProps {
   editingId: string | null;
   initialValues: InventoryFormValues;
-  departments: Department[];
   inventoryTypes: CodeItem[];
   isSaving: boolean;
   onClose: () => void;
@@ -18,7 +17,6 @@ const inputClass = 'mt-1.5 w-full rounded-lg border border-slate-800 bg-slate-95
 export default function InventoryFormModal({
   editingId,
   initialValues,
-  departments,
   inventoryTypes,
   isSaving,
   onClose,
@@ -66,13 +64,6 @@ export default function InventoryFormModal({
               <label className="text-slate-400">
                 단위
                 <input value={values.unit} onChange={(event) => update('unit', event.target.value)} placeholder="예: EA, BOX, SET" className={inputClass} />
-              </label>
-              <label className="text-slate-400">
-                관리 부서
-                <select value={values.departmentId} onChange={(event) => update('departmentId', event.target.value)} className={inputClass}>
-                  <option value="">부서 미지정</option>
-                  {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
-                </select>
               </label>
             </div>
           </section>

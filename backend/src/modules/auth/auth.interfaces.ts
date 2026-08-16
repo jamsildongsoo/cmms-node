@@ -1,6 +1,6 @@
 /* =========================================================================
    JWT 공유 인터페이스 — B안 확정
-   페이로드에 roleId, departmentId, lastLoginPlantId 포함
+   페이로드에 roleId, departmentId, homePlantId 포함
    → 매 요청 DB 조회 없이 TenantContext 구성 가능
    ========================================================================= */
 
@@ -11,9 +11,9 @@ export interface JwtPayload {
   companyId: string;
   userId: string;
   roleId: string;
+  scope: 'COMPANY' | 'PLANT';
   departmentId: string | null;
-  lastLoginPlantId: string | null;
-  multiPlant: 'Y' | 'N';
+  homePlantId: string | null;
   iat?: number;
   exp?: number;
 }
@@ -40,15 +40,15 @@ export interface LoginResponse {
   name: string;
   avatarKey: string;
   roleId: string;
+  scope: 'COMPANY' | 'PLANT';
   departmentId: string | null;
   position: string | null;
   title: string | null;
-  lastLoginPlantId: string | null;
-  /** 역할의 multi_plant 값 — Header 플랜트 셀렉터 표시 여부 */
-  multiPlant: 'Y' | 'N';
+  homePlantId: string | null;
   mustChangePassword: boolean;
   passwordExpired: boolean;
-  permissions: Record<string, { C: string; R: string; U: string; D: string; A: string }>;
+  moduleAccess: Record<string, { permC: 'Y' | 'N'; permR: 'Y' | 'N'; permU: 'Y' | 'N'; permD: 'Y' | 'N'; permA: 'Y' | 'N' }>;
+  departmentWarehouseId: string | null;
 }
 
 /** 사용자 프로필 응답 */
@@ -63,7 +63,7 @@ export interface UserProfileResponse {
   title: string | null;
   departmentId: string | null;
   roleId: string;
-  lastLoginPlantId: string | null;
-  multiPlant: 'Y' | 'N';
+  scope: 'COMPANY' | 'PLANT';
+  homePlantId: string | null;
   mustChangePassword: boolean;
 }

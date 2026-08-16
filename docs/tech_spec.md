@@ -1,302 +1,223 @@
-# CMMS-NODE 기술 사양서
+# CMMS 기술 사양서
 
-본 문서는 FE/BE 기술 스펙을 요약합니다.
-비즈니스 요구사항은 `product_spec.md`에서 관리합니다.
+## 1. 책임과 적용범위
 
----
+이 문서는 현재 CMMS 구현의 기술 정본이다. 업무정책은 `docs/product_spec.md`, 공통 코드 규칙은 `docs/coding_conventions.md`, 운영 인프라는 `docs/server_spec.md`를 따른다.
 
-## 1. 기술 개요
+```text
+React/TypeScript FE
+        ↓ API wrapper
+NestJS API
+        ↓ Guard / Tenant Context / Service transaction
+TypeORM + PostgreSQL
+        ├─ Object Storage 첨부파일
+        └─ 외부 연계
+```
 
-*   프론트엔드는 React + TypeScript 기반입니다.
-*   백엔드는 NestJS + TypeORM 기반입니다.
-*   DB 스키마의 단일 소스는 백엔드 엔티티입니다.
+## 2. 모듈·인증·권한
 
----
+### 2.1 모듈
 
-## 2. 시스템 구성
+`MDM`, `EQP`, `INV`, `STK`, `PUR`, `POR`, `PM`, `WO`, `WP`, `APR`, `BRD`를 사용한다. SYSTEM은 별도 시스템 관리 API와 SystemShell을 사용한다.
 
-### 2.1 프론트엔드
+### 2.2 인증
 
-*   단일 앱 셸(`AppShell`) 구조를 사용합니다.
-*   URL 라우팅 대신 `activeTab` 기반 화면 전환을 사용합니다.
-*   공통 API wrapper를 통해서만 백엔드와 통신합니다.
-*   로그인 후 화면 진입점은 `AppShell`, 추후 대시보드 홈은 `DashboardHome`으로 분리합니다.
+- 로그인 성공 시 access token과 refresh session을 발급한다.
+- refresh session은 폐기시각을 기록한다.
+- access token 만료 시 FE interceptor가 refresh 후 원 요청을 재시도한다.
+- 로그아웃은 refresh session을 폐기한다.
+- tenant context는 인증된 companyId, userId, roleId, scope, departmentId, homePlantId와 요청의 activePlantId를 보유한다.
+- companyId는 body에서 받지 않고 인증 context에서 결정한다.
 
-### 2.2 백엔드
+### 2.3 권한
 
-*   모듈 단위로 Controller / Service / Repository를 구성합니다.
-*   권한 검증은 Guard + PolicyService 조합을 사용합니다.
-*   상태 전이와 문서 수정 API를 분리합니다.
+- 모듈 접근은 `module + C/R/U/D` 권한으로 검사한다.
+- ADMIN도 부여된 모듈 CRUD와 회사 격리·사업장 범위를 적용한다.
+- SYSTEM은 별도 시스템 API 권한으로 검사한다.
+- PLANT 범위는 homePlantId 사업장으로 제한한다.
+- COMPANY 범위는 전체 또는 선택 사업장으로 제한한다.
+- STK 재고 API는 모듈 권한 외에 item의 창고별 접근을 서비스에서 재검증한다.
+- 업무 행위는 공통 Guard metadata로 선언한다.
 
----
+## 3. API 설계
 
-## 3. 인증과 세션
+### 3.1 공통 규칙
 
-*   access token: 30분
-*   refresh token: 3일
-*   access token은 FE 메모리에만 유지합니다.
-*   refresh token은 `HttpOnly` 쿠키와 서버측 세션 정보로 관리합니다.
-*   FE는 401 발생 시 refresh 1회 재시도 후 실패하면 재로그인을 안내합니다.
+Base path는 `/api`다.
 
----
+| 목적 | 형식 |
+|---|---|
+| 목록 | GET /resources |
+| 상세 | GET /resources/:id |
+| 생성 | POST /resources |
+| 수정 | PUT /resources/:id |
+| 삭제 | DELETE /resources/:id |
+| 상태·업무행위 | POST /resources/:id/actions/{action} |
 
-## 4. 권한 기술 규칙
+- 식별자는 path, 검색·범위는 query, 입력은 body에 둔다.
+- companyId는 body에 받지 않는다.
+- plantId가 없으면 COMPANY 범위는 전체, PLANT 범위는 homePlant로 해석한다.
+- 응답은 Entity 전체를 노출하지 않고 명시적 응답 타입으로 매핑한다.
+- 예외는 전역 필터가 일관된 HTTP 오류 구조로 변환한다.
 
-### 4.1 모듈 권한
+### 3.2 주요 API
 
-*   모듈 권한은 `C/R/U/D/A` 5축으로 관리합니다.
-*   권한 선언은 컨트롤러 메서드에 명시합니다.
-*   권한 메타데이터가 없는 API는 deny-all이 원칙입니다.
+#### 인증·시스템
 
-역할별 모듈 권한 seed는 `product_spec.md`의 공통 권한표를 단일 기준으로 사용합니다. 구매 기능도 같은 표에서 `PUR`와 `POR` 권한을 선언하며 별도 권한 체계를 두지 않습니다. `POR`는 별도 발주 엔티티를 생성하지 않으므로 현재 `R/U`만 사용합니다.
+- `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/me`
+- `/system/companies`, `/system/users`, `/system/login-history`
 
-### 4.2 예외 규칙
+#### 기준정보·마스터
 
-*   임시저장 본인 문서 예외
-*   결재선 당사자성 예외
-*   첨부파일은 원문서 권한 해석
-*   SYSTEM 전용 API 예외
-*   발전현황 API는 인증 사용자 공통 조회 예외
+- `/mdm/plants`, `/mdm/departments`, `/mdm/roles`, `/mdm/users`, `/mdm/warehouses`, `/mdm/codes`
+- `/mdm/roles/:roleId/details`
+- `/master/equipments`, `/master/inventories`
+
+#### 구매
 
----
+- `/procurement/requests`
+- `/procurement/requests/:id/actions/confirm`
+- `/procurement/requests/:id/actions/receive`
+- `/procurement/requests/:id/actions/close`
+- `/procurement/orders`
+- `/procurement/orders/:id/allocations`
+- `/procurement/orders/:id/actions/order`
+- `/procurement/orders/:id/actions/ship`
+- `/procurement/orders/:id/actions/receive`
+- `/procurement/orders/:id/actions/transfer`
+- `/procurement/transfers/pr`
 
-## 5. API 설계 규칙
+#### 재고
 
-### 5.0 전달 위치와 범위
+- `GET /inventory-tx/status`
+- `GET /inventory-tx/history`
+- `GET /inventory-tx/documents`
+- `GET /inventory-tx/documents/:id`
+- `POST /inventory-tx`
+- `POST /inventory-tx/close`
 
-*   `path`: 처리 대상 자원의 식별자입니다.
-*   `query`: 목록 검색, 정렬, 필터, `plantId` 등 조회 범위입니다.
-*   `body`: 생성·수정 데이터와 action에 필요한 업무 데이터입니다.
-*   `actions`: 일반 CRUD로 표현할 수 없는 상태 변경 또는 업무 행위입니다.
-*   `companyId`는 클라이언트에서 받지 않고 인증된 tenant context에서 획득합니다.
-*   `companyId` 없이 전체 회사를 조회하는 API는 `SYSTEM` 권한을 요구합니다.
-*   자원 식별자를 query와 body에 중복 전달하지 않습니다.
+#### 업무·결재·게시판
 
-예시:
+- `/pm/records`, `/work-order`, `/work-permit`
+- `/approval`, `/approval/:id/actions/approve`, `/approval/:id/actions/reject`
+- `/board`, `/board/:id/comments`
+- `/files`
+
+## 4. DTO와 응답 계약
+
+### 4.1 Request DTO
 
-*   `GET /procurement/requests/:id`
-*   `GET /procurement/requests?plantId=P001&status=T`
-*   `POST /procurement/requests/:id/actions/receive`
-
-### 5.1 기본 CRUD
-
-*   `GET /resources`
-*   `GET /resources/:id`
-*   `POST /resources`
-*   `PUT /resources/:id`
-*   `DELETE /resources/:id`
-
-### 5.2 상태 전이
-
-*   `POST /resources/:id/actions/{action}`
-
-### 5.3 연계 업무의 권한 적용
-
-*   하나의 문서를 여러 모듈이 이어서 처리하더라도 각 API는 수행하는 행위의 모듈 권한을 선언합니다.
-*   구매요청 등록·수정·상신·직접확정은 `PUR`, 발주·배송·종료는 `POR`, 실제 재고 처리는 `STK`를 사용합니다.
-*   이 규칙은 구매 기능만의 예외가 아니라 다른 연계 업무에도 동일하게 적용합니다.
-
-### 5.4 플랜트 범위 전달
-
-*   멀티플랜트 역할은 헤더에서 `activePlantId`를 선택할 수 있습니다.
-*   API의 `plantId`가 특정 값이면 해당 사업장으로 조회합니다.
-*   `plantId` 파라미터가 없으면 회사 범위 전체 조회를 기본으로 허용합니다.
-*   단일 플랜트 역할은 FE에서 사업장 선택을 막고 `users.last_login_plant_id`를 활성 사업장으로 사용합니다.
-*   멀티플랜트 사용자가 전체를 명시적으로 선택한 경우 빈 값으로 전달하고, 서버는 회사 전체 사업장을 조회합니다.
-*   구매 목록(`getRequests/getOrders`)과 PM/WO/WP 목록 API는 선택된 `activePlantId`를 전달합니다. 값이 없으면 회사 전체를 조회합니다.
-*   상세·저장·삭제 API의 플랜트 선택 제한은 FE가 담당합니다. 서버는 회사 테넌트 격리와 모듈 권한을 적용하고 동일 회사 안의 플랜트 권한을 중복 판정하지 않습니다.
-
-### 5.5 Entity와 DTO 사용 기준
-
-*   Entity는 Service와 Repository 사이의 영속성 모델로 사용합니다.
-*   Controller Body는 Entity를 직접 사용해도 되지만, 서버 관리 필드(`companyId`, `createdBy`, `deleteYn` 등)를 클라이언트가 설정할 수 없도록 제한해야 합니다.
-*   다음 경우에는 DTO를 우선합니다.
-    *   입력 필드 검증 또는 whitelist가 필요한 경우
-    *   Entity와 API 입력 구조가 다른 경우
-    *   `header/items` 같은 복합 aggregate 요청인 경우
-    *   날짜·금액·상태값 변환이 필요한 경우
-*   응답은 Entity 전체 노출보다 응답 interface/DTO로 필요한 필드만 고정하는 것을 우선합니다.
-*   단순 CRUD이고 입력 구조가 Entity와 동일하며 서버 관리 필드가 분리되어 있으면 제한된 Entity 사용을 허용합니다.
-
----
-
-## 6. FE 구조 요약
-
-### 6.1 화면 구조
-
-*   `AppShell`이 공통 셸입니다.
-*   구매 화면은 `Procurement` 공통 컴포넌트를 `request`/`management` 모드로 분기합니다.
-*   재고는 `재고조회`와 `재고처리`로 구분합니다.
-
-현재 주요 탭:
-*   `mdm`
-*   `equipment`
-*   `inventory`
-*   `stock-overview`
-*   `stock-process`
-*   `pm`
-*   `wo`
-*   `wp`
-*   `procurement-request`
-*   `procurement-management`
-*   `approval`
-*   `board`
-*   `power-generation`
-*   `system`
-
-### 6.2 공통 정책
-
-*   날짜 포맷은 사용자 표시 기준으로 일관되게 처리합니다.
-*   숫자/금액은 공통 formatter를 사용합니다.
-*   문서번호 클릭은 출력 진입으로 사용하는 패턴을 우선합니다.
-*   구매입고는 별도 메뉴가 아니라 구매화면 또는 재고처리 화면 진입으로 처리합니다.
-*   모달/버튼 노출은 권한과 문서 상태에 따라 읽기 전용 또는 편집 가능으로 분기합니다.
-
-### 6.3 상태 관리와 인증 동작
-
-*   인증 스토어는 `user`, `token`, `isInitialized`, `error`, `activePlantId`를 관리합니다.
-*   access token은 FE 메모리에만 유지합니다.
-*   앱 시작 시 `/auth/refresh`로 세션 복원을 시도합니다.
-*   Axios 인터셉터는 일반 API의 401에 대해 refresh 1회 재시도 후 실패하면 로그아웃 및 재로그인 안내를 처리합니다.
-*   `PURCHASER`와 `ADMIN`은 헤더에서 활성 플랜트를 전환하거나 전체 사업장을 선택할 수 있습니다. 구매요청(`PUR`)은 일반 사용자에게 자기 사업장만 허용하고, 구매관리(`POR`)는 `PURCHASER` 중심의 멀티사업장 범위를 적용합니다.
-
-### 6.4 공통 UI 정책
-
-*   성공/실패/안내 메시지는 toast를 사용합니다.
-*   확인/취소가 필요한 작업은 공통 확인 대화상자를 사용합니다.
-*   브라우저 기본 `alert/confirm/prompt`는 사용하지 않습니다.
-*   목록 인쇄와 문서 인쇄는 전용 출력 컴포넌트 + `window.print()` 흐름을 사용합니다.
-
----
-
-## 7. BE 구조 요약
-
-### 7.1 엔티티와 DB
-
-*   테이블/컬럼/PK의 단일 소스는 `backend/src/entities/*.entity.ts`입니다.
-*   운영 DB는 엔티티 변경에 맞춘 SQL을 검토 후 직접 반영합니다.
-*   `DB_SYNCHRONIZE=true`는 개발 환경에서만 사용합니다.
-*   운영에서는 애플리케이션 migration 명령을 사용하지 않습니다.
-
-### 7.2 스키마/데이터 설계 원칙
-
-*   업무 데이터는 `company_id` 기준으로 테넌트 격리합니다.
-*   플랜트 단위 업무 데이터는 `plant_id`를 함께 사용합니다.
-*   대부분의 마스터/업무 엔티티는 `created_at`, `created_by`, `updated_at`, `updated_by`, `delete_yn` 공통 컬럼을 가집니다.
-*   조회는 원칙적으로 `delete_yn='N'` 조건을 포함합니다.
-*   시간은 `timestamptz`, 금액/수량은 `numeric` + Decimal 기준으로 처리합니다.
-
-### 7.3 주요 테이블 그룹
-
-| 그룹 | 예시 |
-|------|------|
-| 회사/권한 | `company`, `users`, `role`, `role_detail` |
-| 기준정보 | `plant`, `department`, `warehouse`, `code_group`, `code_item` |
-| 설비/자재 | `equipment`, `equipment_check_cycle`, `inventory` |
-| 업무문서 | `pm_record`, `work_order`, `work_permit`, `purchase_request` |
-| 재고 | `inventory_status`, `inventory_history`, `inventory_monthly_closing` |
-| 결재/게시판 | `approval`, `approval_step`, `board`, `board_comment` |
-| 파일/보조 | `file_attachment`, `file_attachment_item`, `login_history`, `sequence_generator` |
-
-### 7.4 업무 테이블 주의사항
-
-*   `purchase_request`는 요청 문서와 구매관리 상태를 함께 저장합니다.
-*   `purchase_request.status`와 `proc_status`는 별도 축입니다.
-*   `inventory_status`는 현재고, `inventory_history`는 수불 이력입니다.
-*   재고 처리 시 동일 창고-품목은 비관적 락 기준으로 직렬화합니다.
-*   출고와 이동출고는 이력에 음수 수량/금액으로 기록합니다.
-*   월마감 상세는 기초재고와 당월 입고·출고·이동·조정을 저장하고, `기초 + 당월 순수불`로 월말재고를 계산합니다.
-*   마감 완료 여부와 마감자·마감일시는 `inventory_closing` 헤더에 저장하며, 재고가 없는 월도 마감할 수 있습니다.
-*   `inventory_monthly_closing`은 `companyId + closingYm + warehouseId + inventoryId` 단위의 마감 상세입니다.
-*   월마감 상세 저장과 헤더 완료 처리는 하나의 트랜잭션으로 수행합니다.
-*   예방점검 주기는 실적 확정 시에만 갱신합니다.
-*   PM/WO/WP 목록은 FE가 선택한 활성 플랜트를 목록 API 조건으로 전달합니다. 상세·수정·삭제의 플랜트 선택 제한도 FE가 담당합니다.
-
----
-
-## 8. 상수와 코드 관리
-
-*   운영 선택지는 `code_group` / `code_item` 기준입니다.
-*   시스템 분기값은 BE 상수 기준입니다.
-*   FE 상수는 개발 편의용 미러만 허용합니다.
-*   FE 미러는 표시, 타입 추론, 문자열 오타 방지 목적에 한정합니다.
-*   FE 미러가 있더라도 업무 기준값의 단일 원천은 항상 BE 상수 파일입니다.
-
-### 8.1 DB 코드와 정책 상수 구분
-
-| 구분 | 관리 위치 | 설명 |
-|------|------|------|
-| 운영 코드 | `code_group`, `code_item` | 회사별 운영 설정값, 선택지, 분류 |
-| 정책 상수 | `backend/src/common/constants/*.ts` | 상태 전이, 권한 판단, 업무 검증에 직접 사용하는 값 |
-
-DB 코드 예시:
-*   `EQ_TYPE`
-*   `INV_TYPE`
-*   `PM_TYPE`
-*   `WO_TYPE`
-*   `WP_TYPE`
-*   `BOARD_TYPE`
-*   `PR_TYPE`
-
-정책 상수 예시:
-*   모듈 코드
-*   권한 액션
-*   문서 상태
-*   구매 진행상태
-*   재고 거래유형/사유
-*   결재 단계/결과/액션
-
-### 8.2 백엔드 상수화 대상
-
-| 분류 | 파일 | 주요 내용 |
-|------|------|------|
-| 모듈 코드 | `module.constants.ts` | `MDM`, `EQP`, `INV`, `STK`, `POR`, `PM`, `WO`, `WP`, `APR`, `BRD`, `PUR` |
-| 권한 액션 | `permission.constants.ts` | `C`, `R`, `U`, `D`, `A`, 권한 컬럼 매핑 |
-| 문서/구매/재고 상태 | `status.constants.ts` | `DocStatus`, `ProcStatus`, `TxType`, `TxReason`, `PmJudge`, `MoveTxType` |
-| 결재 코드 | `approval.constants.ts` | `ApprovalStepType`, `ApprovalResult`, `ApprovalAction` |
-
-### 8.3 프론트엔드 미러 상수
-
-| 파일 | BE 원천 | FE 사용 목적 |
-|------|------|------|
-| `frontend/src/constants/module.ts` | `module.constants.ts` | 모듈 코드 참조, 타입 추론, 문자열 오타 방지 |
-| `frontend/src/constants/status.ts` | `status.constants.ts` | 상태/사유 라벨 표시, 옵션 구성, 타입 추론 |
-
-프론트엔드에 현재 미러된 대표 값:
-*   `APP_MODULE`
-*   `DOC_STATUS`
-*   `PROC_STATUS_LABELS`
-*   `PM_JUDGE_LABELS`
-*   `TX_TYPE_LABELS`
-*   `TX_REASON`
-*   `TX_REASON_LABELS`
-*   `TX_REASON_OPTIONS`
-*   `TX_REASON_BY_TYPE`
-
-### 8.4 현재 상수화된 업무 기준값
-
-현재 DB 코드가 아니라 정책 상수로 관리하는 대표 값:
-*   문서 상태 `T/P/C/S/R/X/E`
-*   구매 진행상태 `O/D/P/I/E`
-*   재고 거래유형 `IN/OUT/MOVE/ADJ`
-*   재고 거래사유 `GENERAL/PURCHASE/RETURN/WORK_ORDER/DISPOSAL/TRANSFER/PLANT_TRANSFER/STOCKTAKING`
-*   결재 단계 `D/A/G/R`
-*   결재 결과 `Y/N`
-*   결재 액션 `APPROVE/REJECT`
-*   권한 액션 `C/R/U/D/A`
-*   모듈 코드 `MDM/EQP/INV/STK/POR/PM/WO/WP/APR/BRD/PUR`
-
-### 8.5 상수화 원칙
-
-*   업무 상태 전이, 권한 판단, 재고 처리 검증에 직접 쓰는 값은 DB 코드로 대체하지 않습니다.
-*   FE에서 라벨만 필요해도, 코드값 자체는 BE 기준을 따라야 합니다.
-*   DB 운영 코드 변경이 우선인 영역은 FE/BE 상수로 분기하지 않습니다.
-*   새 상수를 추가할 때는 “운영자가 회사별로 바꿔야 하는 값인가, 시스템 규칙인가”를 먼저 판단합니다.
-
----
-
-## 9. 관련 문서
-
-*   비즈니스 스펙: `product_spec.md`
-*   인프라/서버: `server_spec.md`
-*   코딩 관습: `coding_conventions.md`
+인증·사용자·권한, 결재·첨부파일, PM·WO·WP, PR·PO·allocation, 입고·출고·이동·조정, 상태 전이와 복합 header/items 입력은 class-validator Request DTO를 사용한다.
+
+단순 기준정보 CRUD는 생성·수정 필드가 같으면 Save DTO를 공유할 수 있다. Entity를 Controller 입력 타입으로 사용하지 않는다.
+
+### 4.2 Response
+
+- 사용자·권한·세션·결재·재고·구매·복합 aggregate는 고정 응답 interface 또는 DTO를 사용한다.
+- 단순 참조 조회는 Pick 또는 명시적 응답 interface를 사용할 수 있다.
+- Pick은 런타임 필터가 아니므로 Service 매핑 또는 query select를 함께 사용한다.
+- FE wrapper의 request/response 타입은 BE DTO와 동일한 식별자·필드 의미를 사용한다.
+
+## 5. 데이터 모델
+
+### 5.1 공통 식별·감사
+
+- 회사별 업무 테이블의 기본 식별은 company_id + id다.
+- header 문서번호 필드는 id다.
+- item은 surrogate id 없이 company_id + 부모문서_id + item_no 복합 PK를 사용한다.
+- item 순번은 DB item_no, API itemNo다.
+- 업무 FK는 request_id, order_id, doc_id처럼 부모 의미를 드러낸다.
+- 독립 Entity는 created_at, created_by, updated_at, updated_by, delete_yn을 사용한다.
+
+### 5.2 주요 테이블
+
+| 영역 | 테이블 |
+|---|---|
+| 조직 | company, plant, department, users, role, role_detail, warehouse |
+| 기준·마스터 | code_group, code_item, equipment, equipment_check_cycle, inventory |
+| 구매 | purchase_request, purchase_request_item, purchase_order, purchase_order_item, allocation |
+| 재고 | inventory_status, inventory_document, inventory_document_item, inventory_history, inventory_closing, inventory_monthly_closing |
+| 결재 | approval, approval_step |
+| 게시판·파일 | board, board_comment, file_attachment, file_attachment_item |
+| 공통 이력 | auth_refresh_session, login_history, sequence_generator |
+
+### 5.3 자재·재고
+
+- inventory는 회사 공통 자재 마스터다.
+- inventory_status는 회사·창고·자재별 현재 수량·금액이다.
+- 신규 자재와 신규 창고 생성 시 관련 status를 0으로 초기화한다.
+- inventory_document는 전표 header이며 id, tx_date, ref_module, ref_no, remarks를 가진다.
+- inventory_document_item은 warehouse_id, inventory_id, tx_type_code, tx_reason_code, qty, unit_price, ref_line_no를 가진다.
+- 이동은 하나의 document에 출발창고 OUT과 도착창고 IN item을 생성한다.
+- inventory_history는 실제 처리 결과를 창고·자재별 signed 수량/금액으로 append-only 저장한다.
+
+### 5.4 구매·allocation
+
+- PR header는 요청창고 하나를 가진다.
+- PO header는 통합 PO를 위해 단일 요청창고에 의존하지 않는다.
+- PO item은 ordered_qty, received_qty를 가진다.
+- allocation은 다음 컬럼을 사용한다.
+
+```text
+allocation_type: PO | MOVE
+doc_id
+doc_item_no
+pr_id
+pr_item_no
+inventory_id
+allocation_qty
+```
+
+- PO의 doc_id는 PO 번호, doc_item_no는 PO item 번호다.
+- MOVE의 doc_id는 inventory document 번호, doc_item_no는 이동 document item 번호다.
+- allocation에는 id와 completed_qty를 두지 않는다.
+- PO allocation은 PO item과 PR item의 발주수량을 연결한다.
+- MOVE allocation은 이동전표 item과 PR item의 실제 이동수량을 연결한다.
+
+## 6. 상태·상수
+
+BE의 공통 상수를 단일 원천으로 하고 FE는 표시 라벨과 화면 분기에 필요한 허용값만 미러링한다.
+
+- 문서: T, P, C, S, R, X, E
+- 구매 진행: O 발주, D 배송중, P 부분입고, I 입고완료, E 종료
+- 재고 유형: IN, OUT, MOVE, ADJ
+- 재고 사유: GENERAL, PURCHASE, RETURN, WORK_ORDER, DISPOSAL, TRANSFER, PLANT_TRANSFER, STOCKTAKING
+- 권한: C(create), R(read), U(update), D(delete)
+- 조직 범위: COMPANY, PLANT
+
+## 7. 트랜잭션과 동시성
+
+### 7.1 재고
+
+- 입고·출고·이동·조정은 all-or-nothing transaction이다.
+- inventory_status의 회사·창고·자재 행을 pessimistic_write로 잠근다.
+- advisory lock은 사용하지 않는다.
+- 월마감 키는 마감과 거래의 경합을 방지하는 트랜잭션 잠금으로 보호한다.
+- 출고 부족, 마감 월 거래, 잘못된 창고·자재는 처리 전에 거부한다.
+
+### 7.2 구매
+
+- PO 생성·allocation 확정·입고·PR 연계 이송은 관련 header/item을 잠그고 하나의 트랜잭션으로 처리한다.
+- 중앙창고 입고는 PO 수량만 갱신한다.
+- 요청창고 직접입고는 PO와 PR 수량을 함께 갱신한다.
+- PR 연계 이송은 MOVE allocation과 PR 수령수량을 함께 갱신한다.
+- 일반 이동은 allocation과 PR을 갱신하지 않는다.
+- 취소는 원전표를 재사용하지 않고 반대 신규 전표를 생성한다.
+
+## 8. FE 구조와 UX
+
+- FE는 features/*/*.api.ts wrapper로만 API를 호출한다.
+- 페이지에서 axios URI를 직접 작성하지 않는다.
+- AppShell은 일반 업무, SystemShell은 SYSTEM 관리만 담당한다.
+- API 오류는 공통 오류 변환과 toast 정책을 사용한다.
+- 저장·상태변경 중 중복 제출을 막고 성공 후 목록·상세를 재조회한다.
+- 수량은 소수점 2자리, 금액은 정수로 표시한다.
+- BE numeric 4자리 값은 FE 표시 규칙에 따라 변환한다.
+
+## 9. 운영 기술 기준
+
+- PostgreSQL을 사용한다.
+- 운영 DB_SYNCHRONIZE=false를 유지한다.
+- 운영 DB DDL은 엔티티 검토 후 별도 반영한다.
+- 첨부파일은 비공개 Object Storage를 사용한다.
+- 운영 구성은 Web 정적 파일, NestJS API, PostgreSQL, Object Storage, Reverse Proxy로 구성한다.

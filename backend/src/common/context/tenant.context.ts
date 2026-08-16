@@ -9,6 +9,7 @@ export interface TenantContext {
   userId: string;
   roleId: string;
   departmentId: string | null;
+  activePlantId: string | null;
 }
 
 /** 요청 수명 동안 컨텍스트를 보유하는 AsyncLocalStorage 인스턴스 */

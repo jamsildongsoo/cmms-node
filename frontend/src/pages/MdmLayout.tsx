@@ -1,30 +1,29 @@
 import { useState } from 'react';
 import { Building2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { APP_MODULE } from '../constants/module';
 import CodeManager from '../features/mdm/components/CodeManager';
 import DeptManager from '../features/mdm/components/DeptManager';
 import PlantManager from '../features/mdm/components/PlantManager';
-import RoleManager from '../features/mdm/components/RoleManager';
+import RolePermissionManager from '../features/mdm/components/RolePermissionManager';
 import UserManager from '../features/mdm/components/UserManager';
 import WarehouseManager from '../features/mdm/components/WarehouseManager';
 import { getMdmCapabilities } from '../features/mdm/mdm.utils';
 import { useAuthStore } from '../store/useAuthStore';
 
-type MdmTab = 'plant' | 'dept' | 'role' | 'user' | 'warehouse' | 'code';
+type MdmTab = 'plant' | 'dept' | 'permission' | 'user' | 'warehouse' | 'code';
 
 const MDM_TABS: ReadonlyArray<{ id: MdmTab; label: string }> = [
   { id: 'plant', label: '플랜트' },
   { id: 'dept', label: '부서' },
   { id: 'user', label: '사용자' },
-  { id: 'role', label: '권한 매트릭스' },
+  { id: 'permission', label: 'Role 권한' },
   { id: 'warehouse', label: '창고' },
   { id: 'code', label: '공통코드' },
 ];
 
 export default function MdmLayout() {
   const user = useAuthStore((state) => state.user);
-  const capabilities = getMdmCapabilities(user?.permissions?.[APP_MODULE.MDM]);
+  const capabilities = getMdmCapabilities(user?.moduleAccess);
   const [subTab, setSubTab] = useState<MdmTab>('plant');
   const notify = (type: 'success' | 'error', text: string) => {
     if (type === 'success') toast.success(text);
@@ -71,7 +70,7 @@ export default function MdmLayout() {
             {...capabilities}
           />
         )}
-        {subTab === 'role' && <RoleManager notify={notify} {...capabilities} />}
+        {subTab === 'permission' && <RolePermissionManager notify={notify} {...capabilities} />}
         {subTab === 'warehouse' && <WarehouseManager notify={notify} {...capabilities} />}
         {subTab === 'code' && <CodeManager notify={notify} {...capabilities} />}
       </div>

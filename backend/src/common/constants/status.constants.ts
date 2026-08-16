@@ -12,7 +12,9 @@ export enum DocStatus {
   TEMP = 'T', // 임시저장
   IN_PROGRESS = 'P', // 결재중(상신됨)
   CONFIRMED = 'C', // 완결확정
-  SELF_CONFIRMED = 'S', // 직접확정(권한자, 결재 우회)
+  // 관리용 호환 상태. 일반 FE에는 노출하지 않지만, 기존 운영 데이터와
+  // 별도 관리 호출이 status='S'를 저장할 수 있도록 백엔드 상수는 유지한다.
+  SELF_CONFIRMED = 'S',
   REJECTED = 'R', // 반려
   CANCELED = 'X', // 취소
   EXPIRED = 'E', // 기간 만료 (예방점검 계획 전용)

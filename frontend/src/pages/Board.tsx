@@ -10,6 +10,7 @@ import type {
   YesNo,
 } from '../features/board/board.types';
 import { useAuthStore } from '../store/useAuthStore';
+import { hasModuleManage } from '../utils/moduleAccess';
 import RichTextEditor from '../components/RichTextEditor';
 import RichTextViewer from '../components/RichTextViewer';
 import {
@@ -26,7 +27,8 @@ import {
 
 export default function Board() {
   const user = useAuthStore((state) => state.user);
-  const boardPermission = user?.permissions?.[APP_MODULE.BRD];
+  const canCreate = hasModuleManage(user?.moduleAccess, APP_MODULE.BRD);
+  const canManage = hasModuleManage(user?.moduleAccess, APP_MODULE.BRD);
 
   const [posts, setPosts] = useState<BoardPost[]>([]);
   
@@ -53,11 +55,10 @@ export default function Board() {
   const formatAuthor = (post: BoardPost) =>
     post.createdByName ? `${post.createdBy} / ${post.createdByName}` : post.createdBy;
 
-  const canCreate = boardPermission?.C === 'Y';
   const canUpdate = (post: BoardPost) =>
-    post.createdBy === user?.id || boardPermission?.U === 'Y';
+    post.createdBy === user?.id || canManage;
   const canDelete = (createdBy: string) =>
-    createdBy === user?.id || boardPermission?.D === 'Y';
+    createdBy === user?.id || canManage;
 
   const fetchData = async () => {
     try {

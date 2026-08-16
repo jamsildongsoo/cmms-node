@@ -9,8 +9,8 @@ export class PurchaseRequestItem {
   @PrimaryColumn({ name: 'request_id', length: 50 })
   requestId!: string;
 
-  @PrimaryColumn({ name: 'line_no', type: 'integer' })
-  lineNo!: number;
+  @PrimaryColumn({ name: 'item_no', type: 'integer' })
+  itemNo!: number;
 
   @Column({ name: 'inventory_id', length: 50 })
   inventoryId!: string;

@@ -1,4 +1,5 @@
-import { Allow, IsDateString, IsIn, IsOptional, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { Allow, IsDateString, IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { DocStatus } from '../../../common/constants/status.constants';
 import type { WorkPermitCheckItem } from '../../../entities/work-permit.entity';
 
@@ -25,7 +26,11 @@ export class SaveWorkPermitDto {
   @IsOptional() @Allow() jsonExcavation?: WorkPermitCheckItem[] | string | null;
   @IsOptional() @Allow() jsonHeavyLoad?: WorkPermitCheckItem[] | string | null;
   @IsOptional() @IsString() remarks?: string | null;
-  @IsOptional() fileGroupId?: string | number | null;
+  @IsOptional()
+  @Transform(({ value }) => value === null || value === undefined || value === '' ? value : Number(value))
+  @IsInt()
+  @Min(1)
+  fileGroupId?: number | null;
   @IsOptional() @IsString() refNo?: string | null;
   @IsOptional() @IsString() refModule?: string | null;
   @IsOptional() @IsString() approvalId?: string | null;

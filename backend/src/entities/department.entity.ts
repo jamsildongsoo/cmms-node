@@ -14,4 +14,13 @@ export class Department extends BaseEntity {
 
   @Column({ type: 'varchar',  name: 'parent_id', length: 50, nullable: true })
   parentId!: string | null;
+
+  @Column({ type: 'varchar', name: 'warehouse_id', length: 50, nullable: true })
+  warehouseId!: string | null;
+
+  @Column({ type: 'varchar', name: 'role_id', length: 50, nullable: true })
+  roleId!: string | null;
+
+  @Column({ type: 'varchar', name: 'scope', length: 20, default: 'PLANT' })
+  scope!: 'COMPANY' | 'PLANT';
 }

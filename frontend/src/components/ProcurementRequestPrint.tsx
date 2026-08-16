@@ -48,7 +48,7 @@ export default function ProcurementRequestPrint(p: ProcurementRequestPrintProps)
         <div className="divide-y divide-gray-300 border-y border-gray-400">
           <div className="grid grid-cols-2 gap-4 py-2">
             <PrintField label="제목" value={p.title} />
-            <PrintField label="요청유형" value={p.requestType} />
+            <PrintField label="유형" value={p.requestType} />
           </div>
           <div className="grid grid-cols-2 gap-4 py-2">
             <PrintField label="플랜트" value={p.plantId} />

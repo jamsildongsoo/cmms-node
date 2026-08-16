@@ -11,16 +11,14 @@ export default function Header() {
   const isLightMode = useThemeStore((s) => s.isLight);
   const toggleTheme = useThemeStore((s) => s.toggle);
 
-  // 멀티 권한자만 플랜트 셀렉터 — 플랜트 목록 로드
+  // plant 필터는 권한 등급이 아니라 조회 범위를 선택하는 UI다.
   const [plants, setPlants] = useState<PlantOption[]>([]);
   useEffect(() => {
-    if (user?.multiPlant === 'Y') {
-      // 선택 UI 구성을 위한 시스템 참조값 조회다. 관리 목록 조회 권한을 대체하지 않는다.
-      referenceApi.getPlantOptions()
-        .then(setPlants)
-        .catch(() => setPlants([]));
-    }
-  }, [user?.multiPlant]);
+    if (!user) return;
+    referenceApi.getPlantOptions()
+      .then(setPlants)
+      .catch(() => setPlants([]));
+  }, [user]);
 
   return (
     <header className="bg-slate-900 border-b border-slate-800 h-14 pr-5 flex items-center justify-between text-slate-300 shrink-0 select-none w-full z-50 print:hidden">
@@ -46,25 +44,19 @@ export default function Header() {
           </span>
         </div>
 
-        {/* 플랜트: 멀티는 셀렉터, 비멀티는 라벨 */}
+        {/* plant 필터를 비우면 회사 전체를 조회한다. */}
         <div className="flex items-center gap-1.5 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 text-xs text-slate-400 ml-3">
           <Building2 size={13} className="text-emerald-500" />
-          {user?.multiPlant === 'Y' ? (
-            <select
-              value={activePlantId || ''}
-              onChange={(e) => setActivePlantId(e.target.value || null)}
-              className="bg-transparent text-slate-200 outline-none border-0 font-semibold cursor-pointer"
-            >
-              <option value="">전체총괄</option>
-              {plants.map(p => (
-                <option key={p.id} value={p.id}>{p.id} — {p.name}</option>
-              ))}
-            </select>
-          ) : (
-            <span className="font-semibold text-slate-200">
-              {user?.lastLoginPlantId || '전체'}
-            </span>
-          )}
+          <select
+            value={activePlantId || ''}
+            onChange={(e) => setActivePlantId(e.target.value || null)}
+            className="bg-transparent text-slate-200 outline-none border-0 font-semibold cursor-pointer"
+          >
+            <option value="">전체</option>
+            {plants.map(p => (
+              <option key={p.id} value={p.id}>{p.id} — {p.name}</option>
+            ))}
+          </select>
         </div>
       </div>
 

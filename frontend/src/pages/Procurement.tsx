@@ -5,6 +5,7 @@ import { requestConfirmation } from '../utils/userActionDialog';
 import ProcurementRequestPrint from '../components/ProcurementRequestPrint';
 import PurchaseOrderPrint from '../components/PurchaseOrderPrint';
 import { useAuthStore } from '../store/useAuthStore';
+import { hasModuleManage, hasModuleRead } from '../utils/moduleAccess';
 import { ShoppingCart, Plus, X, Printer, PackagePlus, FileText } from 'lucide-react';
 import {
   getCommonStatusLabel,
@@ -24,6 +25,7 @@ import { toastApiError } from '../utils/apiError';
 import type { CodeItem, Department, Plant, Warehouse } from '../features/mdm/mdm.types';
 import type { InventoryReference as InventoryRef } from '../features/master/master-reference.types';
 import type {
+  PurchaseOrderAllocation,
   PurchaseRequest,
   PurchaseRequestItem,
 } from '../features/procurement/procurement.types';
@@ -44,16 +46,16 @@ function resolveDepartmentName(depts: Department[], departmentId?: string | null
 export default function Procurement({
   mode = 'request',
   onOpenReceiptRequest,
+  onOpenReceiptOrder,
 }: {
   mode?: 'request' | 'management';
   onOpenReceiptRequest?: (requestId: string) => void;
+  onOpenReceiptOrder?: (orderId: string) => void;
 }) {
   const user = useAuthStore((s) => s.user);
   const activePlantId = useAuthStore((s) => s.activePlantId);
-  const requestPermission = user?.permissions?.[APP_MODULE.PUR];
-  const orderPermission = user?.permissions?.[APP_MODULE.POR];
-  const canRequestRead = requestPermission?.R === 'Y';
-  const canManageRead = orderPermission?.R === 'Y';
+  const canRequestRead = hasModuleRead(user?.moduleAccess, APP_MODULE.PUR);
+  const canManageRead = hasModuleRead(user?.moduleAccess, APP_MODULE.POR);
   const canRead = mode === 'management' ? canManageRead : canRequestRead;
 
   // ============ 공통 데이터 ============
@@ -94,8 +96,10 @@ export default function Procurement({
 
   // ============ 구매요청 ============
   const [requests, setRequests] = useState<PurchaseRequest[]>([]);
+  const [selectedRequestIds, setSelectedRequestIds] = useState<string[]>([]);
   const [searchType, setSearchType] = useState<'id' | 'title' | 'owner'>('id');
   const [searchValue, setSearchValue] = useState('');
+  const [tempOnly, setTempOnly] = useState(false);
   const filteredRequests = useMemo(() => {
     const keyword = searchValue.trim().toLowerCase();
     if (!keyword) return requests;
@@ -113,7 +117,7 @@ export default function Procurement({
     try {
       const response = mode === 'management'
         ? await procurementApi.getOrders(false, activePlantId)
-        : await procurementApi.getRequests(false, activePlantId);
+        : await procurementApi.getRequests(false, activePlantId, tempOnly);
       setRequests(response.map((request) => ({
         ...request,
         requestDate: formatDateOnly(request.requestDate),
@@ -122,7 +126,7 @@ export default function Procurement({
         shipStartDate: formatDateOnly(request.shipStartDate) || null,
       })));
     } catch (e) { console.error(e); }
-  }, [activePlantId, canRead, mode]);
+  }, [activePlantId, canRead, mode, tempOnly]);
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadRequests();
@@ -130,10 +134,32 @@ export default function Procurement({
     return () => window.clearTimeout(timer);
   }, [loadRequests]);
 
+  const createIntegratedOrder = async () => {
+    if (selectedRequestIds.length < 1) {
+      toast.error('통합 발주할 구매요청을 선택하세요.');
+      return;
+    }
+    try {
+      const details = await Promise.all(selectedRequestIds.map((id) => procurementApi.getRequest(id, activePlantId)));
+      const lines = details.flatMap((detail) => detail.items.map((item) => ({
+        prId: detail.header.id,
+        prItemNo: item.itemNo!,
+        qty: Number(item.qty),
+      })));
+      const created = await procurementApi.createIntegratedOrder({ lines });
+      toast.success(`통합 PO ${created.id}가 생성되었습니다.`);
+      setSelectedRequestIds([]);
+      await loadRequests();
+    } catch (error: unknown) {
+      toastApiError(error, '통합 발주 생성에 실패했습니다.');
+    }
+  };
+
   // 신규/수정 모달
   const [formOpen, setFormOpen] = useState(false);
   const [formHeader, setFormHeader] = useState<Partial<PurchaseRequest>>({ requestDate: todayLocal() });
   const [formItems, setFormItems] = useState<PurchaseRequestItem[]>([{ inventoryId: '', qty: 0, unit: '' }]);
+  const [allocations, setAllocations] = useState<PurchaseOrderAllocation[]>([]);
   const [approvalRef, setApprovalRef] = useState<PurchaseRequest | null>(null);
   const [detailMode, setDetailMode] = useState<'create' | 'request' | 'management'>('request');
 
@@ -141,7 +167,7 @@ export default function Procurement({
     setDetailMode('create');
     setFormHeader({
       requestDate: todayLocal(),
-      plantId: activePlantId || user?.lastLoginPlantId || '',
+      plantId: activePlantId || user?.homePlantId || '',
       departmentId: user?.departmentId || '',
     });
     setFormItems([{ inventoryId: '', qty: 0, unit: '' }]);
@@ -154,8 +180,16 @@ export default function Procurement({
         ? await procurementApi.getOrder(request.id, activePlantId)
         : await procurementApi.getRequest(request.id, activePlantId);
       setDetailMode(mode === 'management' ? 'management' : 'request');
+      const isRejected = mode === 'request' && response.header.status === 'R';
       setFormHeader({
         ...response.header,
+        ...(isRejected ? {
+          id: undefined,
+          status: 'T',
+          requesterId: user?.id,
+          createdAt: undefined,
+          approvalId: undefined,
+        } : {}),
         requestDate: formatDateOnly(response.header.requestDate),
         orderDate: formatDateOnly(response.header.orderDate) || null,
         etaDate: formatDateOnly(response.header.etaDate) || null,
@@ -165,17 +199,46 @@ export default function Procurement({
         ...item,
         qty: Number(item.qty),
       })));
+      if (mode === 'management' && response.header.purchaseOrderId) {
+        setAllocations(await procurementApi.getOrderAllocations(response.header.purchaseOrderId));
+      } else {
+        setAllocations([]);
+      }
       setFormOpen(true);
     } catch (error: unknown) {
       toastApiError(error, '구매요청을 불러오지 못했습니다.');
     }
   };
 
-  const submitForm = async (action: 'T' | 'P' | 'S') => {
+  const saveAllocations = async () => {
+    if (!formHeader.id || !allocations.length) return;
+    const totals = allocations.reduce<Record<number, number>>((result, line) => {
+      result[line.docItemNo] = (result[line.docItemNo] || 0) + Number(line.allocatedQty);
+      return result;
+    }, {});
+    const invalid = allocations.some((line) => !Number.isFinite(Number(line.allocatedQty)) || Number(line.allocatedQty) <= 0);
+    if (invalid) { toast.error('배부수량은 0보다 커야 합니다.'); return; }
+    const orderLines = new Map(formItems.map((item, index) => [index + 1, Number(item.qty)]));
+    if (Object.entries(totals).some(([lineNo, total]) => Math.abs(total - (orderLines.get(Number(lineNo)) || 0)) > 0.0001)) {
+      toast.error('배부 합계가 발주수량과 일치해야 합니다.');
+      return;
+    }
+    try {
+      const saved = await procurementApi.saveOrderAllocations(formHeader.id, allocations.map((line) => ({
+        docItemNo: line.docItemNo,
+        prId: line.prId,
+        prItemNo: line.prItemNo,
+        allocatedQty: Number(line.allocatedQty),
+      })));
+      setAllocations(saved);
+      toast.success('배부 정보가 저장되었습니다.');
+    } catch (error: unknown) { toastApiError(error, '배부 정보 저장에 실패했습니다.'); }
+  };
+
+  const submitForm = async (action: 'T' | 'P') => {
     if (!formHeader.title?.trim()) { toast.error('제목을 입력하세요.'); return; }
     if (!formHeader.warehouseId) { toast.error('예정 창고를 선택하세요.'); return; }
     if (formItems.length === 0 || !formItems[0].inventoryId) { toast.error('자재 라인을 1개 이상 입력하세요.'); return; }
-    if (action === 'S' && !(await requestConfirmation('이 구매요청을 직접확정하시겠습니까?'))) return;
     try {
       const header = { ...formHeader, status: 'T' };
       const saved = formHeader.id
@@ -186,12 +249,7 @@ export default function Procurement({
         setApprovalRef(saved);
         return;
       }
-      if (action === 'S') {
-        await procurementApi.confirm(saved.id);
-        toast.success('구매요청이 직접확정되었습니다.');
-      } else {
-        toast.success('구매요청이 임시저장되었습니다.');
-      }
+      toast.success('구매요청이 임시저장되었습니다.');
       setFormOpen(false);
       await loadRequests();
     } catch (error: unknown) {
@@ -255,7 +313,7 @@ export default function Procurement({
   const handlePrint = () => {
     const stamp = formatDateTimeSeconds(new Date());
     const common = {
-      companyName: user?.companyName || user?.companyId || 'CMMS',
+      companyName: user?.companyId || 'CMMS',
       printerName: user?.name || '-',
       printedAt: stamp,
     };
@@ -265,11 +323,11 @@ export default function Procurement({
       rows: filteredRequests,
       getRowKey: (request) => request.id,
       columns: [
-        { header: '요청번호', render: (request) => request.id, className: 'font-mono' },
-        { header: '요청일', render: (request) => request.requestDate || '-' },
+        { header: '문서번호', render: (request) => request.id, className: 'font-mono' },
+        { header: '작성일자', render: (request) => request.requestDate || '-' },
         { header: '플랜트/창고', render: (request) => `${request.plantId || '-'} / ${request.warehouseId || '-'}` },
         { header: '유형', render: (request) => prTypes.find((type) => type.id === request.requestType)?.name || request.requestType || '-' },
-        { header: '문서상태', render: (request) => getCommonStatusLabel(request.status) },
+        { header: '상태', render: (request) => getCommonStatusLabel(request.status) },
         {
           header: '구매진행상태',
           render: (request) => request.procStatus
@@ -401,18 +459,17 @@ export default function Procurement({
     usersList,
     warehouses,
   ]);
-  const canCreate = requestPermission?.C === 'Y';
-  const canUpdate = requestPermission?.U === 'Y';
-  const canDelete = requestPermission?.D === 'Y';
-  const canDirectConfirm = requestPermission?.A === 'Y';
-  const canManageOrder = orderPermission?.U === 'Y';
-  const canReceive = user?.permissions?.STK?.C === 'Y';
+  const canCreate = hasModuleManage(user?.moduleAccess, APP_MODULE.PUR);
+  const canUpdate = canRequestRead;
+  const canDelete = canRequestRead;
+  const canManageOrder = hasModuleManage(user?.moduleAccess, APP_MODULE.POR);
+  const canReceive = hasModuleRead(user?.moduleAccess, APP_MODULE.STK);
   const isRequestDraftLike = !formHeader.id || ['T', 'R'].includes(formHeader.status || '');
   const isOwnTempRequest = formHeader.status === 'T' && formHeader.requesterId === user?.id;
   const canEditRequest = !formHeader.id ? canCreate : canUpdate || isOwnTempRequest;
   const formEditable = detailMode !== 'management' && isRequestDraftLike && canEditRequest;
   const canSaveRequest = canEditRequest;
-  const isConfirmedRequest = ['S', 'C'].includes(formHeader.status || '');
+  const isConfirmedRequest = ['C'].includes(formHeader.status || '');
   const canManageFlow = detailMode === 'management' && isConfirmedRequest && canManageOrder;
   const canCloseRequest = detailMode === 'management'
     && isConfirmedRequest
@@ -459,6 +516,11 @@ export default function Procurement({
               <Plus size={14} /> 입력
             </button>
           )}
+          {mode === 'request' && canManageOrder && selectedRequestIds.length > 0 && (
+            <button onClick={() => void createIntegratedOrder()} className="rounded-lg bg-amber-700 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-600">
+              선택 {selectedRequestIds.length}건 통합 발주
+            </button>
+          )}
         </div>
       </div>
 
@@ -473,17 +535,27 @@ export default function Procurement({
             <option value="owner">담당자</option>
           </select>
           <input value={searchValue} onChange={(event) => setSearchValue(event.target.value)} placeholder="검색어를 입력하세요" className="flex-1 min-w-[200px] bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300 outline-none" />
+          {mode === 'request' && (
+            <button
+              type="button"
+              onClick={() => setTempOnly((current) => !current)}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold cursor-pointer ${tempOnly ? 'border-blue-500 bg-blue-600 text-white' : 'border-slate-800 bg-slate-950 text-slate-400'}`}
+            >
+              임시저장 {tempOnly ? 'ON' : 'OFF'}
+            </button>
+          )}
         </div>
         <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/40">
         <table className="w-full text-left text-xs border-collapse">
           <thead>
             <tr className="bg-slate-900 text-slate-400 border-b border-slate-800 select-none">
-              <th className="p-3 font-semibold">요청번호</th>
-              <th className="p-3 font-semibold">요청일</th>
+              <th className="p-3 font-semibold">{mode === 'request' && canManageOrder ? '선택' : ''}</th>
+              <th className="p-3 font-semibold">문서번호</th>
+              <th className="p-3 font-semibold">작성일자</th>
               <th className="p-3 font-semibold">제목</th>
               <th className="p-3 font-semibold">플랜트/창고</th>
               <th className="p-3 font-semibold">유형</th>
-              <th className="p-3 font-semibold">결재상태</th>
+              <th className="p-3 font-semibold">상태</th>
               <th className="p-3 font-semibold">구매상태</th>
               <th className="p-3 font-semibold">발주일 / 배송일</th>
               <th className="p-3 font-semibold text-right">작업</th>
@@ -491,10 +563,21 @@ export default function Procurement({
           </thead>
           <tbody>
             {filteredRequests.length === 0 && (
-              <tr><td colSpan={9} className="p-8 text-center text-slate-600">구매요청이 없습니다.</td></tr>
+              <tr><td colSpan={10} className="p-8 text-center text-slate-600">구매요청이 없습니다.</td></tr>
             )}
             {filteredRequests.map(pr => (
               <tr key={pr.id} className="border-b border-slate-900 hover:bg-slate-900/30 text-slate-300">
+                <td className="p-3">
+                  {mode === 'request' && canManageOrder && pr.status === 'C' && (
+                    <input
+                      type="checkbox"
+                      checked={selectedRequestIds.includes(pr.id)}
+                      onChange={(event) => setSelectedRequestIds(event.target.checked
+                        ? [...selectedRequestIds, pr.id]
+                        : selectedRequestIds.filter((id) => id !== pr.id))}
+                    />
+                  )}
+                </td>
                 <td className="p-3 font-mono">
                   <button
                     type="button"
@@ -532,9 +615,11 @@ export default function Procurement({
                     icon={FileText}
                     tone="accent"
                   />
-                  {canReceive && ['S', 'C'].includes(pr.status) && pr.procStatus !== 'E' && (
+                  {canReceive && ['C'].includes(pr.status) && pr.procStatus !== 'E' && (
                     <ListIconButton
-                      onClick={() => onOpenReceiptRequest?.(pr.id)}
+                      onClick={() => mode === 'management' && pr.purchaseOrderId
+                        ? onOpenReceiptOrder?.(pr.purchaseOrderId)
+                        : onOpenReceiptRequest?.(pr.id)}
                       label="입고"
                       icon={PackagePlus}
                       tone="accent"
@@ -564,7 +649,7 @@ export default function Procurement({
               <option value="">선택</option>
               {prTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select></Field>
-            <Field label="플랜트"><select value={formHeader.plantId || ''} onChange={e => setFormHeader({ ...formHeader, plantId: e.target.value, warehouseId: '' })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" disabled={!formEditable || user?.multiPlant !== 'Y'}>
+            <Field label="플랜트"><select value={formHeader.plantId || ''} onChange={e => setFormHeader({ ...formHeader, plantId: e.target.value, warehouseId: '' })} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" disabled={!formEditable}>
               <option value="">선택</option>
               {plants.map(p => <option key={p.id} value={p.id}>{p.id} — {p.name}</option>)}
             </select></Field>
@@ -608,6 +693,37 @@ export default function Procurement({
             </table>
             </div>
           </div>
+          {detailMode === 'management' && (
+            <div className="mt-6">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-400">PR 배부</span>
+                {canManageFlow && formHeader.procStatus === 'O' && allocations.length > 0 && (
+                  <button onClick={() => void saveAllocations()} className="rounded-lg border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-xs font-semibold text-blue-200 hover:bg-blue-800/60">
+                    배부 저장
+                  </button>
+                )}
+              </div>
+              {allocations.length === 0 ? (
+                <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-4 text-xs text-slate-500">등록된 배부 정보가 없습니다.</div>
+              ) : (
+                <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950/40">
+                  <table className="w-full border-collapse text-xs">
+                    <thead><tr className="border-b border-slate-800 bg-slate-900 text-slate-400"><th className="p-3 text-left">PO 라인</th><th className="p-3 text-left">PR / 라인</th><th className="p-3 text-left">자재</th><th className="p-3 text-right">배부수량</th></tr></thead>
+                    <tbody>
+                      {allocations.map((line, index) => (
+                        <tr key={`${line.docItemNo}-${line.prId}-${line.prItemNo}`} className="border-b border-slate-900 text-slate-300">
+                          <td className="p-3">{line.docItemNo}</td>
+                          <td className="p-3 font-mono">{line.prId} / {line.prItemNo}</td>
+                          <td className="p-3 font-mono">{line.inventoryId}</td>
+                          <td className="p-1"><input type="number" min="0.0001" step="0.0001" value={line.allocatedQty} disabled={!canManageFlow || formHeader.procStatus !== 'O'} onChange={(event) => setAllocations(allocations.map((item, itemIndex) => itemIndex === index ? { ...item, allocatedQty: Number(event.target.value) } : item))} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-right text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
           <div className="flex justify-end gap-2 mt-6 pt-6 border-t border-slate-800">
             <button onClick={() => setFormOpen(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg py-2 px-4 text-xs font-semibold transition-colors border-0 cursor-pointer">닫기</button>
             {formHeader.id && detailMode === 'request' && formHeader.status === 'T' && (canDelete || isOwnTempRequest) && (
@@ -629,9 +745,6 @@ export default function Procurement({
             )}
             {formEditable && canSaveRequest && <button onClick={() => submitForm('T')} className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer">임시 저장</button>}
             {formEditable && canSaveRequest && <button onClick={() => submitForm('P')} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-4 text-xs font-semibold transition-colors border-0 cursor-pointer">결재 상신</button>}
-            {formEditable && canSaveRequest && canDirectConfirm && (
-              <button onClick={() => submitForm('S')} className="bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg py-2 px-5 text-xs font-semibold transition-colors border-0 cursor-pointer">직접 확정</button>
-            )}
           </div>
         </Modal>
       )}

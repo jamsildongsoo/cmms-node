@@ -6,13 +6,18 @@ import type {
   PurchaseRequest,
   PurchaseRequestDetail,
   PurchaseRequestItem,
+  PurchaseOrderAllocation,
   ReceiveRequest,
 } from './procurement.types';
 
 export const procurementApi = {
-  async getRequests(receivable = false, plantId?: string | null): Promise<PurchaseRequest[]> {
+  async getRequests(receivable = false, plantId?: string | null, tempOnly = false): Promise<PurchaseRequest[]> {
     const response = await axiosInstance.get<PurchaseRequest[]>('/procurement/requests', {
-      params: { plantId: plantId || undefined, receivable: receivable ? 'Y' : undefined },
+      params: {
+        plantId: plantId || undefined,
+        receivable: receivable ? 'Y' : undefined,
+        tempOnly: tempOnly ? 'Y' : undefined,
+      },
     });
     return response.data;
   },
@@ -28,11 +33,66 @@ export const procurementApi = {
     });
     return response.data;
   },
+  async createIntegratedOrder(request: {
+    orderDate?: string;
+    etaDate?: string;
+    lines: Array<{ prId: string; prItemNo: number; qty: number }>;
+  }): Promise<PurchaseRequest> {
+    const response = await axiosInstance.post<PurchaseRequest>('/procurement/orders', request);
+    return response.data;
+  },
   async getOrder(id: string, plantId?: string | null): Promise<PurchaseRequestDetail> {
     const response = await axiosInstance.get<PurchaseRequestDetail>(`/procurement/orders/${id}`, {
       params: { plantId: plantId || undefined },
     });
     return response.data;
+  },
+  async getOrderAllocations(orderId: string): Promise<PurchaseOrderAllocation[]> {
+    const response = await axiosInstance.get<PurchaseOrderAllocation[]>(
+      `/procurement/orders/${encodeURIComponent(orderId)}/allocations`,
+    );
+    return response.data;
+  },
+  async saveOrderAllocations(
+    orderId: string,
+    lines: Array<Pick<PurchaseOrderAllocation, 'docItemNo' | 'prId' | 'prItemNo' | 'allocatedQty'>>,
+  ): Promise<PurchaseOrderAllocation[]> {
+    const response = await axiosInstance.put<PurchaseOrderAllocation[]>(
+      `/procurement/orders/${encodeURIComponent(orderId)}/allocations`,
+      { lines },
+    );
+    return response.data;
+  },
+  async transferOrder(request: {
+    orderId: string;
+    sourceWarehouseId: string;
+    targetWarehouseId: string;
+    txDate?: string;
+    lines: Array<{ docItemNo: number; qty: number }>;
+  }): Promise<PurchaseOrderAllocation[]> {
+    const { orderId, ...payload } = request;
+    const response = await axiosInstance.post<PurchaseOrderAllocation[]>(
+      `/procurement/orders/${encodeURIComponent(orderId)}/actions/transfer`,
+      payload,
+    );
+    return response.data;
+  },
+  async transferPurchaseRequests(request: {
+    sourceWarehouseId: string;
+    targetWarehouseId: string;
+    txDate?: string;
+    lines: Array<{ prId: string; prItemNo: number; qty: number }>;
+  }): Promise<void> {
+    await axiosInstance.post('/procurement/transfers/pr', request);
+  },
+  async receiveOrder(request: {
+    orderId: string;
+    warehouseId: string;
+    txDate?: string;
+    lines: Array<{ itemNo: number; qty: number; unitPrice: number }>;
+  }): Promise<void> {
+    const { orderId, ...payload } = request;
+    await axiosInstance.post(`/procurement/orders/${encodeURIComponent(orderId)}/actions/receive`, payload);
   },
   async create(header: Partial<PurchaseRequest>, items: PurchaseRequestItem[]): Promise<PurchaseRequest> {
     const response = await axiosInstance.post<PurchaseRequest>('/procurement/requests', { header, items });

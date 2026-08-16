@@ -1,7 +1,8 @@
 import { Entity, PrimaryColumn, Column } from 'typeorm';
+import { BaseEntity } from './base.entity';
 
 @Entity('role_detail')
-export class RoleDetail {
+export class RoleDetail extends BaseEntity {
   @PrimaryColumn({ name: 'company_id', length: 50 })
   companyId!: string;
 

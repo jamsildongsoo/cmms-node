@@ -1,5 +1,4 @@
-import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
-import { Department } from './department.entity';
+import { Entity, PrimaryColumn, Column } from 'typeorm';
 import { BaseEntity } from './base.entity';
 
 @Entity('inventory')
@@ -15,9 +14,6 @@ export class Inventory extends BaseEntity {
 
   @Column({ type: 'varchar',  name: 'inv_type_code', length: 50, nullable: true })
   invTypeCode!: string | null;
-
-  @Column({ type: 'varchar',  name: 'department_id', length: 50, nullable: true })
-  departmentId!: string | null;
 
   @Column({ type: 'varchar',  length: 20, nullable: true })
   unit!: string | null;

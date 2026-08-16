@@ -17,14 +17,14 @@ import ListIconButton from '../components/ListIconButton';
 import {
   Wrench, Plus, Edit2, Trash2, Printer, FileSpreadsheet
 } from 'lucide-react';
+import { hasModuleManage } from '../utils/moduleAccess';
 
 export default function Equipment() {
   const user = useAuthStore((state) => state.user);
   const activePlantId = useAuthStore((state) => state.activePlantId);
-  const permission = user?.permissions?.[APP_MODULE.EQP];
-  const canCreate = permission?.C === 'Y';
-  const canUpdate = permission?.U === 'Y';
-  const canDelete = permission?.D === 'Y';
+  const canCreate = hasModuleManage(user?.moduleAccess, APP_MODULE.EQP);
+  const canUpdate = canCreate;
+  const canDelete = canCreate;
   const [equipments, setEquipments] = useState<EquipmentModel[]>([]);
   const [plants, setPlants] = useState<Plant[]>([]);
   const [equipmentTypes, setEquipmentTypes] = useState<CodeItem[]>([]);
@@ -210,7 +210,7 @@ export default function Equipment() {
       title: '설비 마스터 목록',
       rows: filteredEquipments,
       getRowKey: (equipment) => `${equipment.plantId}:${equipment.id}`,
-      companyName: user?.companyName || user?.companyId || 'CMMS',
+      companyName: user?.companyId || 'CMMS',
       printerName: user?.name || '-',
       printedAt: stamp,
       emptyMessage: '등록된 설비가 없습니다.',

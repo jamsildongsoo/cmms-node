@@ -9,7 +9,6 @@ export const DOC_STATUS = {
   TEMP: 'T',
   IN_PROGRESS: 'P',
   CONFIRMED: 'C',
-  SELF_CONFIRMED: 'S',
   REJECTED: 'R',
   CANCELED: 'X',
   EXPIRED: 'E',
@@ -19,7 +18,6 @@ export type DocStatus = (typeof DOC_STATUS)[keyof typeof DOC_STATUS];
 
 export const STATUS_LABELS: Record<string, string> = {
   T: '임시저장',
-  S: '직접확정(완료)',
   P: '결재진행',
   C: '결재확정(완료)',
   R: '반려',

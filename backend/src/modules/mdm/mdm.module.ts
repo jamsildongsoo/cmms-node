@@ -5,12 +5,13 @@ import { MdmService } from './mdm.service';
 import { Plant } from '../../entities/plant.entity';
 import { Department } from '../../entities/department.entity';
 import { Role } from '../../entities/role.entity';
-import { RoleDetail } from '../../entities/role-detail.entity';
 import { User } from '../../entities/users.entity';
 import { Warehouse } from '../../entities/warehouse.entity';
 import { CodeGroup } from '../../entities/code-group.entity';
 import { CodeItem } from '../../entities/code-item.entity';
 import { Company } from '../../entities/company.entity';
+import { InventoryStatus } from '../../entities/inventory-status.entity';
+import { RoleDetail } from '../../entities/role-detail.entity';
 
 @Module({
   imports: [
@@ -18,12 +19,13 @@ import { Company } from '../../entities/company.entity';
       Plant,
       Department,
       Role,
-      RoleDetail,
       User,
       Warehouse,
       CodeGroup,
       CodeItem,
       Company,
+      InventoryStatus,
+      RoleDetail,
     ]),
   ],
   controllers: [MdmController, MetaController],

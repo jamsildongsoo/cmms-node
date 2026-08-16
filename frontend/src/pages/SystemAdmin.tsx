@@ -144,7 +144,7 @@ export default function SystemAdmin() {
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
           <div className="space-y-2">
             <h3 className="text-sm font-bold text-slate-200">신규 회사 생성</h3>
-            <p className="text-[11px] text-slate-500">생성 시 기본 롤(ADMIN/MANAGER/USER)·권한 매트릭스·공통코드가 자동 시딩되고, 아래 관리자 계정이 <span className="text-slate-300 font-semibold">ADMIN 롤</span>로 함께 생성됩니다.</p>
+            <p className="text-[11px] text-slate-500">생성 시 기본 롤(ADMIN/MANAGER/USER/PURCHASER)·권한 매트릭스·공통코드가 자동 시딩되고, 아래 관리자 계정이 <span className="text-slate-300 font-semibold">ADMIN 롤</span>로 함께 생성됩니다.</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
                 <input

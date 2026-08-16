@@ -1,22 +1,37 @@
-import { Controller, Get, Put, Body, Query, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Query, Param, UseGuards } from '@nestjs/common';
 import { SystemService } from './system.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { getTenantContext } from '../../common/context/tenant.context';
-import { PermissionGuard, SystemPermission } from '../../common/guards/permission.guard';
+import { SystemGuard } from '../../common/guards/system.guard';
+import { MdmService } from '../mdm/mdm.service';
+import { Company } from '../../entities/company.entity';
+import { CreateCompanyDto, CreateCompanyResponseDto } from '../mdm/dto/create-company.dto';
 
 @Controller('api/system')
-@UseGuards(JwtAuthGuard, PermissionGuard)
+@UseGuards(JwtAuthGuard, SystemGuard)
 export class SystemController {
-  constructor(private readonly systemService: SystemService) {}
+  constructor(
+    private readonly systemService: SystemService,
+    private readonly mdmService: MdmService,
+  ) {}
+
+  @Get('companies')
+  async getCompanies(): Promise<Company[]> {
+    return this.mdmService.getCompanies();
+  }
+
+  @Post('companies')
+  async createCompany(@Body() body: CreateCompanyDto): Promise<CreateCompanyResponseDto> {
+    const { userId } = getTenantContext();
+    return this.mdmService.createCompany(body, userId);
+  }
 
   @Get('users')
-  @SystemPermission()
   async getUsers(@Query('companyId') companyId?: string) {
     return this.systemService.getUsers(companyId);
   }
 
   @Get('login-history')
-  @SystemPermission()
   async getLoginHistory(
     @Query('companyId') companyId?: string,
     @Query('userId') userId?: string,
@@ -25,7 +40,6 @@ export class SystemController {
   }
 
   @Put('users/:companyId/:id/use-yn')
-  @SystemPermission()
   async updateUserUseYn(
     @Param('companyId') companyId: string,
     @Param('id') id: string,

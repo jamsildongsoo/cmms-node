@@ -31,13 +31,12 @@ import {
 } from './dto/auth-request.dto';
 import { AppModule } from '../../common/constants/module.constants';
 import { User } from '../../entities/users.entity';
-import { Role } from '../../entities/role.entity';
 import { Plant } from '../../entities/plant.entity';
 import { Company } from '../../entities/company.entity';
-import { RoleDetail } from '../../entities/role-detail.entity';
 import { LoginHistory } from '../../entities/login-history.entity';
 import { AuthRefreshSession } from '../../entities/auth-refresh-session.entity';
 import { DEFAULT_AVATAR_KEY, isAvatarKey } from '../../common/constants/avatar.constants';
+import { DepartmentAccessService, ModuleAccessMap } from '../../common/permissions/department-access.service';
 
 @Injectable()
 export class AuthService {
@@ -57,18 +56,15 @@ export class AuthService {
     private readonly config: ConfigService,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-    @InjectRepository(Role)
-    private readonly roleRepository: Repository<Role>,
     @InjectRepository(Plant)
     private readonly plantRepository: Repository<Plant>,
     @InjectRepository(Company)
     private readonly companyRepository: Repository<Company>,
-    @InjectRepository(RoleDetail)
-    private readonly roleDetailRepository: Repository<RoleDetail>,
     @InjectRepository(LoginHistory)
     private readonly loginHistoryRepository: Repository<LoginHistory>,
     @InjectRepository(AuthRefreshSession)
     private readonly refreshSessionRepository: Repository<AuthRefreshSession>,
+    private readonly departmentAccessService: DepartmentAccessService,
   ) {
     this.passwordExpiryDays = config.get<number>('PASSWORD_EXPIRY_DAYS', 90);
     this.maxFailedAttempts = config.get<number>('PASSWORD_MAX_FAILED', 5);
@@ -94,7 +90,7 @@ export class AuthService {
     userAgent?: string,
   ): Promise<{ response: LoginResponse; refreshToken: string }> {
     const companyId = req.companyId.toUpperCase().trim();
-    const { user, multiPlant } = await this.findActiveUser(companyId, req.id);
+    const { user } = await this.findActiveUser(companyId, req.id);
     if (!user) {
       await this.recordLoginHistory(companyId, req.id, ipAddress, 'FAIL');
       throw new UnauthorizedException('존재하지 않거나 사용 중지된 사용자입니다.');
@@ -132,14 +128,14 @@ export class AuthService {
       throw new UnauthorizedException(msg);
     }
 
-    let plantId: string | null = user.lastLoginPlantId;
-    if (!plantId) {
+    let homePlantId: string | null = user.lastLoginPlantId;
+    if (!homePlantId) {
       const plant = await this.plantRepository.findOne({
         select: { id: true },
         where: { companyId, deleteYn: 'N' },
         order: { id: 'ASC' },
       });
-      plantId = plant?.id ?? null;
+      homePlantId = plant?.id ?? null;
     }
 
     await this.userRepository.update(
@@ -149,7 +145,7 @@ export class AuthService {
         accountLockedUntil: null,
         lastLoginAt: now,
         lastLoginIp: ipAddress,
-        lastLoginPlantId: plantId,
+        lastLoginPlantId: homePlantId,
       },
     );
     await this.recordLoginHistory(companyId, req.id, ipAddress, 'SUCCESS');
@@ -165,27 +161,28 @@ export class AuthService {
       companyId,
       userId: req.id,
       roleId: user.roleId ?? '',
+      scope: user.scope,
       departmentId: user.departmentId ?? null,
-      lastLoginPlantId: plantId,
-      multiPlant,
+      homePlantId,
     };
     const accessToken = this.signAccessToken(payload);
     const company = await this.companyRepository.findOne({
       select: { name: true },
       where: { id: companyId },
     });
-    const permissions = await this.resolvePermissions(companyId, user.roleId ?? '');
+    const moduleAccess = await this.resolveModuleAccess(companyId, req.id, user.roleId);
+    const departmentWarehouseId = await this.departmentAccessService.getDepartmentWarehouseId(companyId, req.id);
     const response = this.buildLoginResponse(
       accessToken,
       companyId,
       company?.name ?? companyId,
       req.id,
       user,
-      plantId,
-      multiPlant,
+      homePlantId,
       mustChange,
       expired,
-      permissions,
+      moduleAccess,
+      departmentWarehouseId,
     );
     const refresh = await this.issueRefreshSession(companyId, req.id, ipAddress, userAgent);
 
@@ -248,7 +245,7 @@ export class AuthService {
       throw new UnauthorizedException('refresh token 검증에 실패했습니다.');
     }
 
-    const { user, multiPlant } = await this.findActiveUser(decoded.companyId, decoded.userId);
+    const { user } = await this.findActiveUser(decoded.companyId, decoded.userId);
     if (!user) {
       await this.revokeRefreshSession(session, 'SYSTEM');
       throw new UnauthorizedException('사용자를 찾을 수 없습니다.');
@@ -259,16 +256,24 @@ export class AuthService {
       companyId: decoded.companyId,
       userId: decoded.userId,
       roleId: user.roleId ?? '',
+      scope: user.scope,
       departmentId: user.departmentId ?? null,
-      lastLoginPlantId: user.lastLoginPlantId ?? null,
-      multiPlant,
+      homePlantId: user.lastLoginPlantId ?? null,
     };
     const accessToken = this.signAccessToken(payload);
     const company = await this.companyRepository.findOne({
       select: { name: true },
       where: { id: decoded.companyId },
     });
-    const permissions = await this.resolvePermissions(decoded.companyId, user.roleId ?? '');
+    const moduleAccess = await this.resolveModuleAccess(
+      decoded.companyId,
+      decoded.userId,
+      user.roleId,
+    );
+    const departmentWarehouseId = await this.departmentAccessService.getDepartmentWarehouseId(
+      decoded.companyId,
+      decoded.userId,
+    );
     const expired = !!(
       user.passwordChangedAt &&
       user.passwordChangedAt.getTime() + this.passwordExpiryDays * 86400000 < Date.now()
@@ -280,10 +285,10 @@ export class AuthService {
       decoded.userId,
       user,
       user.lastLoginPlantId ?? null,
-      multiPlant,
       user.mustChangePassword === 'Y' || expired,
       expired,
-      permissions,
+      moduleAccess,
+      departmentWarehouseId,
     );
     const rotated = await this.rotateRefreshSession(
       session,
@@ -341,7 +346,7 @@ export class AuthService {
       name: req.name,
       passwordHash: hash,
       departmentId: req.departmentId ?? null,
-      roleId: null,
+      roleId: 'USER',
       email: req.email?.trim() || null,
       phone: req.phone?.trim() || null,
       position: req.position?.trim() || null,
@@ -358,8 +363,6 @@ export class AuthService {
       where: { companyId, id: userId, deleteYn: 'N' },
     });
     if (!user) throw new UnauthorizedException('사용자를 찾을 수 없습니다.');
-    const multiPlant = await this.getMultiPlant(companyId, user.roleId);
-
     return {
       companyId: user.companyId,
       id: user.id,
@@ -371,8 +374,8 @@ export class AuthService {
       avatarKey: user.avatarKey || DEFAULT_AVATAR_KEY,
       departmentId: user.departmentId ?? null,
       roleId: user.roleId ?? '',
-      lastLoginPlantId: user.lastLoginPlantId ?? null,
-      multiPlant,
+      scope: user.scope,
+      homePlantId: user.lastLoginPlantId ?? null,
       mustChangePassword: user.mustChangePassword === 'Y',
     };
   }
@@ -447,7 +450,7 @@ export class AuthService {
   private async findActiveUser(
     companyId: string,
     userId: string,
-  ): Promise<{ user: User | null; multiPlant: 'Y' | 'N' }> {
+  ): Promise<{ user: User | null }> {
     const user = await this.userRepository.findOne({
       where: {
         companyId,
@@ -456,22 +459,7 @@ export class AuthService {
         useYn: 'Y',
       },
     });
-    return {
-      user,
-      multiPlant: user ? await this.getMultiPlant(companyId, user.roleId) : 'N',
-    };
-  }
-
-  private async getMultiPlant(
-    companyId: string,
-    roleId: string | null,
-  ): Promise<'Y' | 'N'> {
-    if (!roleId) return 'N';
-    const role = await this.roleRepository.findOne({
-      select: { multiPlant: true },
-      where: { companyId, id: roleId },
-    });
-    return role?.multiPlant === 'Y' ? 'Y' : 'N';
+    return { user };
   }
 
   private signAccessToken(payload: JwtPayload): string {
@@ -593,24 +581,20 @@ export class AuthService {
       .execute();
   }
 
-  private async resolvePermissions(
+  private async resolveModuleAccess(
     companyId: string,
-    roleId: string,
-  ): Promise<Record<string, { C: string; R: string; U: string; D: string; A: string }>> {
-    if (roleId?.toUpperCase() === 'SYSTEM' && companyId === 'SYSTEM') {
+    userId: string,
+    roleId: string | null,
+  ): Promise<ModuleAccessMap> {
+    if (companyId === 'SYSTEM' && roleId?.toUpperCase() === 'SYSTEM') {
       return Object.fromEntries(Object.values(AppModule).map((module) => [
         module,
-        { C: 'Y', R: 'Y', U: 'Y', D: 'Y', A: 'Y' },
+        {
+          permC: 'Y', permR: 'Y', permU: 'Y', permD: 'Y', permA: 'Y',
+        },
       ]));
     }
-
-    const permissionRows = roleId
-      ? await this.roleDetailRepository.find({ where: { companyId, roleId } })
-      : [];
-    return Object.fromEntries(permissionRows.map((row) => [
-      row.moduleDetail,
-      { C: row.permC, R: row.permR, U: row.permU, D: row.permD, A: row.permA },
-    ]));
+    return this.departmentAccessService.getAccessMap(companyId, userId);
   }
 
   private buildLoginResponse(
@@ -619,11 +603,11 @@ export class AuthService {
     companyName: string,
     userId: string,
     user: User,
-    lastLoginPlantId: string | null,
-    multiPlant: 'Y' | 'N',
+    homePlantId: string | null,
     mustChange: boolean,
     expired: boolean,
-    permissions: Record<string, { C: string; R: string; U: string; D: string; A: string }>,
+    moduleAccess: ModuleAccessMap,
+    departmentWarehouseId: string | null,
   ): LoginResponse {
     return {
       accessToken,
@@ -633,14 +617,15 @@ export class AuthService {
       name: user.name,
       avatarKey: user.avatarKey || DEFAULT_AVATAR_KEY,
       roleId: user.roleId ?? '',
+      scope: user.scope,
       departmentId: user.departmentId ?? null,
       position: user.position ?? null,
       title: user.title ?? null,
-      lastLoginPlantId,
-      multiPlant,
+      homePlantId,
       mustChangePassword: mustChange,
       passwordExpired: expired,
-      permissions,
+      moduleAccess,
+      departmentWarehouseId,
     };
   }
 }

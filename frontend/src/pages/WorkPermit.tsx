@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
 import { useAuthStore } from '../store/useAuthStore';
+import { hasModuleManage } from '../utils/moduleAccess';
 import { getCommonStatusLabel as getStatusLabel } from '../constants/status';
 import { APP_MODULE } from '../constants/module';
 import {
@@ -52,6 +53,7 @@ export default function WorkPermit() {
   const [activeTab, setActiveTab] = useState<'plans' | 'results'>('plans');
   const [searchType, setSearchType] = useState<'id' | 'title' | 'supervisor'>('id');
   const [searchValue, setSearchValue] = useState('');
+  const [tempOnly, setTempOnly] = useState(false);
 
 
   const [permits, setPermits] = useState<WorkPermitModel[]>([]);
@@ -114,11 +116,9 @@ export default function WorkPermit() {
     content: RichTextDocument;
   } | null>(null);
 
-  const permission = user?.permissions?.[APP_MODULE.WP];
-  const canCreate = permission?.C === 'Y';
-  const canUpdate = permission?.U === 'Y';
-  const canDelete = permission?.D === 'Y';
-  const canDirectConfirm = permission?.A === 'Y';
+  const canCreate = hasModuleManage(user?.moduleAccess, APP_MODULE.WP);
+  const canUpdate = canCreate;
+  const canDelete = canCreate;
   const canEditCurrent = !wpNo
     ? canCreate
     : canUpdate || (recordStatus === 'T' && createdBy === user?.id);
@@ -133,6 +133,7 @@ export default function WorkPermit() {
         params.set('searchType', searchType);
         params.set('searchValue', searchValue);
       }
+      if (tempOnly) params.set('tempOnly', 'Y');
       // 폼 선택값 구성을 위한 시스템 참조값 조회다. 작업허가서 목록 R 권한을 대체하지 않는다.
       const [loadedPermits, loadedEquipments, loadedDepartments, loadedUsers, loadedWorkOrders] = await Promise.all([
         workPermitApi.getAll(params, activePlantId),
@@ -159,7 +160,7 @@ export default function WorkPermit() {
     const timer = window.setTimeout(() => { void fetchData(); }, 0);
     return () => window.clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePlantId]);
+  }, [activePlantId, activeTab, tempOnly]);
 
   const toggleAccordion = (type: string) => {
     setAccordionOpen(prev => ({ ...prev, [type]: !prev[type] }));
@@ -241,11 +242,12 @@ export default function WorkPermit() {
     setIsLoading(true);
     try {
       const w = await workPermitApi.getDetail(wp.plantId, wp.id);
+      const isRejected = w.status === 'R';
 
       const matchedEq = equipments.find(e => e.id === w.equipmentId);
       setEquipmentName(matchedEq ? matchedEq.name : w.equipmentId);
 
-      setWpNo(w.id);
+      setWpNo(isRejected ? '' : w.id);
       setPlantId(w.plantId);
       setEquipmentId(w.equipmentId);
       setWorkOrderId(w.workOrderId || '');
@@ -262,10 +264,10 @@ export default function WorkPermit() {
       setRemarks(w.remarks || '');
       setRefNo(w.refNo || '');
       setRefModule(w.refModule || '');
-      setApprovalId(w.status === 'R' ? '' : (w.approvalId || ''));
-      setCreatedAt(w.createdAt || '');
-      setCreatedBy(w.createdBy || '');
-      setRecordStatus(w.status || 'T');
+      setApprovalId('');
+      setCreatedAt(isRejected ? '' : (w.createdAt || ''));
+      setCreatedBy(isRejected ? '' : (w.createdBy || ''));
+      setRecordStatus(isRejected ? 'T' : (w.status || 'T'));
 
       // Parse JSON checksheets
       setGenChecks(parseCheckItems(w.jsonGeneral, INITIAL_GENERAL));
@@ -307,7 +309,7 @@ export default function WorkPermit() {
     }
   };
 
-  const handleSave = async (submitStatus: 'T' | 'S' | 'P') => {
+  const handleSave = async (submitStatus: 'T' | 'P') => {
     if (!title.trim()) {
       toast.error('허가명을 입력해주세요.');
       return;
@@ -390,7 +392,7 @@ export default function WorkPermit() {
         });
         return;
       }
-      toast.success(submitStatus === 'T' ? '임시저장 되었습니다.' : '안전작업허가서가 직접 확정 발급 완료되었습니다.');
+      toast.success('임시저장 되었습니다.');
       setIsFormOpen(false);
       fetchData();
     } catch (err) {
@@ -484,13 +486,13 @@ export default function WorkPermit() {
       title: '안전작업허가서 현황',
       rows: currentPermits,
       getRowKey: (permit) => permit.id,
-      companyName: user?.companyName || user?.companyId || 'CMMS',
+      companyName: user?.companyId || 'CMMS',
       printerName: user?.name || '-',
       printedAt: stamp,
       columns: [
-        { header: '허가번호', render: (permit) => permit.id, className: 'font-mono' },
-        { header: '허가명', render: (permit) => permit.title },
-        { header: '설비명', render: (permit) => equipments.find((item) => item.id === permit.equipmentId)?.name || permit.equipmentId },
+        { header: '문서번호', render: (permit) => permit.id, className: 'font-mono' },
+        { header: '제목', render: (permit) => permit.title },
+        { header: '대상설비', render: (permit) => equipments.find((item) => item.id === permit.equipmentId)?.name || permit.equipmentId },
         { header: '담당자', render: (permit) => usersList.find((item) => item.id === permit.createdBy)?.name || permit.createdBy || '-' },
         { header: '감독자', render: (permit) => usersList.find((item) => item.id === permit.supervisorId)?.name || permit.supervisorId },
         { header: '시작 시간', render: (permit) => formatDateTime(permit.startAt) },
@@ -580,6 +582,13 @@ export default function WorkPermit() {
           />
           <button type="button" onClick={fetchData} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-1.5 text-xs font-semibold cursor-pointer border-0">
             검색
+          </button>
+          <button
+            type="button"
+            onClick={() => setTempOnly((current) => !current)}
+            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold cursor-pointer ${tempOnly ? 'border-blue-500 bg-blue-600 text-white' : 'border-slate-800 bg-slate-950 text-slate-400'}`}
+          >
+            임시저장 {tempOnly ? 'ON' : 'OFF'}
           </button>
         </div>
       </div>
@@ -976,15 +985,6 @@ export default function WorkPermit() {
                 >
                   결재 상신
                 </button>}
-                {canEditCurrent && canDirectConfirm && (
-                  <button
-                    onClick={() => handleSave('S')}
-                    disabled={isLoading}
-                    className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg py-2 px-5 text-xs font-semibold transition-all cursor-pointer border-0 disabled:opacity-50 shadow-md shadow-emerald-950/20"
-                  >
-                    직접 확정 (Save)
-                  </button>
-                )}
               </div>
             </div>
           </div>

@@ -10,11 +10,11 @@ import type {
 
 export const systemAdminApi = {
   async getCompanies(): Promise<Company[]> {
-    const response = await axiosInstance.get<Company[]>('/mdm/companies');
+    const response = await axiosInstance.get<Company[]>('/system/companies');
     return response.data;
   },
   async createCompany(request: CreateCompanyRequest): Promise<void> {
-    await axiosInstance.post('/mdm/companies', request);
+    await axiosInstance.post('/system/companies', request);
   },
   async getUsers(companyId?: string): Promise<SystemUser[]> {
     const response = await axiosInstance.get<SystemUser[]>('/system/users', {

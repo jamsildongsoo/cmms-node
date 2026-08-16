@@ -17,14 +17,16 @@ export default function PrintHeader({ approvalNo }: PrintHeaderProps) {
   const user = useAuthStore((s) => s.user);
   const stamp = formatPrintStamp(new Date());
 
-  // 첫 페이지만 상단에 출력 로그 표시 (브라우저 페이지 분할에 맡김)
   return (
-    <div className="hidden print:flex print:justify-between print:items-center print:mb-2 print:text-[9px] print:text-slate-500 print:border-b print:border-slate-300 print:pb-1">
-      <span>{approvalNo ? `결재: ${approvalNo}` : ''}</span>
+    <div className="print-header hidden print:flex print:justify-between print:items-center print:mb-2 print:text-[9px] print:text-slate-500 print:border-b print:border-slate-300 print:pb-1">
       <div className="flex gap-4">
-        <span>회사: {user?.companyName || user?.companyId || 'CMMS'}</span>
-        <span>출력자: {user?.name || '-'}</span>
+        <span>회사코드: {user?.companyId || 'CMMS'}</span>
         <span>출력일시: {stamp}</span>
+        <span>출력자: {user?.name || '-'}</span>
+      </div>
+      <div className="flex gap-4">
+        {approvalNo && <span>결재: {approvalNo}</span>}
+        <span className="print-page-number" />
       </div>
     </div>
   );

@@ -113,6 +113,7 @@ export class ApprovalService {
         const canEditOwnTemp = await this.permissionPolicyService.assertCanUpdateOwnTempOrPermission({
           companyId,
           roleId: roleId ?? '',
+          userId: operator,
           module: AppModule.APR,
           status: entity.status,
           ownerId: entity.drafterId,
@@ -275,6 +276,7 @@ export class ApprovalService {
       const canDeleteOwnTemp = await this.permissionPolicyService.assertCanDeleteOwnTempOrPermission({
         companyId,
         roleId,
+        userId: operator,
         module: AppModule.APR,
         status: approval.status,
         ownerId: approval.drafterId,

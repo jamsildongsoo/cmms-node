@@ -64,12 +64,12 @@ export default function WorkPermitPrint(p: WorkPermitPrintProps) {
       <PrintSection title="문서 정보">
         <div className="divide-y divide-gray-300 border-y border-gray-400">
           <div className="grid grid-cols-2 gap-4 py-2">
-            <PrintField label="허가명" value={p.title} />
+            <PrintField label="제목" value={p.title} />
             <PrintField label="상태" value={getCommonStatusLabel(p.status)} />
           </div>
           <div className="grid grid-cols-2 gap-4 py-2">
-            <PrintField label="대상설비 번호/이름" value={`${p.equipmentId} / ${p.equipmentName}`} />
-            <PrintField label="허가유형" value={p.permitTypeLabel} />
+            <PrintField label="대상설비" value={`${p.equipmentId} / ${p.equipmentName}`} />
+            <PrintField label="유형" value={p.permitTypeLabel} />
           </div>
           <div className="grid grid-cols-3 gap-4 py-2">
             <PrintField label="시작 시간" value={fmt(p.startAt)} />

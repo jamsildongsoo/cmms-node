@@ -3,13 +3,13 @@ import type { EquipmentReference, InventoryReference } from './master-reference.
 
 export const masterReferenceApi = {
   async getEquipments(plantId?: string | null): Promise<EquipmentReference[]> {
-    const response = await axiosInstance.get<EquipmentReference[]>('/master/refs/equipments', {
+    const response = await axiosInstance.get<EquipmentReference[]>('/master/equipments', {
       params: { plantId: plantId || undefined },
     });
     return response.data;
   },
   async getInventories(): Promise<InventoryReference[]> {
-    const response = await axiosInstance.get<InventoryReference[]>('/master/refs/inventories');
+    const response = await axiosInstance.get<InventoryReference[]>('/master/inventories');
     return response.data;
   },
 };

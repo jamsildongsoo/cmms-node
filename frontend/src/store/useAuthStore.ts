@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import type { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import axiosInstance from '../api/axios';
 import { getApiErrorMessage } from '../utils/apiError';
+import type { ModuleAccessMap } from '../utils/moduleAccess';
 
 interface User {
   companyId: string;
@@ -11,14 +12,15 @@ interface User {
   name: string;
   avatarKey: string;
   roleId: string;
+  scope: 'COMPANY' | 'PLANT';
   departmentId: string | null;
   position: string | null;
   title: string | null;
-  lastLoginPlantId: string | null;
-  multiPlant: 'Y' | 'N';
+  homePlantId: string | null;
+  moduleAccess: ModuleAccessMap;
+  departmentWarehouseId: string | null;
   mustChangePassword?: boolean;
   passwordExpired?: boolean;
-  permissions: Record<string, { C: string; R: string; U: string; D: string; A: string }>;
 }
 
 interface SignUpData {
@@ -41,14 +43,15 @@ interface AuthResponse {
   name: string;
   avatarKey: string;
   roleId: string;
+  scope: 'COMPANY' | 'PLANT';
   departmentId: string | null;
   position: string | null;
   title: string | null;
-  lastLoginPlantId: string | null;
-  multiPlant: 'Y' | 'N';
+  homePlantId: string | null;
+  moduleAccess: ModuleAccessMap;
+  departmentWarehouseId: string | null;
   mustChangePassword?: boolean;
   passwordExpired?: boolean;
-  permissions: Record<string, { C: string; R: string; U: string; D: string; A: string }>;
 }
 
 interface AuthState {
@@ -140,8 +143,11 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   },
 
   setActivePlantId: (plantId) => {
-    const { user } = get();
-    if (!user || user.multiPlant !== 'Y') return;
+    if (plantId) {
+      axiosInstance.defaults.headers.common['X-Active-Plant-Id'] = plantId;
+    } else {
+      delete axiosInstance.defaults.headers.common['X-Active-Plant-Id'];
+    }
     set({ activePlantId: plantId });
   },
 
@@ -153,6 +159,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   },
 
   applyAuth: (data) => {
+    const isCompanyWide = data.scope === 'COMPANY';
     const user: User = {
       companyId: data.companyId,
       companyName: data.companyName || data.companyId,
@@ -160,14 +167,15 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       name: data.name,
       avatarKey: data.avatarKey || 'user-blue',
       roleId: data.roleId,
+      scope: data.scope,
       departmentId: data.departmentId,
       position: data.position,
       title: data.title,
-      lastLoginPlantId: data.lastLoginPlantId,
-      multiPlant: data.multiPlant === 'Y' ? 'Y' : 'N',
+      homePlantId: data.homePlantId,
+      moduleAccess: data.moduleAccess || {},
+      departmentWarehouseId: data.departmentWarehouseId ?? null,
       mustChangePassword: data.mustChangePassword,
       passwordExpired: data.passwordExpired,
-      permissions: data.permissions || {},
     };
 
     axiosInstance.defaults.headers.common.Authorization = `Bearer ${data.accessToken}`;
@@ -176,12 +184,18 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       user,
       token: data.accessToken,
       error: null,
-      activePlantId: data.lastLoginPlantId,
+      activePlantId: isCompanyWide ? null : data.homePlantId,
     });
+    if (!isCompanyWide && data.homePlantId) {
+      axiosInstance.defaults.headers.common['X-Active-Plant-Id'] = data.homePlantId;
+    } else {
+      delete axiosInstance.defaults.headers.common['X-Active-Plant-Id'];
+    }
   },
 
   clearAuth: () => {
     delete axiosInstance.defaults.headers.common.Authorization;
+    delete axiosInstance.defaults.headers.common['X-Active-Plant-Id'];
     set({
       user: null,
       token: null,

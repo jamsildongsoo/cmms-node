@@ -15,6 +15,8 @@ export class WorkPermitRepository {
     plantId?: string,
     searchType?: string,
     searchValue?: string,
+    tempOnly?: string,
+    userId?: string,
   ): Promise<WorkPermit[]> {
     const query = this.workPermits
       .createQueryBuilder('wp')
@@ -23,6 +25,11 @@ export class WorkPermitRepository {
       .where('wp.companyId = :companyId', { companyId })
       .andWhere('wp.deleteYn = :notDeleted', { notDeleted: 'N' });
     if (plantId) query.andWhere('wp.plantId = :plantId', { plantId });
+    if (tempOnly === 'Y') {
+      query
+        .andWhere('wp.status = :tempStatus', { tempStatus: 'T' })
+        .andWhere('wp.createdBy = :userId', { userId });
+    }
     if (searchValue) {
       const value = `%${searchValue}%`;
       if (searchType === 'id') query.andWhere('wp.id ILIKE :value', { value });

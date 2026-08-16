@@ -31,12 +31,20 @@ function PageLoading() {
 export default function AppShell() {
   const [activeTab, setActiveTab] = useState('board');
   const [receiptRequestId, setReceiptRequestId] = useState<string | null>(null);
+  const [receiptOrderId, setReceiptOrderId] = useState<string | null>(null);
   const user = useAuthStore((s) => s.user);
   // 비밀번호 변경 안내 모달 — 로그인 시 플래그면 표시, 세션 내 닫으면 재표시 안 함
   const [showPwNotice, setShowPwNotice] = useState(!!user?.mustChangePassword);
 
   const openReceiptRequest = (requestId: string) => {
     setReceiptRequestId(requestId);
+    setReceiptOrderId(null);
+    setActiveTab('stock-process');
+  };
+
+  const openReceiptOrder = (orderId: string) => {
+    setReceiptOrderId(orderId);
+    setReceiptRequestId(null);
     setActiveTab('stock-process');
   };
 
@@ -60,11 +68,11 @@ export default function AppShell() {
       case 'stock-overview':
         return <InventoryOverview />;
       case 'stock-process':
-        return <InventoryProcessing initialRequestId={receiptRequestId} />;
+        return <InventoryProcessing initialRequestId={receiptRequestId} initialOrderId={receiptOrderId} />;
       case 'procurement-request':
         return <ProcurementRequest onOpenReceiptRequest={openReceiptRequest} />;
       case 'procurement-management':
-        return <ProcurementManagement onOpenReceiptRequest={openReceiptRequest} />;
+        return <ProcurementManagement onOpenReceiptRequest={openReceiptRequest} onOpenReceiptOrder={openReceiptOrder} />;
       case 'approval':
         return <Approval />;
       case 'board':

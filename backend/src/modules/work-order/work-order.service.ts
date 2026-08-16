@@ -36,15 +36,18 @@ export class WorkOrderService {
     operator: string,
     searchType?: string,
     searchValue?: string,
+    tempOnly?: string,
     requestedPlantId?: string,
   ): Promise<WorkOrderResponseDto[]> {
-    const plantId = await resolveActivePlantId(this.dataSource, companyId, operator, requestedPlantId);
+    const plantId = await resolveActivePlantId(this.dataSource, companyId, operator, requestedPlantId, AppModule.WO);
     return (
       await this.workOrderRepository.findAll(
         companyId,
         plantId ?? undefined,
         searchType,
         searchValue,
+        tempOnly,
+        operator,
       )
     ).map((entity) => this.toResponse(entity));
   }
@@ -60,6 +63,7 @@ export class WorkOrderService {
       companyId,
       operator,
       plantId,
+      AppModule.WO,
     );
     if (!activePlantId) throw new BadRequestException('사업장을 확인할 수 없습니다.');
     const workOrder = await this.workOrderRepository.findOne(
@@ -92,16 +96,23 @@ export class WorkOrderService {
       companyId,
       operator,
       input.plantId,
+      AppModule.WO,
     );
     if (!plantId) throw new BadRequestException('사업장을 확인할 수 없습니다.');
+    // 관리용 호환 경로: FE에서는 직접확정을 제공하지 않지만, 별도 관리 호출이
+    // status='S'를 저장하는 경우 기존 직접확정 검증을 유지한다.
     if (input.status === DocStatus.SELF_CONFIRMED) {
-      await this.permissionPolicyService.assertModulePermission({
+      await this.permissionPolicyService.assertActionPermission({
         companyId,
         roleId: roleId ?? '',
+          userId: operator,
         module: AppModule.WO,
         action: 'A',
         resourceLabel: '작업지시 직접 확정',
       });
+    }
+    if (![DocStatus.TEMP, DocStatus.SELF_CONFIRMED].includes(input.status as DocStatus)) {
+      throw new BadRequestException('작업지시 저장 상태는 임시저장 또는 직접확정만 허용됩니다.');
     }
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();
@@ -139,14 +150,15 @@ export class WorkOrderService {
         await this.permissionPolicyService.assertCanUpdateOwnTempOrPermission({
           companyId,
           roleId: roleId ?? '',
+          userId: operator,
           module: AppModule.WO,
           status: entity.status,
           ownerId: entity.createdBy,
           operatorId: operator,
           resourceLabel: '작업지시',
         });
-        if (![DocStatus.TEMP, DocStatus.REJECTED].includes(entity.status as DocStatus)) {
-          throw new BadRequestException('임시저장 또는 반려 상태의 작업지시만 수정할 수 있습니다.');
+        if (entity.status !== DocStatus.TEMP) {
+          throw new BadRequestException('임시저장 상태의 작업지시만 수정할 수 있습니다.');
         }
       }
       Object.assign(entity, {
@@ -164,7 +176,7 @@ export class WorkOrderService {
         fileGroupId: input.fileGroupId ?? null,
         refNo: input.refNo ?? null,
         refModule: input.refModule ?? null,
-        approvalId: entity.status === DocStatus.REJECTED ? null : (input.approvalId ?? null),
+        approvalId: input.approvalId ?? null,
         status: input.status || DocStatus.TEMP,
         updatedBy: operator,
       });
@@ -210,6 +222,7 @@ export class WorkOrderService {
       companyId,
       operator,
       plantId,
+      AppModule.WO,
     );
     if (!activePlantId) throw new BadRequestException('사업장을 확인할 수 없습니다.');
     const repository = this.dataSource.getRepository(WorkOrder);
@@ -220,6 +233,7 @@ export class WorkOrderService {
     await this.permissionPolicyService.assertCanDeleteOwnTempOrPermission({
       companyId,
       roleId,
+      userId: operator,
       module: AppModule.WO,
       status: entity.status,
       ownerId: entity.createdBy,

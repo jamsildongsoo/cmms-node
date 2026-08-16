@@ -1,5 +1,5 @@
-import { IsNotEmpty, IsString, IsOptional, IsArray, ValidateNested, IsIn, IsEnum, IsObject } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsNotEmpty, IsString, IsOptional, IsArray, ValidateNested, IsIn, IsEnum, IsObject, IsInt, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 import { ApprovalStepType } from '../../../common/constants/approval.constants';
 import { DocStatus } from '../../../common/constants/status.constants';
 import { LINKABLE_MODULES } from '../../../common/constants/module.constants';
@@ -18,7 +18,10 @@ class ApprovalDto {
   content?: Record<string, unknown> | null;
 
   @IsOptional()
-  fileGroupId?: string | number | null;
+  @Transform(({ value }) => value === null || value === undefined || value === '' ? value : Number(value))
+  @IsInt()
+  @Min(1)
+  fileGroupId?: number | null;
 
   @IsOptional()
   @IsEnum(DocStatus)

@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsDateString,
@@ -6,6 +6,7 @@ import {
   IsInt,
   IsNumber,
   IsOptional,
+  Min,
   IsString,
   ValidateNested,
 } from 'class-validator';
@@ -29,7 +30,11 @@ export class PmRecordHeaderDto {
   @IsOptional() @IsDateString() certExpireDate?: string | null;
   @IsOptional() @IsString() certAgency?: string | null;
   @IsOptional() @IsString() approvalId?: string | null;
-  @IsOptional() fileGroupId?: string | number | null;
+  @IsOptional()
+  @Transform(({ value }) => value === null || value === undefined || value === '' ? value : Number(value))
+  @IsInt()
+  @Min(1)
+  fileGroupId?: number | null;
   @IsOptional() @IsString() refNo?: string | null;
   @IsOptional() @IsString() refModule?: string | null;
   @IsIn(Object.values(DocStatus)) status!: string;

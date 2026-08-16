@@ -2,14 +2,13 @@ export interface Inventory {
   id: string;
   name: string;
   invTypeCode: string | null;
-  departmentId: string | null;
   unit: string | null;
   makerName: string | null;
   spec: string | null;
   model: string | null;
   serialNumber: string | null;
-  safetyQty: number;
-  reorderQty: number;
+  safetyQty: string | number;
+  reorderQty: string | number;
   leadTimeDays: number;
   remarks: string | null;
 }
@@ -18,7 +17,6 @@ export interface InventoryFormValues {
   id: string;
   name: string;
   invTypeCode: string;
-  departmentId: string;
   unit: string;
   makerName: string;
   spec: string;

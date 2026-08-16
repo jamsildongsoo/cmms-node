@@ -1,17 +1,19 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
 import { useAuthStore } from '../store/useAuthStore';
+import { hasModuleManage } from '../utils/moduleAccess';
 import { toastApiError } from '../utils/apiError';
 import ListIconButton from '../components/ListIconButton';
 import { APP_MODULE } from '../constants/module';
 import { inventoryApi } from '../features/inventory/inventory.api';
 import type { Inventory as InventoryModel, InventoryFormValues } from '../features/inventory/inventory.types';
 import { referenceApi } from '../features/mdm/reference.api';
-import type { CodeItem, Department } from '../features/mdm/mdm.types';
+import type { CodeItem } from '../features/mdm/mdm.types';
 import { downloadBlob } from '../utils/downloadBlob';
 import { openListPrint } from '../utils/listPrint';
 import { formatPrintStamp } from '../utils/datetime';
+import { formatQuantity } from '../utils/number';
 import InventoryFormModal from '../features/inventory/components/InventoryFormModal';
 import {
   Package, Plus, Edit2, Trash2, Printer, FileSpreadsheet
@@ -19,12 +21,10 @@ import {
 
 export default function Inventory() {
   const user = useAuthStore((state) => state.user);
-  const permission = user?.permissions?.[APP_MODULE.INV];
-  const canCreate = permission?.C === 'Y';
-  const canUpdate = permission?.U === 'Y';
-  const canDelete = permission?.D === 'Y';
+  const canCreate = hasModuleManage(user?.moduleAccess, APP_MODULE.INV);
+  const canUpdate = canCreate;
+  const canDelete = canCreate;
   const [inventories, setInventories] = useState<InventoryModel[]>([]);
-  const [depts, setDepts] = useState<Department[]>([]);
   const [inventoryTypes, setInventoryTypes] = useState<CodeItem[]>([]);
 
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -34,21 +34,15 @@ export default function Inventory() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const departmentNames = useMemo(
-    () => new Map(depts.map((department) => [department.id, department.name])),
-    [depts],
-  );
 
   const fetchData = async () => {
     try {
       // 폼 선택값 구성을 위한 시스템 참조값 조회다. 자재 마스터 R 권한을 대체하지 않는다.
-      const [loadedInventories, loadedDepartments, loadedTypes] = await Promise.all([
+      const [loadedInventories, loadedTypes] = await Promise.all([
         inventoryApi.getAll(),
-        referenceApi.getDepartmentOptions(),
         referenceApi.getInventoryTypeOptions(),
       ]);
       setInventories(loadedInventories);
-      setDepts(loadedDepartments);
       setInventoryTypes(loadedTypes);
     } catch (err) {
       console.error(err);
@@ -61,12 +55,10 @@ export default function Inventory() {
     // 폼 선택값 구성을 위한 시스템 참조값 조회다. 자재 마스터 R 권한을 대체하지 않는다.
     void Promise.all([
       inventoryApi.getAll(),
-      referenceApi.getDepartmentOptions(),
       referenceApi.getInventoryTypeOptions(),
-    ]).then(([loadedInventories, loadedDepartments, loadedTypes]) => {
+    ]).then(([loadedInventories, loadedTypes]) => {
         if (!active) return;
         setInventories(loadedInventories);
-        setDepts(loadedDepartments);
         setInventoryTypes(loadedTypes);
     }).catch((err) => {
       if (active) toastApiError(err, '목록을 불러오지 못했습니다.');
@@ -78,7 +70,7 @@ export default function Inventory() {
     setEditingId(null);
     setFormValues({
       id: '', name: '', invTypeCode: inventoryTypes[0]?.id || '',
-      departmentId: depts[0]?.id || '', unit: '', makerName: '', spec: '',
+      unit: '', makerName: '', spec: '',
       model: '', serialNumber: '', safetyQty: 0, reorderQty: 0,
       leadTimeDays: 0, remarks: '',
     });
@@ -89,10 +81,10 @@ export default function Inventory() {
     setEditingId(inv.id);
     setFormValues({
       id: inv.id, name: inv.name, invTypeCode: inv.invTypeCode || '',
-      departmentId: inv.departmentId || '', unit: inv.unit || '',
+      unit: inv.unit || '',
       makerName: inv.makerName || '', spec: inv.spec || '', model: inv.model || '',
-      serialNumber: inv.serialNumber || '', safetyQty: inv.safetyQty,
-      reorderQty: inv.reorderQty, leadTimeDays: inv.leadTimeDays,
+      serialNumber: inv.serialNumber || '', safetyQty: Number(inv.safetyQty),
+      reorderQty: Number(inv.reorderQty), leadTimeDays: inv.leadTimeDays,
       remarks: inv.remarks || '',
     });
     setIsFormOpen(true);
@@ -122,7 +114,7 @@ export default function Inventory() {
     setIsLoading(true);
     const payload = {
       id: values.id, name: values.name, invTypeCode: values.invTypeCode,
-      departmentId: values.departmentId || null, unit: values.unit || null,
+      unit: values.unit || null,
       makerName: values.makerName || null, spec: values.spec || null,
       model: values.model || null, serialNumber: values.serialNumber || null,
       safetyQty: values.safetyQty, reorderQty: values.reorderQty,
@@ -160,7 +152,7 @@ export default function Inventory() {
       title: '자재 마스터 목록',
       rows: inventories,
       getRowKey: (inventory) => inventory.id,
-      companyName: user?.companyName || user?.companyId || 'CMMS',
+      companyName: user?.companyId || 'CMMS',
       printerName: user?.name || '-',
       printedAt: stamp,
       emptyMessage: '등록된 자재가 없습니다.',
@@ -168,11 +160,10 @@ export default function Inventory() {
         { header: '자재코드', render: (inventory) => inventory.id, className: 'font-mono' },
         { header: '자재명', render: (inventory) => inventory.name },
         { header: '단위', render: (inventory) => inventory.unit || '-' },
-        { header: '부서', render: (inventory) => departmentNames.get(inventory.departmentId ?? '') || inventory.departmentId || '-' },
         { header: '제조사', render: (inventory) => inventory.makerName || '-' },
         { header: '모델', render: (inventory) => inventory.model || '-' },
-        { header: '안전재고', render: (inventory) => inventory.safetyQty },
-        { header: '재주문점', render: (inventory) => inventory.reorderQty },
+        { header: '안전재고', render: (inventory) => formatQuantity(inventory.safetyQty) },
+        { header: '재주문점', render: (inventory) => formatQuantity(inventory.reorderQty) },
         { header: '리드타임', render: (inventory) => `${inventory.leadTimeDays}일` },
       ],
     });
@@ -225,7 +216,6 @@ export default function Inventory() {
                 <th className="p-3 font-semibold">자재코드</th>
                 <th className="p-3 font-semibold">자재명</th>
                 <th className="p-3 font-semibold">단위</th>
-                <th className="p-3 font-semibold">부서</th>
                 <th className="p-3 font-semibold">제조사</th>
                 <th className="p-3 font-semibold">모델</th>
                 <th className="p-3 font-semibold">안전재고</th>
@@ -243,11 +233,10 @@ export default function Inventory() {
                     <td className="p-3 font-mono text-slate-400 print:text-slate-600">{inv.id}</td>
                     <td className="p-3 font-semibold text-slate-200 print:text-slate-900">{inv.name}</td>
                     <td className="p-3 text-slate-400 print:text-slate-600">{inv.unit || '-'}</td>
-                    <td className="p-3">{departmentNames.get(inv.departmentId ?? '') || inv.departmentId || '-'}</td>
                     <td className="p-3 text-slate-400 print:text-slate-600">{inv.makerName || '-'}</td>
                     <td className="p-3 text-slate-400 print:text-slate-600">{inv.model || '-'}</td>
-                    <td className="p-3 font-semibold text-slate-300 print:text-slate-800">{inv.safetyQty}</td>
-                    <td className="p-3 text-slate-400 print:text-slate-600">{inv.reorderQty}</td>
+                    <td className="p-3 font-semibold text-slate-300 print:text-slate-800">{formatQuantity(inv.safetyQty)}</td>
+                    <td className="p-3 text-slate-400 print:text-slate-600">{formatQuantity(inv.reorderQty)}</td>
                     <td className="p-3 text-slate-400 print:text-slate-600">{inv.leadTimeDays}일</td>
                     <td className="p-3 text-right space-x-2 print:hidden">
                       {canUpdate && <ListIconButton
@@ -278,7 +267,6 @@ export default function Inventory() {
           key={editingId || 'create'}
           editingId={editingId}
           initialValues={formValues}
-          departments={depts}
           inventoryTypes={inventoryTypes}
           isSaving={isLoading}
           onClose={() => setIsFormOpen(false)}

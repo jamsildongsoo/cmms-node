@@ -25,12 +25,13 @@ export default function UserManager({
   const [name, setName] = useState('');
   const [departmentId, setDepartmentId] = useState('');
   const [roleId, setRoleId] = useState('');
+  const [scope, setScope] = useState<'COMPANY' | 'PLANT'>('PLANT');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [position, setPosition] = useState('');
   const [title, setTitle] = useState('');
   const [useYn, setUseYn] = useState<YesNo>('Y');
-  const [lastLoginPlantId, setLastLoginPlantId] = useState('');
+  const [homePlantId, setHomePlantId] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const fetchData = async () => {
@@ -74,7 +75,7 @@ export default function UserManager({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!id || !name) return;
-    if (!lastLoginPlantId) {
+    if (!homePlantId) {
       notify('error', '지정 플랜트를 선택해주세요.');
       return;
     }
@@ -84,12 +85,13 @@ export default function UserManager({
         id, name,
         departmentId: departmentId || null,
         roleId,
+        scope,
         email: email || null,
         phone: phone || null,
         position: position || null,
         title: title || null,
         useYn,
-        lastLoginPlantId: lastLoginPlantId || null,
+        homePlantId: homePlantId || null,
       };
 
       if (editingId) {
@@ -121,9 +123,9 @@ export default function UserManager({
   };
 
   const resetForm = () => {
-    setId(''); setName(''); setDepartmentId(''); setRoleId('');
+    setId(''); setName(''); setDepartmentId(''); setRoleId(''); setScope('PLANT');
     setEmail(''); setPhone(''); setPosition(''); setTitle(''); setUseYn('Y');
-    setLastLoginPlantId('');
+    setHomePlantId('');
     setEditingId(null);
   };
 
@@ -163,7 +165,15 @@ export default function UserManager({
             <label className="block text-slate-400 text-xs mb-1.5">부서</label>
             <select
               value={departmentId}
-              onChange={(e) => setDepartmentId(e.target.value)}
+              onChange={(e) => {
+                const nextDepartmentId = e.target.value;
+                setDepartmentId(nextDepartmentId);
+                if (!editingId) {
+                  const department = depts.find((item) => item.id === nextDepartmentId);
+                  setRoleId(department?.roleId || '');
+                  setScope(department?.scope || 'PLANT');
+                }
+              }}
               className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 text-xs outline-none transition-colors"
             >
               <option value="">없음</option>
@@ -184,6 +194,12 @@ export default function UserManager({
               {roles.map(r => (
                 <option key={r.id} value={r.id}>{r.roleName}</option>
               ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs mb-1.5">데이터 Scope</label>
+            <select value={scope} onChange={(e) => setScope(e.target.value as 'COMPANY' | 'PLANT')} className="w-full bg-slate-900 border border-slate-800 rounded-lg py-2 px-3 text-slate-200 text-xs outline-none">
+              <option value="PLANT">현재 Plant</option><option value="COMPANY">회사 전체</option>
             </select>
           </div>
           <div>
@@ -242,8 +258,8 @@ export default function UserManager({
             <label className="block text-slate-400 text-xs mb-1.5">지정 플랜트 <span className="text-rose-500">*</span></label>
             <select
               required
-              value={lastLoginPlantId}
-              onChange={(e) => setLastLoginPlantId(e.target.value)}
+              value={homePlantId}
+              onChange={(e) => setHomePlantId(e.target.value)}
               className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 text-xs outline-none transition-colors"
             >
               <option value="">-- 지정 플랜트 선택 --</option>
@@ -315,12 +331,13 @@ export default function UserManager({
                         setName(u.name);
                         setDepartmentId(u.departmentId || '');
                         setRoleId(u.roleId);
+                        setScope(u.scope);
                         setEmail(u.email || '');
                         setPhone(u.phone || '');
                         setPosition(u.position || '');
                         setTitle(u.title || '');
                         setUseYn(u.useYn);
-                        setLastLoginPlantId(u.lastLoginPlantId || '');
+                        setHomePlantId(u.homePlantId || '');
                       }}
                       label={`${u.name} 수정`}
                       icon={Edit2}

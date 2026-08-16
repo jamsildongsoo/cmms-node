@@ -11,11 +11,10 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { MdmService, MdmUserResponse } from './mdm.service';
+import { MdmService, MdmUserInput, MdmUserResponse } from './mdm.service';
 import { Plant } from '../../entities/plant.entity';
 import { Department } from '../../entities/department.entity';
 import { Role } from '../../entities/role.entity';
-import { RoleDetail } from '../../entities/role-detail.entity';
 import { User } from '../../entities/users.entity';
 import { Warehouse } from '../../entities/warehouse.entity';
 import { CodeGroup } from '../../entities/code-group.entity';
@@ -23,17 +22,12 @@ import { CodeItem } from '../../entities/code-item.entity';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import {
   PermissionGuard,
-  Permission,
-  RefPermission,
-  SystemPermission,
+  ModuleAccess,
+  ModulePermission,
 } from '../../common/guards/permission.guard';
+import { RoleDetail } from '../../entities/role-detail.entity';
 import { AppModule, AppModuleLabel } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
-import { Company } from '../../entities/company.entity';
-import {
-  CreateCompanyDto,
-  CreateCompanyResponseDto,
-} from './dto/create-company.dto';
 
 @Controller('api/mdm')
 @UseGuards(JwtAuthGuard, PermissionGuard)
@@ -44,36 +38,22 @@ export class MdmController {
   // 2. 플랜트 (Plant)
   // =========================================================================
   @Get('plants')
-  @Permission(AppModule.MDM, 'R')
-  async getPlants(): Promise<Plant[]> {
-    const { companyId } = getTenantContext();
-    return this.mdmService.getPlantsByCompany(companyId);
-  }
-
-  /** 업무 입력화면의 선택 목록용 — 인증된 사용자는 회사 내 플랜트를 조회할 수 있다. */
-  @Get('refs/plants')
-  @RefPermission()
-  async getPlantsForUse(@Query('plantId') plantId?: string): Promise<Plant[]> {
+  @ModuleAccess(AppModule.MDM)
+  async getPlants(@Query('plantId') plantId?: string): Promise<Plant[]> {
     const { companyId, userId } = getTenantContext();
     return this.mdmService.getPlantsForUse(companyId, userId, plantId);
   }
 
-  @Get('refs/departments')
-  @RefPermission()
-  async getDepartmentsForUse(): Promise<Department[]> {
-    const { companyId } = getTenantContext();
-    return this.mdmService.getDepartmentsByCompany(companyId);
-  }
 
   @Post('plants')
-  @Permission(AppModule.MDM, 'C')
+  @ModuleAccess(AppModule.MDM)
   async createPlant(@Body() plant: Partial<Plant>): Promise<Plant> {
     const { companyId, userId } = getTenantContext();
     return this.mdmService.savePlant(companyId, plant, userId);
   }
 
   @Put('plants/:id')
-  @Permission(AppModule.MDM, 'U')
+  @ModuleAccess(AppModule.MDM)
   async updatePlant(@Param('id') id: string, @Body() plant: Partial<Plant>): Promise<Plant> {
     const { companyId, userId } = getTenantContext();
     return this.mdmService.updatePlant(companyId, id, plant, userId);
@@ -81,7 +61,7 @@ export class MdmController {
 
   @Delete('plants/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Permission(AppModule.MDM, 'D')
+  @ModuleAccess(AppModule.MDM)
   async deletePlant(@Param('id') id: string): Promise<void> {
     const { companyId, userId } = getTenantContext();
     await this.mdmService.deletePlant(companyId, id, userId);
@@ -91,21 +71,21 @@ export class MdmController {
   // 3. 부서 (Department)
   // =========================================================================
   @Get('departments')
-  @Permission(AppModule.MDM, 'R')
+  @ModuleAccess(AppModule.MDM)
   async getDepartments(): Promise<Department[]> {
     const { companyId } = getTenantContext();
     return this.mdmService.getDepartmentsByCompany(companyId);
   }
 
   @Post('departments')
-  @Permission(AppModule.MDM, 'C')
+  @ModuleAccess(AppModule.MDM)
   async createDepartment(@Body() dept: Partial<Department>): Promise<Department> {
     const { companyId, userId } = getTenantContext();
     return this.mdmService.saveDepartment(companyId, dept, userId);
   }
 
   @Put('departments/:id')
-  @Permission(AppModule.MDM, 'U')
+  @ModuleAccess(AppModule.MDM)
   async updateDepartment(@Param('id') id: string, @Body() dept: Partial<Department>): Promise<Department> {
     const { companyId, userId } = getTenantContext();
     return this.mdmService.updateDepartment(companyId, id, dept, userId);
@@ -113,7 +93,7 @@ export class MdmController {
 
   @Delete('departments/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Permission(AppModule.MDM, 'D')
+  @ModuleAccess(AppModule.MDM)
   async deleteDepartment(@Param('id') id: string): Promise<void> {
     const { companyId, userId } = getTenantContext();
     await this.mdmService.deleteDepartment(companyId, id, userId);
@@ -123,28 +103,38 @@ export class MdmController {
   // 4. 권한 그룹 (Role)
   // =========================================================================
   @Get('roles')
-  @Permission(AppModule.MDM, 'R')
+  @ModuleAccess(AppModule.MDM)
   async getRoles(): Promise<Role[]> {
     const { companyId } = getTenantContext();
     return this.mdmService.getRolesByCompany(companyId);
   }
 
-  @Get('roles/:roleId/details')
-  @Permission(AppModule.MDM, 'R')
-  async getRoleDetails(@Param('roleId') roleId: string): Promise<RoleDetail[]> {
-    const { companyId } = getTenantContext();
-    return this.mdmService.getRoleDetails(companyId, roleId);
-  }
-
   @Post('roles')
-  @Permission(AppModule.MDM, 'C')
+  @ModuleAccess(AppModule.MDM)
   async createRole(@Body() role: Partial<Role>): Promise<Role> {
     const { companyId, userId } = getTenantContext();
     return this.mdmService.saveRole(companyId, role, userId);
   }
 
+  @Get('roles/:id/details')
+  @ModuleAccess(AppModule.MDM)
+  async getRoleDetails(@Param('id') id: string): Promise<RoleDetail[]> {
+    const { companyId } = getTenantContext();
+    return this.mdmService.getRoleDetails(companyId, id);
+  }
+
+  @Put('roles/:id/details')
+  @ModuleAccess(AppModule.MDM)
+  async saveRoleDetails(
+    @Param('id') id: string,
+    @Body() details: Partial<RoleDetail>[],
+  ): Promise<void> {
+    const { companyId, userId } = getTenantContext();
+    await this.mdmService.saveRoleDetails(companyId, id, details, userId);
+  }
+
   @Put('roles/:id')
-  @Permission(AppModule.MDM, 'U')
+  @ModuleAccess(AppModule.MDM)
   async updateRole(
     @Param('id') id: string,
     @Body() role: Partial<Role>,
@@ -153,20 +143,9 @@ export class MdmController {
     return this.mdmService.updateRole(companyId, id, role, userId);
   }
 
-  @Post('roles/:roleId/details')
-  @HttpCode(HttpStatus.OK)
-  @Permission(AppModule.MDM, 'U')
-  async saveRoleDetails(
-    @Param('roleId') roleId: string,
-    @Body() details: Partial<RoleDetail>[],
-  ): Promise<void> {
-    const { companyId } = getTenantContext();
-    await this.mdmService.saveRoleDetails(companyId, roleId, details);
-  }
-
   @Delete('roles/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Permission(AppModule.MDM, 'D')
+  @ModuleAccess(AppModule.MDM)
   async deleteRole(@Param('id') id: string): Promise<void> {
     const { companyId, userId } = getTenantContext();
     await this.mdmService.deleteRole(companyId, id, userId);
@@ -176,29 +155,29 @@ export class MdmController {
   // 5. 사용자 (User)
   // =========================================================================
   @Get('users')
-  @Permission(AppModule.MDM, 'R')
-  async getUsers(): Promise<User[]> {
+  @ModuleAccess(AppModule.MDM)
+  async getUsers(): Promise<MdmUserResponse[]> {
     const { companyId } = getTenantContext();
     return this.mdmService.getUsersByCompany(companyId);
   }
 
   @Post('users')
-  @Permission(AppModule.MDM, 'C')
-  async createUser(@Body() user: Partial<User>): Promise<MdmUserResponse> {
+  @ModuleAccess(AppModule.MDM)
+  async createUser(@Body() user: MdmUserInput): Promise<MdmUserResponse> {
     const { companyId, userId } = getTenantContext();
     return this.mdmService.saveUser(companyId, user, userId);
   }
 
   @Put('users/:id')
-  @Permission(AppModule.MDM, 'U')
-  async updateUser(@Param('id') id: string, @Body() user: Partial<User>): Promise<User> {
+  @ModuleAccess(AppModule.MDM)
+  async updateUser(@Param('id') id: string, @Body() user: MdmUserInput): Promise<MdmUserResponse> {
     const { companyId, userId } = getTenantContext();
     return this.mdmService.updateUser(companyId, id, user, userId); // userId 가 operator 로서 C1-sub 로직 검사 수행
   }
 
   @Delete('users/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Permission(AppModule.MDM, 'D')
+  @ModuleAccess(AppModule.MDM)
   async deleteUser(@Param('id') id: string): Promise<void> {
     const { companyId, userId } = getTenantContext();
     await this.mdmService.deleteUser(companyId, id, userId);
@@ -208,37 +187,22 @@ export class MdmController {
   // 6. 저장소 (Warehouse)
   // =========================================================================
   @Get('warehouses')
-  @Permission(AppModule.MDM, 'R')
+  @ModuleAccess(AppModule.MDM)
   async getWarehouses(): Promise<Warehouse[]> {
     const { companyId } = getTenantContext();
     return this.mdmService.getWarehousesByCompany(companyId);
   }
 
-  /** 결재선·작성자 표시 등 업무화면에서 사용하는 읽기 전용 사용자 참조 API. */
-  @Get('refs/users')
-  @RefPermission()
-  async getUsersForUse(): Promise<Partial<User>[]> {
-    const { companyId } = getTenantContext();
-    return this.mdmService.getUsersForUse(companyId);
-  }
-
-  /** 업무 입력화면의 선택 목록용 — 변경 권한과 분리된 읽기 전용 참조 API. */
-  @Get('refs/warehouses')
-  @RefPermission()
-  async getWarehousesForUse(@Query('plantId') plantId?: string): Promise<Warehouse[]> {
-    const { companyId, userId } = getTenantContext();
-    return this.mdmService.getWarehousesForUse(companyId, userId, plantId);
-  }
 
   @Post('warehouses')
-  @Permission(AppModule.MDM, 'C')
+  @ModuleAccess(AppModule.MDM)
   async createWarehouse(@Body() warehouse: Partial<Warehouse>): Promise<Warehouse> {
     const { companyId, userId } = getTenantContext();
     return this.mdmService.saveWarehouse(companyId, warehouse, userId);
   }
 
   @Put('warehouses/:id')
-  @Permission(AppModule.MDM, 'U')
+  @ModuleAccess(AppModule.MDM)
   async updateWarehouse(@Param('id') id: string, @Body() warehouse: Partial<Warehouse>): Promise<Warehouse> {
     const { companyId, userId } = getTenantContext();
     return this.mdmService.updateWarehouse(companyId, id, warehouse, userId);
@@ -246,7 +210,7 @@ export class MdmController {
 
   @Delete('warehouses/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Permission(AppModule.MDM, 'D')
+  @ModuleAccess(AppModule.MDM)
   async deleteWarehouse(@Param('id') id: string): Promise<void> {
     const { companyId, userId } = getTenantContext();
     await this.mdmService.deleteWarehouse(companyId, id, userId);
@@ -256,21 +220,21 @@ export class MdmController {
   // 7. 공통코드 그룹 & 아이템
   // =========================================================================
   @Get('code-groups')
-  @Permission(AppModule.MDM, 'R')
+  @ModuleAccess(AppModule.MDM)
   async getCodeGroups(): Promise<CodeGroup[]> {
     const { companyId } = getTenantContext();
     return this.mdmService.getCodeGroupsByCompany(companyId);
   }
 
   @Post('code-groups')
-  @Permission(AppModule.MDM, 'C')
+  @ModuleAccess(AppModule.MDM)
   async createCodeGroup(@Body() group: Partial<CodeGroup>): Promise<CodeGroup> {
     const { companyId, userId } = getTenantContext();
     return this.mdmService.saveCodeGroup(companyId, group, userId);
   }
 
   @Put('code-groups/:id')
-  @Permission(AppModule.MDM, 'U')
+  @ModuleAccess(AppModule.MDM)
   async updateCodeGroup(@Param('id') id: string, @Body() group: Partial<CodeGroup>): Promise<CodeGroup> {
     const { companyId, userId } = getTenantContext();
     return this.mdmService.updateCodeGroup(companyId, id, group, userId);
@@ -278,28 +242,22 @@ export class MdmController {
 
   @Delete('code-groups/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Permission(AppModule.MDM, 'D')
+  @ModuleAccess(AppModule.MDM)
   async deleteCodeGroup(@Param('id') id: string): Promise<void> {
     const { companyId, userId } = getTenantContext();
     await this.mdmService.deleteCodeGroup(companyId, id, userId);
   }
 
   @Get('code-groups/:groupId/items')
-  @Permission(AppModule.MDM, 'R')
+  @ModuleAccess(AppModule.MDM)
   async getCodeItems(@Param('groupId') groupId: string): Promise<CodeItem[]> {
     const { companyId } = getTenantContext();
     return this.mdmService.getCodeItems(companyId, groupId);
   }
 
-  @Get('codes/items/:groupId')
-  @RefPermission()
-  async getCodeItemsForUse(@Param('groupId') groupId: string): Promise<CodeItem[]> {
-    const { companyId } = getTenantContext();
-    return this.mdmService.getCodeItems(companyId, groupId);
-  }
 
   @Post('code-groups/:groupId/items')
-  @Permission(AppModule.MDM, 'C')
+  @ModuleAccess(AppModule.MDM)
   async createCodeItem(
     @Param('groupId') groupId: string,
     @Body() item: Partial<CodeItem>,
@@ -309,7 +267,7 @@ export class MdmController {
   }
 
   @Put('code-groups/:groupId/items/:id')
-  @Permission(AppModule.MDM, 'U')
+  @ModuleAccess(AppModule.MDM)
   async updateCodeItem(
     @Param('groupId') groupId: string,
     @Param('id') id: string,
@@ -321,7 +279,7 @@ export class MdmController {
 
   @Delete('code-groups/:groupId/items/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Permission(AppModule.MDM, 'D')
+  @ModuleAccess(AppModule.MDM)
   async deleteCodeItem(
     @Param('groupId') groupId: string,
     @Param('id') id: string,
@@ -330,20 +288,6 @@ export class MdmController {
     await this.mdmService.deleteCodeItem(companyId, groupId, id);
   }
 
-  @Get('companies')
-  @SystemPermission()
-  async getCompanies(): Promise<Company[]> {
-    return this.mdmService.getCompanies();
-  }
-
-  @Post('companies')
-  @SystemPermission()
-  async createCompany(
-    @Body() body: CreateCompanyDto,
-  ): Promise<CreateCompanyResponseDto> {
-    const { userId } = getTenantContext();
-    return this.mdmService.createCompany(body, userId);
-  }
 }
 
 @Controller('api/meta')

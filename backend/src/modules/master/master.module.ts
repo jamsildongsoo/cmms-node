@@ -5,6 +5,7 @@ import { MasterService } from './master.service';
 import { Equipment } from '../../entities/equipment.entity';
 import { EquipmentCheckCycle } from '../../entities/equipment-check-cycle.entity';
 import { Inventory } from '../../entities/inventory.entity';
+import { InventoryStatus } from '../../entities/inventory-status.entity';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { Inventory } from '../../entities/inventory.entity';
       Equipment,
       EquipmentCheckCycle,
       Inventory,
+      InventoryStatus,
     ]),
   ],
   controllers: [MasterController],

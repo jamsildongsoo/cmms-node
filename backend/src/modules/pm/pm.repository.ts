@@ -13,6 +13,8 @@ export interface PmRecordSearch {
   searchType?: string;
   searchValue?: string;
   showAll?: string;
+  tempOnly?: string;
+  userId?: string;
 }
 
 @Injectable()
@@ -54,6 +56,11 @@ export class PmRepository {
     }
     if (search.stage) {
       query.andWhere('pm.stepStage = :stage', { stage: search.stage });
+    }
+    if (search.tempOnly === 'Y') {
+      query
+        .andWhere('pm.status = :tempStatus', { tempStatus: 'T' })
+        .andWhere('pm.createdBy = :userId', { userId: search.userId });
     }
     if (search.showAll !== 'Y' && search.stage === 'P') {
       query

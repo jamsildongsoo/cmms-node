@@ -7,6 +7,8 @@ import { InventoryHistory } from '../../entities/inventory-history.entity';
 import { InventoryMonthlyClosing } from '../../entities/inventory-monthly-closing.entity';
 import { InventoryClosing } from '../../entities/inventory-closing.entity';
 import { User } from '../../entities/users.entity';
+import { InventoryDocument } from '../../entities/inventory-document.entity';
+import { InventoryDocumentItem } from '../../entities/inventory-document-item.entity';
 
 @Module({
   imports: [
@@ -16,6 +18,8 @@ import { User } from '../../entities/users.entity';
       InventoryMonthlyClosing,
       InventoryClosing,
       User,
+      InventoryDocument,
+      InventoryDocumentItem,
     ]),
   ],
   controllers: [InventoryTxController],

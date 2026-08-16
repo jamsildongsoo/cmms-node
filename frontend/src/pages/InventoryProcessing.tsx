@@ -14,6 +14,7 @@ import type {
   PurchaseReceiptRequestSummary,
 } from '../features/procurement/procurement.types';
 import { useAuthStore } from '../store/useAuthStore';
+import { hasModuleManage } from '../utils/moduleAccess';
 import { APP_MODULE } from '../constants/module';
 import {
   getCommonStatusLabel,
@@ -35,6 +36,7 @@ interface InventoryProcessingProps {
   initialTab?: ProcessingTab;
   initialReason?: TxReason;
   initialRequestId?: string | null;
+  initialOrderId?: string | null;
 }
 
 function createEmptyGrid(
@@ -56,9 +58,10 @@ export default function InventoryProcessing({
   initialTab = 'IN',
   initialReason,
   initialRequestId,
+  initialOrderId,
 }: InventoryProcessingProps) {
   const user = useAuthStore((state) => state.user);
-  const canCreate = user?.permissions?.[APP_MODULE.STK]?.C === 'Y';
+  const canCreate = hasModuleManage(user?.moduleAccess, APP_MODULE.STK);
   const [activeTab, setActiveTab] = useState<ProcessingTab>(initialTab);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [inventories, setInventories] = useState<InventoryReference[]>([]);
@@ -75,6 +78,8 @@ export default function InventoryProcessing({
   const [searchType, setSearchType] = useState<'id' | 'title' | 'owner'>('id');
   const [searchValue, setSearchValue] = useState('');
   const [warehouseId, setWarehouseId] = useState('');
+  const [receiptOrderId, setReceiptOrderId] = useState<string | null>(initialOrderId ?? null);
+  const [prTransferMode, setPrTransferMode] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -110,6 +115,37 @@ export default function InventoryProcessing({
     }, 0);
     return () => window.clearTimeout(timer);
   }, [activeTab, txReasonCode, initialRequestId]);
+
+  useEffect(() => {
+    if (!initialOrderId) return;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await procurementApi.getOrder(initialOrderId);
+          setReceiptOrderId(initialOrderId);
+          setHeader({
+            id: response.header.id,
+            title: response.header.title || response.header.id,
+            plantId: response.header.plantId,
+            warehouseId: response.header.warehouseId,
+            requesterId: response.header.requesterId,
+            departmentId: response.header.departmentId,
+            status: response.header.status,
+            procStatus: response.header.procStatus,
+          });
+          setWarehouseId(response.header.warehouseId || '');
+          setLines(response.items.map((item) => {
+            const qty = Number(item.qty);
+            const receivedQty = Number(item.receivedQty || 0);
+            return { itemNo: item.itemNo!, inventoryId: item.inventoryId, unit: item.unit, remarks: item.remarks, qty, receivedQty, remaining: Math.max(0, qty - receivedQty), inputQty: Math.max(0, qty - receivedQty), unitPrice: 0 };
+          }));
+        } catch (error: unknown) {
+          toastApiError(error, '구매오더를 불러오지 못했습니다.');
+        }
+      })();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [initialOrderId]);
 
   const filteredRequests = useMemo(() => {
     const keyword = searchValue.trim().toLowerCase();
@@ -165,6 +201,7 @@ export default function InventoryProcessing({
     setActiveTab(tab);
     setHeader(null);
     setLines([]);
+    setReceiptOrderId(null);
     setSearchValue('');
     setTxReasonCode((current) => {
       if (tab === 'IN' && current === TX_REASON.PURCHASE) return current;
@@ -173,6 +210,49 @@ export default function InventoryProcessing({
     });
     setTxGrid(createEmptyGrid(warehouses, inventories));
     setTxDate(todayLocal());
+    setPrTransferMode(false);
+  }
+
+  async function handlePrTransferModeChange(enabled: boolean) {
+    setPrTransferMode(enabled);
+    setHeader(null);
+    setLines([]);
+    if (enabled) await loadReceiptRequests();
+  }
+
+  async function handlePrTransferSubmit() {
+    if (!header || !txGrid[0]?.warehouseId || !header.warehouseId) {
+      toast.error('PR과 출발·도착 창고를 확인하세요.');
+      return;
+    }
+    const transferLines = lines
+      .filter((line) => line.inputQty > 0)
+      .map((line) => ({ prId: header.id, prItemNo: line.itemNo, qty: line.inputQty }));
+    if (!transferLines.length) {
+      toast.error('이송수량을 입력하세요.');
+      return;
+    }
+    if (lines.some((line) => line.inputQty > line.remaining)) {
+      toast.error('PR 잔여수량을 초과하여 이송할 수 없습니다.');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      await procurementApi.transferPurchaseRequests({
+        sourceWarehouseId: txGrid[0].warehouseId,
+        targetWarehouseId: header.warehouseId,
+        txDate,
+        lines: transferLines,
+      });
+      toast.success('PR 연계 이송전표가 생성되었습니다.');
+      setHeader(null);
+      setLines([]);
+      await loadReceiptRequests();
+    } catch (error: unknown) {
+      toastApiError(error, 'PR 연계 이송에 실패했습니다.');
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   async function handleSaveTransactions() {
@@ -237,7 +317,7 @@ export default function InventoryProcessing({
     const receiptLines = lines
       .filter((line) => line.inputQty > 0)
       .map((line) => ({
-        lineNo: line.lineNo,
+        itemNo: line.itemNo,
         qty: line.inputQty,
         unitPrice: line.unitPrice,
       }));
@@ -251,12 +331,11 @@ export default function InventoryProcessing({
     }
     setIsLoading(true);
     try {
-      await procurementApi.receive({
-        requestId: header.id,
-        warehouseId,
-        txDate,
-        lines: receiptLines,
-      });
+      if (receiptOrderId) {
+        await procurementApi.receiveOrder({ orderId: receiptOrderId, warehouseId, txDate, lines: receiptLines });
+      } else {
+        await procurementApi.receive({ requestId: header.id, warehouseId, txDate, lines: receiptLines });
+      }
       toast.success('구매입고가 처리되었습니다.');
       setHeader(null);
       setLines([]);
@@ -372,7 +451,7 @@ export default function InventoryProcessing({
                     </thead>
                     <tbody>
                       {lines.map((line, index) => (
-                        <tr key={line.lineNo} className="border-t border-slate-800 text-slate-300">
+                        <tr key={line.itemNo} className="border-t border-slate-800 text-slate-300">
                           <td className="p-3">{line.inventoryId}</td>
                           <td className="p-3 text-right">{line.qty}</td>
                           <td className="p-3 text-right">{line.receivedQty}</td>
@@ -442,18 +521,48 @@ export default function InventoryProcessing({
         ) : (
           <div className="space-y-4">
             {activeTab === 'MOVE' && (
-              <p className="text-xs text-slate-500">같은 플랜트 내 창고 이동만 처리합니다. 다른 플랜트 간 이동은 출고/플랜트이동과 입고/플랜트이동을 각각 처리하세요.</p>
+              <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950/50 px-4 py-3">
+                <div>
+                  <p className="text-xs font-semibold text-slate-300">PR 연계 이동</p>
+                  <p className="mt-1 text-[11px] text-slate-500">PR을 선택하면 이동수량이 PR 수령수량과 MOVE allocation에 반영됩니다.</p>
+                </div>
+                <button type="button" onClick={() => void handlePrTransferModeChange(!prTransferMode)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${prTransferMode ? 'bg-blue-600 text-white' : 'border border-slate-700 bg-slate-900 text-slate-400'}`}>
+                  {prTransferMode ? 'PR 연계 사용 중' : '일반 이동'}
+                </button>
+              </div>
+            )}
+            {activeTab === 'MOVE' && prTransferMode && (
+              <div className="rounded-xl border border-blue-900/60 bg-slate-950/40 p-4 space-y-4">
+                <label className="block text-xs text-slate-400">
+                  <span className="mb-1 block">구매요청</span>
+                  <select value={header?.id || ''} onChange={(event) => void verifyRequest(event.target.value)} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200">
+                    <option value="">선택</option>
+                    {receiptRequests.map((request) => <option key={request.id} value={request.id}>{request.id} — {request.title}</option>)}
+                  </select>
+                </label>
+                {header && (
+                  <>
+                    <div className="grid grid-cols-2 gap-3 text-xs"><Info label="요청창고" value={header.warehouseId} /><Info label="출발창고" value={txGrid[0]?.warehouseId || '-'} /></div>
+                    <div className="overflow-hidden rounded-xl border border-slate-800">
+                      <table className="w-full text-xs"><thead className="bg-slate-950 text-slate-400"><tr><th className="p-3 text-left">자재</th><th className="p-3 text-right">요청</th><th className="p-3 text-right">기수령</th><th className="p-3 text-right">잔여</th><th className="p-3 text-right">이송</th></tr></thead><tbody>
+                        {lines.map((line, index) => <tr key={line.itemNo} className="border-t border-slate-800 text-slate-300"><td className="p-3">{line.inventoryId}</td><td className="p-3 text-right">{line.qty}</td><td className="p-3 text-right">{line.receivedQty}</td><td className="p-3 text-right text-amber-400">{line.remaining}</td><td className="p-2"><input type="number" min="0" max={line.remaining} value={line.inputQty} onChange={(event) => setLines(lines.map((item, lineIndex) => lineIndex === index ? { ...item, inputQty: Number(event.target.value) } : item))} className="w-full rounded border border-slate-800 bg-slate-950 px-2 py-1.5 text-right" /></td></tr>)}
+                      </tbody></table>
+                    </div>
+                    <div className="flex justify-end"><button disabled={isLoading} onClick={() => void handlePrTransferSubmit()} className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">PR 연계 이송전표 생성</button></div>
+                  </>
+                )}
+              </div>
             )}
             {txReasonCode === TX_REASON.PLANT_TRANSFER && (
               <p className="text-xs text-amber-400">플랜트 간 이동은 출고와 입고를 별도 전표로 처리합니다. 상세사유와 참조전표 번호를 함께 기록하세요.</p>
             )}
-            <div className="flex justify-end items-center">
+            {!prTransferMode && <div className="flex justify-end items-center">
               <button type="button" onClick={handleAddGridRow} className="text-blue-400 text-xs font-semibold bg-transparent border-0 cursor-pointer flex items-center gap-1">
                 <Plus size={12} />
                 <span>행 추가</span>
               </button>
-            </div>
-            <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/20">
+            </div>}
+            {!prTransferMode && <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/20">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="bg-slate-900 text-slate-400 border-b border-slate-800 select-none">
@@ -507,14 +616,14 @@ export default function InventoryProcessing({
                   ))}
                 </tbody>
               </table>
-            </div>
-            <div className="flex justify-end">
+            </div>}
+            {!prTransferMode && <div className="flex justify-end">
               {canCreate && (
                 <button onClick={() => void handleSaveTransactions()} disabled={isLoading || txGrid.length === 0} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer border-0 disabled:opacity-50">
                   저장
                 </button>
               )}
-            </div>
+            </div>}
           </div>
         )}
       </div>

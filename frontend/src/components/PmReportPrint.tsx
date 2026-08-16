@@ -66,12 +66,12 @@ export default function PmReportPrint(props: PmReportPrintProps) {
       <PrintSection title="문서 정보">
         <div className="divide-y divide-gray-300 border-y border-gray-400">
           <div className="grid grid-cols-2 gap-4 py-2">
-            <PrintField label="점검명" value={props.title || '-'} />
+            <PrintField label="제목" value={props.title || '-'} />
             <PrintField label="상태" value={getCommonStatusLabel(props.status)} />
           </div>
           <div className="grid grid-cols-2 gap-4 py-2">
-            <PrintField label="대상설비 번호/이름" value={props.equipmentName} />
-            <PrintField label="점검유형" value={props.checkTypeCode} />
+            <PrintField label="대상설비" value={props.equipmentName} />
+            <PrintField label="유형" value={props.checkTypeCode} />
             {!isPlan && <PrintField label="종합판정" value={getJudgeLabel(props.judgeCode)} />}
           </div>
           <div className="grid grid-cols-3 gap-4 py-2">

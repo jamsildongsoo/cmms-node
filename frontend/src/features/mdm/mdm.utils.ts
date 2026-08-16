@@ -1,4 +1,5 @@
-import type { MdmPermission } from './mdm.types';
+import { hasModuleManage } from '../../utils/moduleAccess';
+import type { ModuleAccessMap } from '../../utils/moduleAccess';
 
 export interface MdmCapabilities {
   canCreate: boolean;
@@ -10,10 +11,8 @@ export interface MdmManagerProps extends MdmCapabilities {
   notify: (type: 'success' | 'error', text: string) => void;
 }
 
-export const getMdmCapabilities = (
-  permission?: MdmPermission,
-): MdmCapabilities => ({
-  canCreate: permission?.C === 'Y',
-  canUpdate: permission?.U === 'Y',
-  canDelete: permission?.D === 'Y',
+export const getMdmCapabilities = (access?: ModuleAccessMap): MdmCapabilities => ({
+  canCreate: hasModuleManage(access, 'MDM'),
+  canUpdate: hasModuleManage(access, 'MDM'),
+  canDelete: hasModuleManage(access, 'MDM'),
 });

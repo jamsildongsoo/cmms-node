@@ -1,9 +1,8 @@
 import {
   Wrench, Package, ClipboardList, FileSignature,
-  Layers, Bell, User, LayoutDashboard, ShieldCheck, ShoppingCart, Zap
+  Layers, Bell, User, LayoutDashboard, ShoppingCart, Zap
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { useAuthStore } from '../store/useAuthStore';
 
 interface SidebarProps {
   activeTab: string;
@@ -22,10 +21,6 @@ interface SidebarSection {
 }
 
 export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
-  const user = useAuthStore((s) => s.user);
-  const canRequestPurchase = user?.permissions?.PUR?.R === 'Y' || user?.permissions?.PUR?.C === 'Y';
-  const canManagePurchase = user?.permissions?.POR?.R === 'Y';
-
   const menuItems: SidebarSection[] = [
     {
       category: '기준정보 관리',
@@ -52,8 +47,8 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
     {
       category: '구매재고관리',
       items: [
-        ...(canRequestPurchase ? [{ id: 'procurement-request', label: '구매요청', icon: ShoppingCart }] : []),
-        ...(canManagePurchase ? [{ id: 'procurement-management', label: '구매재고관리', icon: ShoppingCart }] : []),
+        { id: 'procurement-request', label: '구매요청', icon: ShoppingCart },
+        { id: 'procurement-management', label: '구매재고관리', icon: ShoppingCart },
         { id: 'stock-overview', label: '재고조회', icon: Layers },
         { id: 'stock-process', label: '재고처리', icon: Layers }
       ]
@@ -77,13 +72,6 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
       ] 
     }
   ];
-
-  if (user?.roleId?.toUpperCase() === 'SYSTEM') {
-    menuItems.push({
-      category: '시스템',
-      items: [{ id: 'system', label: '시스템 관리', icon: ShieldCheck }]
-    });
-  }
 
   return (
     <aside className="w-56 bg-slate-900 border-r border-slate-800 text-slate-300 flex flex-col shrink-0 print:hidden">

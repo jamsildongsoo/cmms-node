@@ -23,6 +23,29 @@ export interface StockHistory {
   refLineNo: string | null;
 }
 
+export interface StockDocumentItem {
+  companyId: string;
+  documentId: string;
+  itemNo: number;
+  warehouseId: string;
+  inventoryId: string;
+  txTypeCode: string;
+  txReasonCode: string;
+  qty: number;
+  unitPrice: number;
+  refLineNo: string | null;
+}
+
+export interface StockDocument {
+  companyId: string;
+  id: string;
+  txDate: string;
+  refModule: string | null;
+  refNo: string | null;
+  remarks: string | null;
+  items: StockDocumentItem[];
+}
+
 export interface StockProcessingItem {
   warehouseId: string;
   inventoryId: string;

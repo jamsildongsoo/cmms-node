@@ -17,7 +17,7 @@ import {
   WorkPermitResponseDto,
 } from './dto/work-permit.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { PermissionGuard, Permission, WorkflowPermission } from '../../common/guards/permission.guard';
+import { PermissionGuard, ModuleAccess, ModulePermission } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
@@ -27,18 +27,19 @@ export class WorkPermitController {
   constructor(private readonly workPermitService: WorkPermitService) {}
 
   @Get()
-  @Permission(AppModule.WP, 'R')
+  @ModuleAccess(AppModule.WP)
   async getWorkPermits(
     @Query('searchType') searchType?: string,
     @Query('searchValue') searchValue?: string,
+    @Query('tempOnly') tempOnly?: string,
     @Query('plantId') plantId?: string,
   ): Promise<WorkPermitResponseDto[]> {
     const { companyId, userId } = getTenantContext();
-    return this.workPermitService.getWorkPermitsByCompany(companyId, userId, searchType, searchValue, plantId);
+    return this.workPermitService.getWorkPermitsByCompany(companyId, userId, searchType, searchValue, tempOnly, plantId);
   }
 
   @Get(':id')
-  @Permission(AppModule.WP, 'R')
+  @ModuleAccess(AppModule.WP)
   async getWorkPermitDetails(
     @Param('id') id: string,
     @Query('plantId') plantId: string,
@@ -48,7 +49,7 @@ export class WorkPermitController {
   }
 
   @Post()
-  @Permission(AppModule.WP, 'C')
+  @ModuleAccess(AppModule.WP)
   async saveWorkPermit(
     @Body() permit: SaveWorkPermitDto,
   ): Promise<WorkPermitResponseDto> {
@@ -57,7 +58,7 @@ export class WorkPermitController {
   }
 
   @Put(':id')
-  @WorkflowPermission()
+  @ModulePermission(AppModule.WP, 'U')
   async updateWorkPermit(
     @Param('id') id: string,
     @Body() permit: SaveWorkPermitDto,
@@ -69,7 +70,7 @@ export class WorkPermitController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @WorkflowPermission()
+  @ModulePermission(AppModule.WP, 'D')
   async deleteWorkPermit(
     @Param('id') id: string,
     @Query('plantId') plantId: string,
@@ -78,3 +79,4 @@ export class WorkPermitController {
     await this.workPermitService.deleteWorkPermit(companyId, plantId, id, userId, roleId);
   }
 }
+

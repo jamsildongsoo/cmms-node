@@ -66,16 +66,16 @@ API의 `path/query/body/actions` 구분과 `companyId`·`plantId` 범위 규칙�
 
 ## 5. 권한 처리 원칙
 
-*   `C/R/U/D/A`는 모듈 단위 기본 권한입니다.
-*   `U/D`는 타인 문서를 포함한 일반 수정/삭제 권한을 의미합니다.
-*   `A`는 업무모듈의 직접확정/승인 권한입니다.
-*   전자결재(`APR`) 승인 행위는 모듈 권한 `A`가 아니라 결재선으로 판단합니다.
-*   `PermissionGuard`가 적용되는 API는 `@Permission`, `@RefPermission`, `@WorkflowPermission`, `@SystemPermission` 중 하나를 반드시 선언합니다.
-*   위 권한 metadata가 없는 API는 기본 거부(`deny all`)로 처리합니다.
+*   모듈 접근 권한은 `module + C/R/U/D`, 조직 범위는 `COMPANY/PLANT`를 사용합니다.
+*   `ADMIN`도 동일한 모듈 CRUD와 회사 격리·사업장 범위·문서 상태·결재·재고 검증을 적용합니다.
+*   `SYSTEM` 사용자는 일반 업무 API가 아닌 시스템 관리 API와 `SystemShell`만 사용합니다.
+*   전자결재 승인·반려는 모듈 권한이 아니라 결재선과 현재 결재단계로 판단합니다.
+*   Controller의 업무 API는 공통 권한 metadata를 선언하고, 세부 소유자·상태·창고 범위 검증은 Service에서 수행합니다.
+*   본인 임시저장 문서의 수정·삭제 허용 여부와 타인 문서의 수정·삭제 권한은 Service 정책으로 일관되게 처리합니다.
 
 권한 예외는 서비스 계층에서 처리합니다.
 
-*   본인 작성 임시저장(`T`) 문서는 `U/D` 권한이 없어도 수정/삭제할 수 있습니다.
+*   본인 작성 임시저장(`T`) 문서는 해당 모듈의 `U/D` 권한과 작성자 본인 여부를 모두 확인한 뒤 수정/삭제합니다.
 *   타인 문서 수정/삭제는 기본 `U/D` 권한 규칙을 따릅니다.
 *   반려(`R`) 문서는 삭제하지 않고 이력을 유지합니다.
 
@@ -93,6 +93,21 @@ API의 `path/query/body/actions` 구분과 `companyId`·`plantId` 범위 규칙�
 *   `updateX(id, request)`
 *   `deleteX(id, options)`
 *   `runXAction(id, action, payload)`
+
+## 6-2. 업무 테이블 필드명 규칙
+
+업무문서와 하위 item은 다음 명명 규칙을 공통으로 사용합니다.
+
+*   문서 header의 회사 범위 복합 PK는 `company_id + id`를 기본으로 하며, 문서 번호 필드명은 `id`로 통일합니다.
+*   item 테이블은 별도 surrogate `id`를 만들지 않고 `company_id + 부모문서_id + item_no`를 복합 식별자로 사용합니다.
+*   모든 문서 item의 순번 컬럼은 `item_no`로 통일합니다. 신규 코드에서 `line_no`를 사용하지 않습니다.
+*   부모 문서 FK는 의미가 드러나는 이름을 사용합니다. 예: `pm_record_id`, `work_order_id`, `request_id`, `order_id`, `doc_id`.
+*   FE/BE API DTO의 item 순번은 DB `item_no`에 대응하는 `itemNo`로 통일합니다.
+*   공용 allocation은 `allocation_type`, `doc_id`, `doc_item_no`, `pr_id`, `pr_item_no`, `allocation_qty`를 사용합니다. `doc_id`는 allocation 유형의 업무문서 번호이며, `PO`는 PO 번호, `MOVE`는 재고 전표 번호를 의미합니다.
+*   `completed_qty`는 allocation에 두지 않습니다. 실제 입고·이동 수량은 PO item 또는 inventory document item에서 관리합니다.
+
+*   재고·구매 수량과 금액은 BE/DB에서 Decimal 및 numeric 4자리로 계산·저장합니다.
+*   FE 수량·측정값은 소수점 2자리, 금액은 정수 반올림으로 표시합니다.
 
 ---
 

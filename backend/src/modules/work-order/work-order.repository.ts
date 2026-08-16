@@ -18,6 +18,8 @@ export class WorkOrderRepository {
     plantId?: string,
     searchType?: string,
     searchValue?: string,
+    tempOnly?: string,
+    userId?: string,
   ): Promise<WorkOrder[]> {
     const query = this.workOrders
       .createQueryBuilder('wo')
@@ -26,6 +28,11 @@ export class WorkOrderRepository {
       .where('wo.companyId = :companyId', { companyId })
       .andWhere('wo.deleteYn = :notDeleted', { notDeleted: 'N' });
     if (plantId) query.andWhere('wo.plantId = :plantId', { plantId });
+    if (tempOnly === 'Y') {
+      query
+        .andWhere('wo.status = :tempStatus', { tempStatus: 'T' })
+        .andWhere('wo.createdBy = :userId', { userId });
+    }
     if (searchValue) {
       const value = `%${searchValue}%`;
       if (searchType === 'id') query.andWhere('wo.id ILIKE :value', { value });

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../../entities/users.entity';
 import { LoginHistory } from '../../entities/login-history.entity';
+import { AuthRefreshSession } from '../../entities/auth-refresh-session.entity';
 
 @Injectable()
 export class SystemService {
@@ -11,6 +12,8 @@ export class SystemService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(LoginHistory)
     private readonly loginHistoryRepository: Repository<LoginHistory>,
+    @InjectRepository(AuthRefreshSession)
+    private readonly refreshSessionRepository: Repository<AuthRefreshSession>,
   ) {}
 
   async getUsers(companyId?: string): Promise<any[]> {
@@ -70,6 +73,17 @@ export class SystemService {
       { companyId: cleanCoId, id: cleanId },
       { useYn: cleanUseYn, updatedBy: operator },
     );
+
+    if (cleanUseYn === 'N') {
+      await this.refreshSessionRepository
+        .createQueryBuilder()
+        .update(AuthRefreshSession)
+        .set({ revokedAt: new Date(), updatedBy: operator, updatedAt: new Date() })
+        .where('company_id = :companyId', { companyId: cleanCoId })
+        .andWhere('user_id = :userId', { userId: cleanId })
+        .andWhere('revoked_at IS NULL')
+        .execute();
+    }
   }
 
   async validateSystemAdminUser(userId: string): Promise<boolean> {

@@ -96,7 +96,7 @@ export class FileStorageService {
         await this.assertCanMutateGroup(group, 'U');
       } else {
         effectiveModule = this.parseAppModule(refModule);
-        await this.assertModulePermission(effectiveModule, ['C']);
+        await this.assertActionPermission(effectiveModule, ['C']);
 
         const groupRepository = qr.manager.getRepository(FileAttachment);
         const group = await groupRepository.save(groupRepository.create({
@@ -367,13 +367,14 @@ export class FileStorageService {
     return group;
   }
 
-  private async assertModulePermission(module: AppModule, actions: PermAction[]): Promise<void> {
-    const { companyId, roleId } = getTenantContext();
+  private async assertActionPermission(module: AppModule, actions: PermAction[]): Promise<void> {
+    const { companyId, roleId, userId } = getTenantContext();
     if (!roleId) throw new ForbiddenException('파일 접근 권한이 없습니다.');
-    await this.permissionPolicyService.assertAnyModulePermission(
+    await this.permissionPolicyService.assertAnyActionPermission(
       {
         companyId,
         roleId,
+        userId,
         module,
         actions,
         message: '파일 접근 권한이 없습니다.',

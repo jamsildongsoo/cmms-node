@@ -4,8 +4,11 @@ import { Repository, DataSource } from 'typeorm';
 import { Equipment } from '../../entities/equipment.entity';
 import { EquipmentCheckCycle } from '../../entities/equipment-check-cycle.entity';
 import { Inventory } from '../../entities/inventory.entity';
+import { InventoryStatus } from '../../entities/inventory-status.entity';
 import { resolveActivePlantId } from '../../common/utils/plant.util';
 import { toDateOnly } from '../../common/utils/date-only.util';
+import { AppModule } from '../../common/constants/module.constants';
+import { EquipmentSaveRequestDto, InventoryUpsertDto } from './dto/master.dto';
 
 export interface EquipmentSaveRequest {
   equipment: Partial<Equipment>;
@@ -19,13 +22,14 @@ export class MasterService {
     @InjectRepository(Equipment) private readonly eqRepo: Repository<Equipment>,
     @InjectRepository(EquipmentCheckCycle) private readonly checkCycleRepo: Repository<EquipmentCheckCycle>,
     @InjectRepository(Inventory) private readonly invRepo: Repository<Inventory>,
+    @InjectRepository(InventoryStatus) private readonly inventoryStatusRepo: Repository<InventoryStatus>,
   ) {}
 
   // =========================================================================
   // 1. 설비 마스터 (Equipment)
   // =========================================================================
   async getEquipmentsByCompany(companyId: string, operator: string): Promise<Equipment[]> {
-    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator);
+    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, null, AppModule.EQP);
     let list: Equipment[];
     if (activePlantId) {
       list = await this.eqRepo.find({ where: { companyId, plantId: activePlantId, deleteYn: 'N' } });
@@ -37,7 +41,7 @@ export class MasterService {
   }
 
   async getEquipmentsByPlant(companyId: string, plantId: string, operator: string): Promise<Equipment[]> {
-    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, plantId);
+    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, plantId, AppModule.EQP);
     if (!activePlantId) {
       return [];
     }
@@ -73,7 +77,7 @@ export class MasterService {
   }
 
   async getEquipmentWithDetails(companyId: string, plantId: string, id: string, operator: string): Promise<EquipmentSaveRequest> {
-    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, plantId);
+    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, plantId, AppModule.EQP);
     if (!activePlantId) {
       throw new BadRequestException('접근 권한이 없는 플랜트입니다.');
     }
@@ -92,7 +96,7 @@ export class MasterService {
 
   async saveEquipment(
     companyId: string,
-    request: EquipmentSaveRequest,
+    request: EquipmentSaveRequestDto,
     operator: string,
     mode: 'create' | 'update',
   ): Promise<Equipment> {
@@ -101,14 +105,12 @@ export class MasterService {
       throw new BadRequestException('플랜트 ID와 설비 ID는 필수입니다.');
     }
 
-    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, reqEq.plantId);
+    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, reqEq.plantId, AppModule.EQP);
     if (!activePlantId) {
       throw new BadRequestException('접근 권한이 없는 플랜트입니다.');
     }
 
     reqEq.plantId = activePlantId;
-    reqEq.companyId = companyId;
-
     return this.dataSource.transaction(async (manager) => {
       const equipmentRepository = manager.getRepository(Equipment);
       const cycleRepository = manager.getRepository(EquipmentCheckCycle);
@@ -152,6 +154,7 @@ export class MasterService {
         await cycleRepository.save(
           request.checkCycles.map((cycle) => cycleRepository.create({
             ...cycle,
+            cycleVal: cycle.cycleVal ?? undefined,
             lastCheckDate: cycle.lastCheckDate ? toDateOnly(cycle.lastCheckDate) : null,
             nextCheckDate: cycle.nextCheckDate ? toDateOnly(cycle.nextCheckDate) : null,
             companyId,
@@ -168,7 +171,7 @@ export class MasterService {
   }
 
   async deleteEquipment(companyId: string, plantId: string, id: string, operator: string): Promise<void> {
-    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, plantId);
+    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, plantId, AppModule.EQP);
     if (!activePlantId) {
       throw new BadRequestException('접근 권한이 없는 플랜트입니다.');
     }
@@ -195,14 +198,15 @@ export class MasterService {
 
   async saveInventory(
     companyId: string,
-    invDto: Partial<Inventory>,
+    invDto: InventoryUpsertDto,
     operator: string,
     mode: 'create' | 'update',
   ): Promise<Inventory> {
     if (!invDto.id) throw new BadRequestException('자재 ID는 필수입니다.');
 
-    invDto.companyId = companyId;
-    const exists = await this.invRepo.findOne({ where: { companyId, id: invDto.id } });
+    const inventoryId = invDto.id?.trim();
+    if (!inventoryId) throw new BadRequestException('자재 ID는 필수입니다.');
+    const exists = await this.invRepo.findOne({ where: { companyId, id: inventoryId } });
     if (mode === 'create' && exists?.deleteYn === 'N') {
       throw new BadRequestException('이미 존재하는 자재입니다.');
     }
@@ -213,19 +217,59 @@ export class MasterService {
     if (exists) {
       Object.assign(exists, {
         ...invDto,
+        id: inventoryId,
+        safetyQty: invDto.safetyQty.toFixed(4),
+        reorderQty: invDto.reorderQty.toFixed(4),
         deleteYn: 'N',
         updatedBy: operator,
       });
-      return this.invRepo.save(exists);
+      const restored = await this.invRepo.save(exists);
+      await this.seedStatusesForInventory(companyId, restored.id, operator);
+      return restored;
     } else {
       const inv = this.invRepo.create({
         ...invDto,
+        companyId,
+        id: inventoryId,
+        safetyQty: invDto.safetyQty.toFixed(4),
+        reorderQty: invDto.reorderQty.toFixed(4),
         deleteYn: 'N',
         createdBy: operator,
         updatedBy: operator,
       });
-      return this.invRepo.save(inv);
+      const saved = await this.invRepo.save(inv);
+      await this.seedStatusesForInventory(companyId, saved.id, operator);
+      return saved;
     }
+  }
+
+  /** 신규 자재는 모든 활성 창고에 0 재고 상태를 준비한다. */
+  private async seedStatusesForInventory(
+    companyId: string,
+    inventoryId: string,
+    operator: string,
+  ): Promise<void> {
+    const warehouses = await this.dataSource.getRepository('warehouse').find({
+      select: { id: true },
+      where: { companyId, deleteYn: 'N' },
+    }) as Array<{ id: string }>;
+    if (!warehouses.length) return;
+    await this.inventoryStatusRepo
+      .createQueryBuilder()
+      .insert()
+      .into(InventoryStatus)
+      .values(warehouses.map((warehouse) => ({
+        companyId,
+        warehouseId: warehouse.id,
+        inventoryId,
+        qty: '0.0000',
+        amount: '0.0000',
+        createdBy: operator,
+        updatedBy: operator,
+        deleteYn: 'N',
+      })))
+      .orIgnore()
+      .execute();
   }
 
   async deleteInventory(companyId: string, id: string, operator: string): Promise<void> {
@@ -257,7 +301,7 @@ export class MasterService {
     csv += '자재코드,자재명,자재타입,관리부서,단위,제조사,스펙,모델,일련번호,안전재고,재주문점,리드타임(일),비고\n';
 
     for (const inv of list) {
-      csv += `${this.escapeCsv(inv.id)},${this.escapeCsv(inv.name)},${this.escapeCsv(inv.invTypeCode)},${this.escapeCsv(inv.departmentId)},${this.escapeCsv(inv.unit)},${this.escapeCsv(inv.makerName)},${this.escapeCsv(inv.spec)},${this.escapeCsv(inv.model)},${this.escapeCsv(inv.serialNumber)},${inv.safetyQty},${inv.reorderQty},${inv.leadTimeDays},${this.escapeCsv(inv.remarks)}\n`;
+      csv += `${this.escapeCsv(inv.id)},${this.escapeCsv(inv.name)},${this.escapeCsv(inv.invTypeCode)},${this.escapeCsv(inv.unit)},${this.escapeCsv(inv.makerName)},${this.escapeCsv(inv.spec)},${this.escapeCsv(inv.model)},${this.escapeCsv(inv.serialNumber)},${inv.safetyQty},${inv.reorderQty},${inv.leadTimeDays},${this.escapeCsv(inv.remarks)}\n`;
     }
     return csv;
   }

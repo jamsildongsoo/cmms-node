@@ -36,13 +36,11 @@ export const warehouseApi = resourceApi<Warehouse>('/mdm/warehouses');
 export const roleApi = {
   ...resourceApi<Role>('/mdm/roles'),
   async getDetails(roleId: string): Promise<RoleDetail[]> {
-    const response = await axiosInstance.get<RoleDetail[]>(
-      `/mdm/roles/${roleId}/details`,
-    );
+    const response = await axiosInstance.get<RoleDetail[]>(`/mdm/roles/${roleId}/details`);
     return response.data;
   },
   async saveDetails(roleId: string, details: RoleDetail[]): Promise<void> {
-    await axiosInstance.post(`/mdm/roles/${roleId}/details`, details);
+    await axiosInstance.put(`/mdm/roles/${roleId}/details`, details);
   },
 };
 
@@ -83,4 +81,3 @@ export const mdmMetaApi = {
     return response.data;
   },
 };
-

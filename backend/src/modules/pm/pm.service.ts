@@ -52,9 +52,10 @@ export class PmService {
     searchType?: string,
     searchValue?: string,
     showAll?: string,
+    tempOnly?: string,
     requestedPlantId?: string,
   ): Promise<PmRecordResponseDto[]> {
-    const plantId = await resolveActivePlantId(this.dataSource, companyId, operator, requestedPlantId);
+    const plantId = await resolveActivePlantId(this.dataSource, companyId, operator, requestedPlantId, AppModule.PM);
     const records = await this.pmRepository.findRecords({
       companyId,
       plantId: plantId ?? undefined,
@@ -62,6 +63,8 @@ export class PmService {
       searchType,
       searchValue,
       showAll,
+      tempOnly,
+      userId: operator,
     });
     return records.map((record) => this.toRecordResponse(record));
   }
@@ -73,7 +76,7 @@ export class PmService {
     operator: string,
   ): Promise<PmRecordDetailsDto> {
     const activePlantId = this.requirePlantId(
-      await resolveActivePlantId(this.dataSource, companyId, operator, plantId),
+      await resolveActivePlantId(this.dataSource, companyId, operator, plantId, AppModule.PM),
     );
     const record = await this.pmRepository.findRecord(companyId, activePlantId, id);
     if (!record) throw new NotFoundException('점검 기록을 찾을 수 없습니다.');
@@ -92,7 +95,7 @@ export class PmService {
     operator: string,
   ): Promise<PmCheckTemplateResponseDto[]> {
     const activePlantId = this.requirePlantId(
-      await resolveActivePlantId(this.dataSource, companyId, operator, plantId),
+      await resolveActivePlantId(this.dataSource, companyId, operator, plantId, AppModule.PM),
     );
     const templates = await this.pmRepository.findTemplates(companyId, activePlantId, checkTypeCode);
     return templates.map((item) => ({
@@ -115,7 +118,7 @@ export class PmService {
   ): Promise<PmRecordResponseDto> {
     const { pmRecord, checkItems } = request;
     const plantId = this.requirePlantId(
-      await resolveActivePlantId(this.dataSource, companyId, operator, pmRecord.plantId),
+      await resolveActivePlantId(this.dataSource, companyId, operator, pmRecord.plantId, AppModule.PM),
     );
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -135,16 +138,21 @@ export class PmService {
       const refNo = pmRecord.refNo?.trim() || null;
       this.validateStage(stage, refModule, refNo);
 
-      // 직접 확정(S)은 임시저장 수정 권한과 별도로 PM:A 권한이 필요하다.
-      if (pmRecord.status === DocStatus.SELF_CONFIRMED) {
-        await this.permissionPolicyService.assertModulePermission({
+      // 관리용 호환 경로: FE에서는 직접확정을 제공하지 않는다. 다만 별도 관리
+      // 호출이 status='S'를 저장할 수 있으므로 기존 검증과 후속 처리 로직은 유지한다.
+    if (pmRecord.status === DocStatus.SELF_CONFIRMED) {
+        await this.permissionPolicyService.assertActionPermission({
           companyId,
           roleId: roleId ?? '',
+          userId: operator,
           module: AppModule.PM,
           action: 'A',
           resourceLabel: '예방점검 직접 확정',
-        });
-      }
+      });
+    }
+    if (![DocStatus.TEMP, DocStatus.SELF_CONFIRMED].includes(pmRecord.status as DocStatus)) {
+      throw new BadRequestException('예방점검 저장 상태는 임시저장 또는 직접확정만 허용됩니다.');
+    }
 
       if (stage === 'R' && refNo) {
         await this.requireConfirmedPlan(
@@ -182,21 +190,19 @@ export class PmService {
         await this.permissionPolicyService.assertCanUpdateOwnTempOrPermission({
           companyId,
           roleId: roleId ?? '',
+          userId: operator,
           module: AppModule.PM,
           status: record.status,
           ownerId: record.createdBy,
           operatorId: operator,
           resourceLabel: '예방점검',
         });
-        if (![DocStatus.TEMP, DocStatus.REJECTED].includes(record.status as DocStatus)) {
-          throw new BadRequestException('임시저장 또는 반려 상태의 예방점검만 수정할 수 있습니다.');
+        if (record.status !== DocStatus.TEMP) {
+          throw new BadRequestException('임시저장 상태의 예방점검만 수정할 수 있습니다.');
         }
       }
 
       const values = this.normalizeHeader(pmRecord, stage, refModule, refNo);
-      if (previousStatus === DocStatus.REJECTED) {
-        values.approvalId = null;
-      }
       // 종료 여부는 전용 종료 API에서만 변경한다. 기존 계획 수정으로 재개방하지 않는다.
       if (!isNew) delete values.closeYn;
       Object.assign(record, values, { updatedBy: operator });
@@ -268,7 +274,7 @@ export class PmService {
     operator: string,
   ): Promise<void> {
     const activePlantId = this.requirePlantId(
-      await resolveActivePlantId(this.dataSource, companyId, operator, plantId),
+      await resolveActivePlantId(this.dataSource, companyId, operator, plantId, AppModule.PM),
     );
     await this.dataSource.transaction(async (manager) => {
       const plan = await this.findLockedRecord(manager, companyId, activePlantId, id);
@@ -288,7 +294,7 @@ export class PmService {
     roleId: string,
   ): Promise<void> {
     const activePlantId = this.requirePlantId(
-      await resolveActivePlantId(this.dataSource, companyId, operator, plantId),
+      await resolveActivePlantId(this.dataSource, companyId, operator, plantId, AppModule.PM),
     );
     let fileGroupId: string | number | null = null;
     await this.dataSource.transaction(async (manager) => {
@@ -296,6 +302,7 @@ export class PmService {
       await this.permissionPolicyService.assertCanDeleteOwnTempOrPermission({
         companyId,
         roleId,
+        userId: operator,
         module: AppModule.PM,
         status: record.status,
         ownerId: record.createdBy,

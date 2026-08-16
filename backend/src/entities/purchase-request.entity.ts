@@ -34,9 +34,6 @@ export class PurchaseRequest extends BaseEntity {
   @Column({ type: 'varchar',  name: 'request_type', length: 50, nullable: true })
   requestType!: string | null;
 
-  @Column({ type: 'varchar',  name: 'vendor_id', length: 50, nullable: true })
-  vendorId!: string | null;
-
   @Column({ type: 'varchar', name: 'purchase_manager', length: 100, nullable: true })
   purchaseManager!: string | null;
 

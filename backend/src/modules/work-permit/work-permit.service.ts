@@ -34,15 +34,18 @@ export class WorkPermitService {
     operator: string,
     searchType?: string,
     searchValue?: string,
+    tempOnly?: string,
     requestedPlantId?: string,
   ): Promise<WorkPermitResponseDto[]> {
-    const plantId = await resolveActivePlantId(this.dataSource, companyId, operator, requestedPlantId);
+    const plantId = await resolveActivePlantId(this.dataSource, companyId, operator, requestedPlantId, AppModule.WP);
     return (
       await this.workPermitRepository.findAll(
         companyId,
         plantId ?? undefined,
         searchType,
         searchValue,
+        tempOnly,
+        operator,
       )
     ).map((entity) => this.toResponse(entity));
   }
@@ -58,6 +61,7 @@ export class WorkPermitService {
       companyId,
       operator,
       plantId,
+      AppModule.WP,
     );
     if (!activePlantId) throw new BadRequestException('사업장을 확인할 수 없습니다.');
     const entity = await this.workPermitRepository.findOne(
@@ -81,16 +85,23 @@ export class WorkPermitService {
       companyId,
       operator,
       input.plantId,
+      AppModule.WP,
     );
     if (!plantId) throw new BadRequestException('사업장을 확인할 수 없습니다.');
+    // 관리용 호환 경로: 일반 FE에서는 사용하지 않지만, 별도 관리 호출의
+    // status='S' 저장을 위해 기존 직접확정 검증을 유지한다.
     if (input.status === DocStatus.SELF_CONFIRMED) {
-      await this.permissionPolicyService.assertModulePermission({
+      await this.permissionPolicyService.assertActionPermission({
         companyId,
         roleId: roleId ?? '',
+          userId: operator,
         module: AppModule.WP,
         action: 'A',
         resourceLabel: '작업허가 직접 확정',
       });
+    }
+    if (![DocStatus.TEMP, DocStatus.SELF_CONFIRMED].includes(input.status as DocStatus)) {
+      throw new BadRequestException('작업허가 저장 상태는 임시저장 또는 직접확정만 허용됩니다.');
     }
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();
@@ -128,14 +139,15 @@ export class WorkPermitService {
         await this.permissionPolicyService.assertCanUpdateOwnTempOrPermission({
           companyId,
           roleId: roleId ?? '',
+          userId: operator,
           module: AppModule.WP,
           status: entity.status,
           ownerId: entity.createdBy,
           operatorId: operator,
           resourceLabel: '작업허가',
         });
-        if (![DocStatus.TEMP, DocStatus.REJECTED].includes(entity.status as DocStatus)) {
-          throw new BadRequestException('임시저장 또는 반려 상태의 작업허가서만 수정할 수 있습니다.');
+        if (entity.status !== DocStatus.TEMP) {
+          throw new BadRequestException('임시저장 상태의 작업허가서만 수정할 수 있습니다.');
         }
       }
       Object.assign(entity, {
@@ -162,7 +174,7 @@ export class WorkPermitService {
         fileGroupId: input.fileGroupId ?? null,
         refNo: input.refNo ?? null,
         refModule: input.refModule ?? null,
-        approvalId: entity.status === DocStatus.REJECTED ? null : (input.approvalId ?? null),
+        approvalId: input.approvalId ?? null,
         status: input.status || DocStatus.TEMP,
         updatedBy: operator,
       });
@@ -201,6 +213,7 @@ export class WorkPermitService {
       companyId,
       operator,
       plantId,
+      AppModule.WP,
     );
     if (!activePlantId) throw new BadRequestException('사업장을 확인할 수 없습니다.');
     const repository = this.dataSource.getRepository(WorkPermit);
@@ -211,6 +224,7 @@ export class WorkPermitService {
     await this.permissionPolicyService.assertCanDeleteOwnTempOrPermission({
       companyId,
       roleId,
+      userId: operator,
       module: AppModule.WP,
       status: entity.status,
       ownerId: entity.createdBy,

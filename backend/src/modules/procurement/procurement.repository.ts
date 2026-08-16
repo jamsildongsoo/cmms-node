@@ -13,11 +13,15 @@ export class ProcurementRepository {
     private readonly items: Repository<PurchaseRequestItem>,
   ) {}
 
-  findAll(companyId: string, plantId?: string): Promise<PurchaseRequest[]> {
+  findAll(companyId: string, plantId?: string, tempOnly = false, requesterId?: string): Promise<PurchaseRequest[]> {
+    const where = plantId
+      ? { companyId, plantId, deleteYn: 'N' as const }
+      : { companyId, deleteYn: 'N' as const };
+    if (tempOnly) {
+      Object.assign(where, { status: 'T', requesterId });
+    }
     return this.requests.find({
-      where: plantId
-        ? { companyId, plantId, deleteYn: 'N' }
-        : { companyId, deleteYn: 'N' },
+      where,
       order: { id: 'DESC' },
     });
   }
@@ -38,7 +42,7 @@ export class ProcurementRepository {
   findItems(companyId: string, requestId: string): Promise<PurchaseRequestItem[]> {
     return this.items.find({
       where: { companyId, requestId },
-      order: { lineNo: 'ASC' },
+      order: { itemNo: 'ASC' },
     });
   }
 }

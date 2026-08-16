@@ -13,15 +13,22 @@ import {
 } from '@nestjs/common';
 import {
   ProcurementService,
-  SaveRequest,
-  OrderRequest,
-  ShipRequest,
-  ReceiveRequest,
   RequestDetail,
   PurchaseRequestResponse,
+  PurchaseOrderAllocationResponse,
 } from './procurement.service';
+import {
+  PlaceOrderDto,
+  CreateIntegratedOrderDto,
+  SaveProcurementAllocationsDto,
+  TransferProcurementDto,
+  CreatePrTransferDto,
+  ReceiveProcurementDto,
+  SaveProcurementDto,
+  StartShippingDto,
+} from './dto/procurement.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { PermissionGuard, Permission, WorkflowPermission } from '../../common/guards/permission.guard';
+import { PermissionGuard, ModuleAccess, ModulePermission } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
@@ -31,10 +38,11 @@ export class ProcurementController {
   constructor(private readonly procurementService: ProcurementService) {}
 
   @Get('requests')
-  @Permission(AppModule.PUR, 'R')
+  @ModuleAccess(AppModule.PUR)
   async getRequests(
     @Query('plantId') plantId?: string,
     @Query('receivable') receivable?: string,
+    @Query('tempOnly') tempOnly?: string,
   ): Promise<PurchaseRequestResponse[]> {
     const { companyId, userId, roleId } = getTenantContext();
     return this.procurementService.getPurchaseRequests(
@@ -43,25 +51,26 @@ export class ProcurementController {
       roleId,
       plantId,
       receivable === 'Y',
+      tempOnly === 'Y',
     );
   }
 
   @Get('receipts/request/:id')
-  @Permission(AppModule.STK, 'R')
+  @ModuleAccess(AppModule.STK)
   async getReceivableRequest(@Param('id') id: string): Promise<RequestDetail> {
     const { companyId, userId } = getTenantContext();
     return this.procurementService.getReceivableRequest(companyId, id, userId);
   }
 
   @Get('receipts/requests')
-  @Permission(AppModule.STK, 'R')
+  @ModuleAccess(AppModule.STK)
   async getReceivableRequests(): Promise<any[]> {
     const { companyId, userId } = getTenantContext();
     return this.procurementService.getReceivableRequests(companyId, userId);
   }
 
   @Get('requests/:id')
-  @Permission(AppModule.PUR, 'R')
+  @ModuleAccess(AppModule.PUR)
   async getRequest(
     @Param('id') id: string,
     @Query('plantId') plantId?: string,
@@ -71,25 +80,31 @@ export class ProcurementController {
   }
 
   @Post('requests')
-  @Permission(AppModule.PUR, 'C')
-  async saveRequest(@Body() request: SaveRequest): Promise<any> {
+  @ModuleAccess(AppModule.PUR)
+  async saveRequest(@Body() request: SaveProcurementDto): Promise<any> {
     const { companyId, userId } = getTenantContext();
-    return this.procurementService.createOrUpdate(companyId, request, userId, 'create');
+    return this.procurementService.createOrUpdate(companyId, {
+      ...request,
+      items: request.items?.map((item) => ({ ...item, qty: item.qty.toString() })),
+    }, userId, 'create');
   }
 
   @Put('requests/:id')
-  @WorkflowPermission()
+  @ModulePermission(AppModule.PUR, 'U')
   async updateRequest(
     @Param('id') id: string,
-    @Body() request: SaveRequest,
+    @Body() request: SaveProcurementDto,
   ): Promise<any> {
     const { companyId, userId, roleId } = getTenantContext();
     request.header.id = id;
-    return this.procurementService.createOrUpdate(companyId, request, userId, 'update', roleId);
+    return this.procurementService.createOrUpdate(companyId, {
+      ...request,
+      items: request.items?.map((item) => ({ ...item, qty: item.qty.toString() })),
+    }, userId, 'update', roleId);
   }
 
   @Post('requests/:id/actions/confirm')
-  @Permission(AppModule.PUR, 'A')
+  @ModulePermission(AppModule.PUR, 'U')
   async confirmRequest(
     @Param('id') id: string,
   ): Promise<any> {
@@ -98,7 +113,7 @@ export class ProcurementController {
   }
 
   @Get('orders')
-  @Permission(AppModule.POR, 'R')
+  @ModuleAccess(AppModule.POR)
   async getOrders(
     @Query('plantId') plantId?: string,
     @Query('receivable') receivable?: string,
@@ -113,8 +128,18 @@ export class ProcurementController {
     );
   }
 
+  @Post('orders')
+  @ModuleAccess(AppModule.POR)
+  async createIntegratedOrder(@Body() request: CreateIntegratedOrderDto): Promise<PurchaseRequestResponse> {
+    const { companyId, userId } = getTenantContext();
+    return this.procurementService.createIntegratedOrder(companyId, {
+      ...request,
+      lines: request.lines.map((line) => ({ ...line, qty: line.qty.toString() })),
+    }, userId);
+  }
+
   @Get('orders/:id')
-  @Permission(AppModule.POR, 'R')
+  @ModuleAccess(AppModule.POR)
   async getOrder(
     @Param('id') id: string,
     @Query('plantId') plantId?: string,
@@ -123,55 +148,120 @@ export class ProcurementController {
     return this.procurementService.getPurchaseOrderDetail(companyId, id, userId, plantId);
   }
 
+  @Get('orders/:id/allocations')
+  @ModuleAccess(AppModule.POR)
+  async getOrderAllocations(
+    @Param('id') id: string,
+  ): Promise<PurchaseOrderAllocationResponse[]> {
+    const { companyId } = getTenantContext();
+    return this.procurementService.getOrderAllocations(companyId, id);
+  }
+
+  @Put('orders/:id/allocations')
+  @ModuleAccess(AppModule.POR)
+  async saveOrderAllocations(
+    @Param('id') id: string,
+    @Body() request: SaveProcurementAllocationsDto,
+  ): Promise<PurchaseOrderAllocationResponse[]> {
+    const { companyId, userId } = getTenantContext();
+    return this.procurementService.saveOrderAllocations(companyId, id, request.lines.map((line) => ({
+      ...line,
+      allocatedQty: line.allocatedQty.toString(),
+    })), userId);
+  }
+
+  @Post('orders/:id/actions/transfer')
+  @ModuleAccess(AppModule.STK)
+  async transferOrder(
+    @Param('id') id: string,
+    @Body() request: TransferProcurementDto,
+  ): Promise<PurchaseOrderAllocationResponse[]> {
+    const { companyId, userId } = getTenantContext();
+    return this.procurementService.transferOrder(companyId, id, {
+      ...request,
+      lines: request.lines.map((line) => ({ ...line, qty: line.qty.toString() })),
+    }, userId);
+  }
+
+  @Post('transfers/pr')
+  @ModuleAccess(AppModule.STK)
+  async transferPurchaseRequests(
+    @Body() request: CreatePrTransferDto,
+  ): Promise<void> {
+    const { companyId, userId } = getTenantContext();
+    await this.procurementService.transferPurchaseRequests(companyId, {
+      ...request,
+      lines: request.lines.map((line) => ({ ...line, qty: line.qty.toString() })),
+    }, userId);
+  }
+
+  @Post('orders/:id/actions/receive')
+  @ModuleAccess(AppModule.POR)
+  async receiveOrder(
+    @Param('id') id: string,
+    @Body() request: ReceiveProcurementDto,
+  ): Promise<void> {
+    const { companyId, userId } = getTenantContext();
+    await this.procurementService.receiveOrder(companyId, id, {
+      ...request,
+      lines: request.lines.map((line) => ({ ...line, qty: line.qty.toString(), unitPrice: line.unitPrice.toString() })),
+    }, userId);
+  }
+
   @Post('orders/:id/actions/order')
-  @Permission(AppModule.POR, 'U')
+  @ModulePermission(AppModule.POR, 'U')
   async placeOrder(
     @Param('id') id: string,
-    @Body() request: OrderRequest,
+    @Body() request: PlaceOrderDto,
   ): Promise<any> {
     const { companyId, userId } = getTenantContext();
-    request.requestId = id;
-    return this.procurementService.placeOrder(companyId, request, userId);
+    return this.procurementService.placeOrder(companyId, { ...request, requestId: id }, userId);
   }
 
   @Post('orders/:id/actions/ship')
-  @Permission(AppModule.POR, 'U')
+  @ModulePermission(AppModule.POR, 'U')
   async startShipping(
     @Param('id') id: string,
-    @Body() request: ShipRequest,
+    @Body() request: StartShippingDto,
   ): Promise<any> {
     const { companyId, userId } = getTenantContext();
-    request.requestId = id;
-    return this.procurementService.startShipping(companyId, request, userId);
+    return this.procurementService.startShipping(companyId, { ...request, requestId: id }, userId);
   }
 
   @Post('requests/:id/actions/receive')
-  @Permission(AppModule.STK, 'C')
+  @ModuleAccess(AppModule.STK)
   async receive(
     @Param('id') id: string,
-    @Body() request: ReceiveRequest,
+    @Body() request: ReceiveProcurementDto,
   ): Promise<any> {
     const { companyId, userId } = getTenantContext();
-    request.requestId = id;
-    return this.procurementService.receive(companyId, request, userId);
+    return this.procurementService.receive(companyId, {
+      ...request,
+      requestId: id,
+      lines: request.lines.map((line) => ({
+        ...line,
+        qty: line.qty.toString(),
+        unitPrice: line.unitPrice.toString(),
+      })),
+    }, userId);
   }
 
   @Post('slips/cancel/:docNo')
-  @Permission(AppModule.STK, 'C')
+  @ModuleAccess(AppModule.STK)
   async cancelSlip(@Param('docNo') docNo: string): Promise<void> {
     const { companyId, userId } = getTenantContext();
     await this.procurementService.cancelSlip(companyId, docNo, userId);
   }
 
   @Post('receipts/cancel/:docNo')
-  @Permission(AppModule.STK, 'C')
+  @ModuleAccess(AppModule.STK)
   async cancelReceipt(@Param('docNo') docNo: string): Promise<void> {
     const { companyId, userId } = getTenantContext();
     await this.procurementService.cancelSlip(companyId, docNo, userId);
   }
 
   @Post('orders/:id/actions/close')
-  @Permission(AppModule.POR, 'U')
+  @ModulePermission(AppModule.POR, 'U')
   async close(@Param('id') id: string): Promise<any> {
     const { companyId, userId } = getTenantContext();
     return this.procurementService.close(companyId, id, userId);
@@ -179,7 +269,7 @@ export class ProcurementController {
 
   @Delete('requests/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @WorkflowPermission()
+  @ModulePermission(AppModule.PUR, 'D')
   async deleteRequest(@Param('id') id: string): Promise<void> {
     const { companyId, userId, roleId } = getTenantContext();
     await this.procurementService.deleteRequest(companyId, id, userId, roleId);

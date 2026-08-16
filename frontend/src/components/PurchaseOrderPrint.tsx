@@ -34,7 +34,7 @@ export default function PurchaseOrderPrint(p: PurchaseOrderPrintProps) {
       <PrintSection title="발주 정보">
         <div className="divide-y divide-gray-300 border-y border-gray-400">
           <div className="grid grid-cols-2 gap-4 py-2">
-            <PrintField label="구매요청번호" value={p.id} />
+            <PrintField label="문서번호" value={p.id} />
             <PrintField label="발주일" value={p.orderDate} />
           </div>
           <div className="py-2">

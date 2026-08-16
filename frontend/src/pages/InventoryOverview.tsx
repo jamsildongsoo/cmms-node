@@ -202,7 +202,7 @@ export default function InventoryOverview() {
   function handleListPrint() {
     const now = new Date();
     const common = {
-      companyName: user?.companyName || user?.companyId || 'CMMS',
+      companyName: user?.companyId || 'CMMS',
       printerName: user?.name || '-',
       printedAt: formatDateTimeSeconds(now),
     };

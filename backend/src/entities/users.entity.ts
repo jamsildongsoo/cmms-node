@@ -30,8 +30,11 @@ export class User extends BaseEntity {
   ])
   department!: Department | null;
 
-  @Column({ type: 'varchar', name: 'role_id', length: 50, nullable: true })
-  roleId!: string | null;
+  @Column({ type: 'varchar', name: 'role_id', length: 50 })
+  roleId!: string;
+
+  @Column({ type: 'varchar', name: 'scope', length: 20, default: 'PLANT' })
+  scope!: 'COMPANY' | 'PLANT';
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   email!: string | null;

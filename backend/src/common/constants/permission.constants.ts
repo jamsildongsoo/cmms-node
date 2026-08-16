@@ -4,7 +4,7 @@
 
 /**
  * 권한 액션 (role_detail.perm_c/r/u/d/a)
- * A = 결재/직접확정 우회 권한. A가 없으면 status='S'(직접확정) 불가 → 결재 상신 강제.
+ * A는 결재·관리 행위 전용 액션으로 사용한다.
  */
 export type PermAction = 'C' | 'R' | 'U' | 'D' | 'A';
 

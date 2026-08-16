@@ -1,5 +1,4 @@
 export type YesNo = 'Y' | 'N';
-export type PermissionAction = 'C' | 'R' | 'U' | 'D' | 'A';
 
 export interface Plant {
   id: string;
@@ -10,16 +9,17 @@ export interface Department {
   id: string;
   name: string;
   parentId: string | null;
+  roleId?: string | null;
+  scope: 'COMPANY' | 'PLANT';
 }
 
 export interface Role {
   id: string;
   roleName: string;
-  multiPlant: YesNo;
 }
 
 export interface RoleDetail {
-  companyId: string;
+  companyId?: string;
   roleId: string;
   moduleDetail: string;
   permC: YesNo;
@@ -34,12 +34,13 @@ export interface MdmUser {
   name: string;
   departmentId: string | null;
   roleId: string;
+  scope: 'COMPANY' | 'PLANT';
   email: string | null;
   phone: string | null;
   position: string | null;
   title: string | null;
   useYn: YesNo;
-  lastLoginPlantId?: string | null;
+  homePlantId?: string | null;
   initialPassword?: string;
 }
 
@@ -74,12 +75,4 @@ export interface CodeItem {
 export interface ModuleMetadata {
   code: string;
   label: string;
-}
-
-export interface MdmPermission {
-  C: string;
-  R: string;
-  U: string;
-  D: string;
-  A: string;
 }

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  NotFoundException,
   Injectable,
 } from '@nestjs/common';
 import { Between, DataSource, LessThan, QueryRunner } from 'typeorm';
@@ -18,6 +19,9 @@ import { InventoryMonthlyClosing } from '../../entities/inventory-monthly-closin
 import { InventoryClosing } from '../../entities/inventory-closing.entity';
 import { User } from '../../entities/users.entity';
 import { Warehouse } from '../../entities/warehouse.entity';
+import { InventoryDocument } from '../../entities/inventory-document.entity';
+import { InventoryDocumentItem } from '../../entities/inventory-document-item.entity';
+import { DepartmentAccessService } from '../../common/permissions/department-access.service';
 
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_UP });
 
@@ -42,11 +46,22 @@ export interface InventoryTxContext {
   userId: string;
 }
 
+export interface InventoryDocumentResponse {
+  companyId: string;
+  id: string;
+  txDate: Date | string;
+  refModule: string | null;
+  refNo: string | null;
+  remarks: string | null;
+  items: InventoryDocumentItem[];
+}
+
 @Injectable()
 export class InventoryTxService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly sequenceService: SequenceService,
+    private readonly departmentAccessService: DepartmentAccessService,
   ) {}
 
   async processTransactions(
@@ -56,6 +71,18 @@ export class InventoryTxService {
     const tenant = context ?? getTenantContext();
     const { companyId, userId } = tenant;
     if (!request.items?.length) return;
+    for (const item of request.items) {
+      await this.departmentAccessService.assertAction(
+        companyId, userId, AppModule.STK, 'U',
+        { warehouseId: item.warehouseId },
+      );
+      if (item.targetWarehouseId) {
+        await this.departmentAccessService.assertAction(
+          companyId, userId, AppModule.STK, 'U',
+          { warehouseId: item.targetWarehouseId },
+        );
+      }
+    }
     const transactionMonths = new Set(
       request.items.map((item) => this.toDateOnly(item.txDate ?? new Date()).slice(0, 7).replace('-', '')),
     );
@@ -118,6 +145,7 @@ export class InventoryTxService {
           await this.executeAdj(runner, companyId, item, statuses, txDate, userId);
         }
       }
+      await this.saveInventoryDocument(runner, companyId, request.items, generated, userId);
       if (ownsTransaction) await runner.commitTransaction();
     } catch (error: unknown) {
       if (ownsTransaction) await runner.rollbackTransaction();
@@ -129,6 +157,66 @@ export class InventoryTxService {
     } finally {
       if (ownsTransaction) await runner.release();
     }
+  }
+
+  private async saveInventoryDocument(
+    runner: QueryRunner,
+    companyId: string,
+    items: TxItem[],
+    docNo: string,
+    operator: string,
+  ): Promise<void> {
+    const documentRepository = runner.manager.getRepository(InventoryDocument);
+    const itemRepository = runner.manager.getRepository(InventoryDocumentItem);
+    const existing = await documentRepository.findOne({ where: { companyId, id: docNo } });
+    if (existing) return;
+    const first = items[0];
+    await documentRepository.save(documentRepository.create({
+      companyId,
+      id: docNo,
+      txDate: first.txDate ?? new Date(),
+      refModule: first.refModule ?? null,
+      refNo: first.refNo ?? null,
+      remarks: null,
+      createdBy: operator,
+      updatedBy: operator,
+      deleteYn: 'N',
+    }));
+    const documentItems = items.flatMap((item, index) => {
+      const txType = item.txTypeCode.toUpperCase();
+      const base = {
+        companyId,
+        documentId: docNo,
+        inventoryId: item.inventoryId,
+        txReasonCode: item.txReasonCode ?? TxReason.GENERAL,
+        qty: new Decimal(item.qty).abs().toFixed(4),
+        unitPrice: new Decimal(item.unitPrice ?? '0').toFixed(4),
+        refLineNo: item.refLineNo ?? null,
+      };
+      if (txType !== TxType.MOVE) {
+        return [{
+          ...base,
+          itemNo: index + 1,
+          warehouseId: item.warehouseId,
+          txTypeCode: txType,
+        }];
+      }
+      return [
+        {
+          ...base,
+          itemNo: index * 2 + 1,
+          warehouseId: item.warehouseId,
+          txTypeCode: TxType.OUT,
+        },
+        {
+          ...base,
+          itemNo: index * 2 + 2,
+          warehouseId: item.targetWarehouseId!,
+          txTypeCode: TxType.IN,
+        },
+      ];
+    });
+    await itemRepository.save(documentItems);
   }
 
   private async executeIn(
@@ -220,7 +308,7 @@ export class InventoryTxService {
     const source = warehouses.find((warehouse) => warehouse.id === item.warehouseId);
     const target = warehouses.find((warehouse) => warehouse.id === item.targetWarehouseId);
     if (!source || !target) throw new BadRequestException('유효한 이동 창고를 찾을 수 없습니다.');
-    if (source.plantId !== target.plantId) {
+    if (source.plantId !== target.plantId && source.plantId !== null && target.plantId !== null) {
       throw new BadRequestException(
         '다른 플랜트 간 이동은 보내는 플랜트에서 출고/플랜트이동, 받는 플랜트에서 입고/플랜트이동으로 각각 처리하세요.',
       );
@@ -417,17 +505,78 @@ export class InventoryTxService {
     }
   }
 
-  getStatusList(companyId: string): Promise<InventoryStatus[]> {
-    return this.dataSource.getRepository(InventoryStatus).find({
+  async getStatusList(companyId: string, userId: string): Promise<InventoryStatus[]> {
+    const rows = await this.dataSource.getRepository(InventoryStatus).find({
       where: { companyId, deleteYn: 'N' },
     });
+    return this.filterByWarehouseScope(companyId, userId, rows);
   }
 
-  getHistoryList(companyId: string): Promise<InventoryHistory[]> {
-    return this.dataSource.getRepository(InventoryHistory).find({
+  async getHistoryList(companyId: string, userId: string): Promise<InventoryHistory[]> {
+    const rows = await this.dataSource.getRepository(InventoryHistory).find({
       where: { companyId, deleteYn: 'N' },
       order: { historyNo: 'DESC' },
     });
+    return this.filterByWarehouseScope(companyId, userId, rows);
+  }
+
+  async getDocumentList(companyId: string, userId: string): Promise<InventoryDocumentResponse[]> {
+    const documents = await this.dataSource.getRepository(InventoryDocument).find({
+      where: { companyId, deleteYn: 'N' },
+      order: { id: 'DESC' },
+    });
+    const items = await this.dataSource.getRepository(InventoryDocumentItem).find({
+      where: { companyId },
+      order: { documentId: 'DESC', itemNo: 'ASC' },
+    });
+    const itemMap = new Map<string, InventoryDocumentItem[]>();
+    for (const item of items) {
+      const documentItems = itemMap.get(item.documentId) ?? [];
+      documentItems.push(item);
+      itemMap.set(item.documentId, documentItems);
+    }
+    const visible: InventoryDocumentResponse[] = [];
+    for (const document of documents) {
+      const documentItems = itemMap.get(document.id) ?? [];
+      const allowedItems = await this.filterByWarehouseScope(companyId, userId, documentItems);
+      if (allowedItems.length > 0) {
+        visible.push({ ...document, items: allowedItems });
+      }
+    }
+    return visible;
+  }
+
+  async getDocumentDetail(
+    companyId: string,
+    userId: string,
+    documentId: string,
+  ): Promise<InventoryDocumentResponse> {
+    const document = await this.dataSource.getRepository(InventoryDocument).findOne({
+      where: { companyId, id: documentId, deleteYn: 'N' },
+    });
+    if (!document) throw new NotFoundException(`재고 전표를 찾을 수 없습니다: ${documentId}`);
+    const items = await this.dataSource.getRepository(InventoryDocumentItem).find({
+      where: { companyId, documentId },
+      order: { itemNo: 'ASC' },
+    });
+    const allowedItems = await this.filterByWarehouseScope(companyId, userId, items);
+    if (!allowedItems.length) throw new NotFoundException(`재고 전표를 찾을 수 없습니다: ${documentId}`);
+    return { ...document, items: allowedItems };
+  }
+
+  private async filterByWarehouseScope<T extends { warehouseId: string }>(
+    companyId: string,
+    userId: string,
+    rows: T[],
+  ): Promise<T[]> {
+    const checks = await Promise.all(rows.map(async (row) => ({
+      row,
+      allowed: await this.departmentAccessService.hasAction(
+        companyId, userId, AppModule.STK, 'R',
+        { warehouseId: row.warehouseId },
+      ),
+    })));
+    return checks.filter((check) => check.allowed).map((check) => check.row);
   }
 
   private validateTxItem(item: TxItem): void {
@@ -446,7 +595,7 @@ export class InventoryTxService {
     const allowed: Record<TxType, TxReason[]> = {
       [TxType.IN]: [TxReason.GENERAL, TxReason.PURCHASE, TxReason.RETURN, TxReason.PLANT_TRANSFER],
       [TxType.OUT]: [TxReason.GENERAL, TxReason.WORK_ORDER, TxReason.DISPOSAL, TxReason.PLANT_TRANSFER],
-      [TxType.MOVE]: [TxReason.TRANSFER],
+      [TxType.MOVE]: [TxReason.TRANSFER, TxReason.PLANT_TRANSFER],
       [TxType.ADJ]: [TxReason.STOCKTAKING],
     };
     if (!allowed[type as TxType].includes(reason)) {

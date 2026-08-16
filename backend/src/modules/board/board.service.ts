@@ -57,10 +57,11 @@ export class BoardService {
     const rawId = input.id == null ? null : Number(input.id);
     let entity: Board;
     if (rawId == null) {
-      await this.permissionPolicyService.assertModulePermission(
+      await this.permissionPolicyService.assertActionPermission(
         {
           companyId,
           roleId,
+          userId: operator,
           module: AppModule.BRD,
           action: 'C',
           resourceLabel: '게시판',

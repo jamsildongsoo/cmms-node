@@ -23,11 +23,11 @@ export function formatNumber(
 }
 
 export function formatQuantity(value: string | number | null | undefined): string {
-  return formatNumber(value, { maximumFractionDigits: 4 });
+  return formatNumber(value, { maximumFractionDigits: 2 });
 }
 
 export function formatAmount(value: string | number | null | undefined): string {
-  return formatNumber(value, { maximumFractionDigits: 2 });
+  return formatNumber(value, { maximumFractionDigits: 0 });
 }
 
 export function formatMoney(value: string | number | null | undefined): string {

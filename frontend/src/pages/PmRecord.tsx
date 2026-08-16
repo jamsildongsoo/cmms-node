@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
 import { useAuthStore } from '../store/useAuthStore';
+import { hasModuleManage } from '../utils/moduleAccess';
 import { getCommonStatusLabel as getStatusLabel, getJudgeLabel } from '../constants/status';
 import { APP_MODULE } from '../constants/module';
 import { formatDateOnly, formatDateTimeSeconds, todayLocal } from '../utils/datetime';
@@ -26,7 +27,7 @@ import {
   ClipboardList, ClipboardCheck, Edit2, Trash2, Printer, X, Plus, MinusCircle, PlayCircle
 } from 'lucide-react';
 
-const isConfirmed = (status: string) => status === 'S' || status === 'C';
+const isConfirmed = (status: string) => status === 'C';
 
 export default function PmRecord() {
   const user = useAuthStore((s) => s.user);
@@ -41,6 +42,7 @@ export default function PmRecord() {
 
   // 검색/필터 상태
   const [showAll, setShowAll] = useState(false);
+  const [tempOnly, setTempOnly] = useState(false);
   const [searchType, setSearchType] = useState<'id' | 'title' | 'author'>('id');
   const [searchValue, setSearchValue] = useState('');
 
@@ -78,11 +80,9 @@ export default function PmRecord() {
     content: RichTextDocument;
   } | null>(null);
 
-  const permission = user?.permissions?.[APP_MODULE.PM];
-  const canCreate = permission?.C === 'Y';
-  const canUpdate = permission?.U === 'Y';
-  const canDelete = permission?.D === 'Y';
-  const canDirectConfirm = permission?.A === 'Y';
+  const canCreate = hasModuleManage(user?.moduleAccess, APP_MODULE.PM);
+  const canUpdate = canCreate;
+  const canDelete = canCreate;
   const canEditCurrent = !pmNo
     ? canCreate
     : canUpdate || (recordStatus === 'T' && createdBy === user?.id);
@@ -102,6 +102,7 @@ export default function PmRecord() {
       const params = new URLSearchParams();
       params.set('stepStage', activeTab === 'plans' ? 'P' : 'R');
       if (showAll) params.set('showAll', 'Y');
+      if (tempOnly) params.set('tempOnly', 'Y');
       if (searchValue) {
         params.set('searchType', searchType);
         params.set('searchValue', searchValue);
@@ -138,7 +139,7 @@ export default function PmRecord() {
     const timer = window.setTimeout(() => { void fetchData(); }, 0);
     return () => window.clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePlantId, activeTab, showAll]);
+  }, [activePlantId, activeTab, showAll, tempOnly]);
 
   const resetForm = (stage: PmStage) => {
     setStepStage(stage);
@@ -177,10 +178,11 @@ export default function PmRecord() {
     try {
       const detail = await pmApi.getDetail(record.plantId, record.id);
       const r = detail.pmRecord;
+      const isRejected = r.status === 'R';
       const selectedEquipment = equipments.find((eq) => eq.plantId === r.plantId && eq.id === r.equipmentId);
 
       setStepStage((r.stepStage || 'R') as PmStage);
-      setPmNo(r.id);
+      setPmNo(isRejected ? '' : r.id);
       setTitle(r.title || '');
       setPlantId(r.plantId);
       setEquipmentId(r.equipmentId);
@@ -197,11 +199,11 @@ export default function PmRecord() {
       setCertNumber(r.certNumber || '');
       setCertExpireDate(formatDateOnly(r.certExpireDate));
       setCertAgency(r.certAgency || '');
-      setApprovalId(r.status === 'R' ? '' : (r.approvalId || ''));
+      setApprovalId('');
       setRefNo(r.refNo || '');
-      setCreatedAt(r.createdAt || '');
-      setCreatedBy(r.createdBy || '');
-      setRecordStatus(r.status || 'T');
+      setCreatedAt(isRejected ? '' : (r.createdAt || ''));
+      setCreatedBy(isRejected ? '' : (r.createdBy || ''));
+      setRecordStatus(isRejected ? 'T' : (r.status || 'T'));
       setCheckItems(detail.checkItems || []);
       setIsFormOpen(true);
     } catch (err) {
@@ -374,18 +376,18 @@ export default function PmRecord() {
       title: `${tabLabel} 현황`,
       rows: list,
       getRowKey: (record) => `${record.plantId}:${record.id}`,
-      companyName: user?.companyName || user?.companyId || 'CMMS',
+      companyName: user?.companyId || 'CMMS',
       printerName: user?.name || '-',
       printedAt: stamp,
       columns: [
         { header: '문서번호', render: (record) => record.id, className: 'font-mono' },
-        { header: '점검명', render: (record) => record.title || '-' },
-        { header: '설비명', render: (record) => record.equipmentName || record.equipmentId },
+        { header: '제목', render: (record) => record.title || '-' },
+        { header: '대상설비', render: (record) => record.equipmentName || record.equipmentId },
         { header: '부서', render: (record) => depts.find((item) => item.id === record.departmentId)?.name || record.departmentId },
         { header: '계획기간', render: (record) => `${record.cycleFrom || '-'} ~ ${record.cycleEnd || '-'}` },
         { header: '점검일', render: (record) => record.workDate || '-' },
         { header: '담당자', render: (record) => usersList.find((item) => item.id === record.workerId)?.name || record.workerId },
-        { header: '결재상태', render: (record) => record.status === 'S' ? '확정' : record.status === 'C' ? '완결' : '임시' },
+        { header: '상태', render: (record) => getStatusLabel(record.status) },
       ],
     });
     if (!opened) toast.error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
@@ -437,7 +439,7 @@ export default function PmRecord() {
     return true;
   };
 
-  const handleSave = async (submitStatus: 'T' | 'S' | 'P') => {
+  const handleSave = async (submitStatus: 'T' | 'P') => {
     if (!validateForm()) return;
     setIsLoading(true);
     try {
@@ -638,6 +640,13 @@ export default function PmRecord() {
               초기화
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setTempOnly((current) => !current)}
+            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold cursor-pointer ${tempOnly ? 'border-blue-500 bg-blue-600 text-white' : 'border-slate-800 bg-slate-950 text-slate-400'}`}
+          >
+            임시저장 {tempOnly ? 'ON' : 'OFF'}
+          </button>
           <div className="flex items-center gap-2 ml-auto">
             <label className="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer">
               <input
@@ -668,15 +677,15 @@ export default function PmRecord() {
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-900 text-slate-400 border-b border-slate-800 select-none print:bg-slate-100 print:text-slate-800 print:border-slate-300">
-                  <th className="p-3 font-semibold">{activeTab === 'plans' ? '계획번호' : '실적번호'}</th>
-                  <th className="p-3 font-semibold">점검명</th>
-                  <th className="p-3 font-semibold">설비명</th>
+                  <th className="p-3 font-semibold">문서번호</th>
+                  <th className="p-3 font-semibold">제목</th>
+                  <th className="p-3 font-semibold">대상설비</th>
                   {activeTab === 'plans' && <th className="p-3 font-semibold">계획기간</th>}
                   <th className="p-3 font-semibold">{activeTab === 'plans' ? '계획일' : '점검일'}</th>
                   <th className="p-3 font-semibold">담당자</th>
-                  <th className="p-3 font-semibold">점검유형</th>
+                  <th className="p-3 font-semibold">유형</th>
                   {activeTab === 'results' && <th className="p-3 font-semibold">판정</th>}
-                  <th className="p-3 font-semibold">결재상태</th>
+                  <th className="p-3 font-semibold">상태</th>
                   <th className="p-3 font-semibold text-right print:hidden">작업</th>
                 </tr>
               </thead>
@@ -1092,15 +1101,6 @@ export default function PmRecord() {
                 >
                   결재 상신
                 </button>}
-                {canEditCurrent && canDirectConfirm && (
-                  <button
-                    onClick={() => handleSave('S')}
-                    disabled={isLoading}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg py-2 px-5 text-xs font-semibold transition-colors cursor-pointer border-0 disabled:opacity-50"
-                  >
-                    직접 확정
-                  </button>
-                )}
               </div>
             </div>
           </div>

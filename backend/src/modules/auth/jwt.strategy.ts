@@ -1,7 +1,7 @@
 /* =========================================================================
    JwtStrategy — Passport JWT 전략 (B안 확정)
    
-   페이로드에서 roleId, departmentId, lastLoginPlantId를 직접 추출.
+   페이로드에서 roleId, departmentId, homePlantId를 직접 추출.
    매 요청마다 DB User 조회 없음.
    
    Spring 대응:
