@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Edit2, Plus, Trash2 } from 'lucide-react';
 import ListIconButton from '../../../components/ListIconButton';
+import BoundedSelect from '../../../components/BoundedSelect';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { requestConfirmation } from '../../../utils/userActionDialog';
 import { plantApi, warehouseApi } from '../mdm.api';
@@ -15,26 +16,33 @@ export default function WarehouseManager({ notify, canCreate, canUpdate, canDele
   const [plantId, setPlantId] = useState('');  // 빈값 = 공통부문(null)
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const fetchWarehouses = async () => {
+  const loadWarehouses = useCallback(async () => {
     try {
       setWarehouses(await warehouseApi.getAll());
     } catch (err) {
       notify('error', getApiErrorMessage(err, '창고 목록 조회 실패.'));
     }
-  };
-  useEffect(() => {
-    let active = true;
-    void Promise.all([warehouseApi.getAll(), plantApi.getAll()])
-      .then(([loadedWarehouses, loadedPlants]) => {
-        if (!active) return;
-        setWarehouses(loadedWarehouses);
-        setPlants(loadedPlants);
-      })
-      .catch((err) => {
-        if (active) notify('error', getApiErrorMessage(err, '창고 기준정보 조회 실패.'));
-      });
-    return () => { active = false; };
   }, [notify]);
+
+  const loadReferences = useCallback(async () => {
+    try {
+      const [loadedWarehouses, loadedPlants] = await Promise.all([
+        warehouseApi.getAll(),
+        plantApi.getAll(),
+      ]);
+      setWarehouses(loadedWarehouses);
+      setPlants(loadedPlants);
+    } catch (err) {
+      notify('error', getApiErrorMessage(err, '창고 기준정보 조회 실패.'));
+    }
+  }, [notify]);
+
+  useEffect(() => {
+    const run = async () => {
+      await loadReferences();
+    };
+    void run();
+  }, [loadReferences]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,7 +57,7 @@ export default function WarehouseManager({ notify, canCreate, canUpdate, canDele
         notify('success', '새로운 창고가 추가되었습니다.');
       }
       setId(''); setName(''); setPlantId(''); setEditingId(null);
-      fetchWarehouses();
+      await loadWarehouses();
     } catch (err) {
       notify('error', getApiErrorMessage(err, '저장 실패.'));
     }
@@ -60,7 +68,7 @@ export default function WarehouseManager({ notify, canCreate, canUpdate, canDele
     try {
       await warehouseApi.delete(whId);
       notify('success', '창고가 삭제되었습니다.');
-      fetchWarehouses();
+      await loadWarehouses();
     } catch (err) {
       notify('error', getApiErrorMessage(err, '삭제 실패.'));
     }
@@ -100,14 +108,11 @@ export default function WarehouseManager({ notify, canCreate, canUpdate, canDele
           </div>
           <div>
             <label className="block text-slate-400 text-xs mb-1.5">플랜트 (비워두면 공통부문)</label>
-            <select
+            <BoundedSelect
               value={plantId}
-              onChange={(e) => setPlantId(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 text-xs outline-none transition-colors"
-            >
-              <option value="">공통부문 (전체 노출)</option>
-              {plants.map(p => <option key={p.id} value={p.id}>{p.id} — {p.name}</option>)}
-            </select>
+              onChange={setPlantId}
+              options={[{ value: '', label: '공통부문 (전체 노출)' }, ...plants.map((plant) => ({ value: plant.id, label: `${plant.id} — ${plant.name}` }))]}
+            />
           </div>
           <div className="flex gap-2">
             <button

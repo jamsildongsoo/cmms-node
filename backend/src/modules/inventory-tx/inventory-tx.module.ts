@@ -11,8 +11,7 @@ import { InventoryDocument } from '../../entities/inventory-document.entity';
 import { InventoryDocumentItem } from '../../entities/inventory-document-item.entity';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([
+  imports: [TypeOrmModule.forFeature([
       InventoryStatus,
       InventoryHistory,
       InventoryMonthlyClosing,
@@ -20,8 +19,7 @@ import { InventoryDocumentItem } from '../../entities/inventory-document-item.en
       User,
       InventoryDocument,
       InventoryDocumentItem,
-    ]),
-  ],
+    ])],
   controllers: [InventoryTxController],
   providers: [InventoryTxService],
   exports: [InventoryTxService],

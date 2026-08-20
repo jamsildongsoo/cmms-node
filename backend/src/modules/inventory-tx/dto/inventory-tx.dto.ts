@@ -51,3 +51,8 @@ export class InventoryTxRequestDto {
   @Type(() => InventoryTxItemDto)
   items!: InventoryTxItemDto[];
 }
+
+export class InventoryCancellationRequestDto {
+  @IsString()
+  originalDocumentId!: string;
+}

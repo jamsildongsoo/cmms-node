@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useCallback, useState, useEffect, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
 import { formatDateTime } from '../utils/datetime';
@@ -31,21 +31,23 @@ import {
 import ListBadge from '../components/ListBadge';
 import ListIconButton from '../components/ListIconButton';
 import { requestConfirmation } from '../utils/userActionDialog';
-import { referenceApi } from '../features/mdm/reference.api';
+import { mdmLookupApi } from '../features/mdm/reference.api';
+import { APP_MODULE } from '../constants/module';
+import { hasModuleCreate, hasModuleDelete, hasModuleRead, hasModuleUpdate } from '../utils/moduleAccess';
 
 const loadApprovalPageData = (inbox: ApprovalInbox) =>
   Promise.all([
     approvalApi.getInbox(inbox),
     // 선택 UI 구성을 위한 시스템 참조값 조회다. 결재함 조회 권한을 대체하지 않는다.
-    referenceApi.getUserOptions() as Promise<ApprovalUser[]>,
+    mdmLookupApi.getUserOptions() as Promise<ApprovalUser[]>,
   ]);
 
 export default function Approval() {
   const user = useAuthStore((s) => s.user);
-  // APR은 모듈 권한 없이 로그인·결재선·문서상태로 서버가 판정한다.
-  const canCreate = true;
-  const canUpdate = true;
-  const canDelete = true;
+  const canRead = hasModuleRead(user?.moduleAccess, APP_MODULE.APR);
+  const canCreate = hasModuleCreate(user?.moduleAccess, APP_MODULE.APR);
+  const canUpdate = hasModuleUpdate(user?.moduleAccess, APP_MODULE.APR);
+  const canDelete = hasModuleDelete(user?.moduleAccess, APP_MODULE.APR);
   const [activeTab, setActiveTab] = useState<ApprovalInbox>('pending');
 
   const [approvals, setApprovals] = useState<ApprovalDocument[]>([]);
@@ -78,7 +80,8 @@ export default function Approval() {
   const [isDraftModalOpen, setIsDraftModalOpen] = useState(false);
   const [editingApprovalId, setEditingApprovalId] = useState<string | null>(null);
 
-  const fetchData = async () => {
+  const loadList = useCallback(async () => {
+    if (!canRead) return;
     try {
       const [appRes, userRes] = await loadApprovalPageData(activeTab);
       setApprovals(appRes);
@@ -87,27 +90,16 @@ export default function Approval() {
       console.error(err);
       toastApiError(err, '목록을 불러오지 못했습니다.');
     }
-  };
+  }, [activeTab, canRead]);
 
   useEffect(() => {
-    let active = true;
-    void loadApprovalPageData(activeTab)
-      .then(([loadedApprovals, loadedUsers]) => {
-        if (!active) return;
-        setApprovals(loadedApprovals);
-        setUsersList(loadedUsers);
-      })
-      .catch((error: unknown) => {
-        if (!active) return;
-        console.error(error);
-        toastApiError(error, '목록을 불러오지 못했습니다.');
-      });
-    return () => {
-      active = false;
+    const run = async () => {
+      await loadList();
     };
-  }, [activeTab]);
+    void run();
+  }, [loadList]);
 
-  const handleOpenDetail = async (app: ApprovalDocument) => {
+  const loadDetail = async (app: ApprovalDocument) => {
     setIsLoading(true);
     try {
       const detail = await approvalApi.getDetail(app.id);
@@ -135,7 +127,7 @@ export default function Approval() {
       await approvalApi.action(selectedApproval.id, action, comments);
       toast.success(action === APPROVAL_ACTION.APPROVE ? '승인 처리되었습니다.' : '반려 처리되었습니다.');
       setIsDetailOpen(false);
-      fetchData();
+      await loadList();
     } catch (err) {
       toastApiError(err, '결재 처리 실패');
     } finally {
@@ -158,7 +150,7 @@ export default function Approval() {
     try {
       await approvalApi.delete(app.id);
       toast.success('임시저장 결재문서를 삭제했습니다.');
-      await fetchData();
+      await loadList();
     } catch (error) {
       toastApiError(error, '결재문서 삭제에 실패했습니다.');
     }
@@ -238,7 +230,7 @@ export default function Approval() {
         <div>
           <h1 className="text-2xl font-bold text-slate-100 flex items-center gap-2">
             <FileSignature size={24} className="text-blue-500" />
-            전자결재 보관함
+            결재함
           </h1>
           <p className="text-slate-400 text-sm mt-1">예방점검, 작업지시, 작업허가 등 핵심 업무 문서를 상신하거나 승인/반려합니다.</p>
         </div>
@@ -323,7 +315,7 @@ export default function Approval() {
                     <td className="p-3 font-mono">
                       <button
                         type="button"
-                        onClick={() => handleOpenDetail(app)}
+                  onClick={() => loadDetail(app)}
                         className="bg-transparent border-0 p-0 text-blue-400 hover:text-blue-300 hover:underline font-mono cursor-pointer"
                         title="결재문 출력 화면"
                       >
@@ -484,12 +476,12 @@ export default function Approval() {
         onClose={() => setIsDraftModalOpen(false)}
         onSaved={() => {
           setIsDraftModalOpen(false);
-          if (activeTab === 'sent') fetchData();
+          if (activeTab === 'sent') void loadList();
           else setActiveTab('sent');
         }}
         onSubmitted={() => {
           setIsDraftModalOpen(false);
-          fetchData();
+          void loadList();
         }}
       />
 

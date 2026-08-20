@@ -76,16 +76,13 @@ Base path는 `/api`다.
 #### 구매
 
 - `/procurement/requests`
-- `/procurement/requests/:id/actions/confirm`
-- `/procurement/requests/:id/actions/receive`
-- `/procurement/requests/:id/actions/close`
+- `/procurement/transfers/purchase-requests/:id`
 - `/procurement/orders`
+- `/procurement/orders/receivable`, `/procurement/orders/receivable/:id` (STK 권한의 구매오더 입고 대상 조회)
+- `/procurement/orders/standalone`
+- `PUT /procurement/orders/:id` (본인이 생성한 임시 POR의 헤더 및 독립 POR 품목 수정)
 - `/procurement/orders/:id/allocations`
-- `/procurement/orders/:id/actions/order`
-- `/procurement/orders/:id/actions/ship`
-- `/procurement/orders/:id/actions/receive`
-- `/procurement/orders/:id/actions/transfer`
-- `/procurement/transfers/pr`
+- `/procurement/orders/:id/actions/confirm`
 
 #### 재고
 
@@ -147,7 +144,7 @@ Base path는 `/api`다.
 - inventory_status는 회사·창고·자재별 현재 수량·금액이다.
 - 신규 자재와 신규 창고 생성 시 관련 status를 0으로 초기화한다.
 - inventory_document는 전표 header이며 id, tx_date, ref_module, ref_no, remarks를 가진다.
-- inventory_document_item은 warehouse_id, inventory_id, tx_type_code, tx_reason_code, qty, unit_price, ref_line_no를 가진다.
+- inventory_document_item은 warehouse_id, inventory_id, tx_type_code, tx_reason_code, qty, unit_price를 가진다.
 - 이동은 하나의 document에 출발창고 OUT과 도착창고 IN item을 생성한다.
 - inventory_history는 실제 처리 결과를 창고·자재별 signed 수량/금액으로 append-only 저장한다.
 
@@ -155,11 +152,11 @@ Base path는 `/api`다.
 
 - PR header는 요청창고 하나를 가진다.
 - PO header는 통합 PO를 위해 단일 요청창고에 의존하지 않는다.
-- PO item은 ordered_qty, received_qty를 가진다.
-- allocation은 다음 컬럼을 사용한다.
+- PO item은 ordered_qty를 저장한다. 입고수량과 잔여수량은 PO 기준 재고전표 item을 조회해 계산한다.
+- allocation은 PO와 PR item의 발주 배부에만 사용하며 다음 컬럼을 사용한다.
 
 ```text
-allocation_type: PO | MOVE
+allocation_type: PO
 doc_id
 doc_item_no
 pr_id
@@ -169,10 +166,8 @@ allocation_qty
 ```
 
 - PO의 doc_id는 PO 번호, doc_item_no는 PO item 번호다.
-- MOVE의 doc_id는 inventory document 번호, doc_item_no는 이동 document item 번호다.
 - allocation에는 id와 completed_qty를 두지 않는다.
 - PO allocation은 PO item과 PR item의 발주수량을 연결한다.
-- MOVE allocation은 이동전표 item과 PR item의 실제 이동수량을 연결한다.
 
 ## 6. 상태·상수
 
@@ -181,7 +176,7 @@ BE의 공통 상수를 단일 원천으로 하고 FE는 표시 라벨과 화면 
 - 문서: T, P, C, S, R, X, E
 - 구매 진행: O 발주, D 배송중, P 부분입고, I 입고완료, E 종료
 - 재고 유형: IN, OUT, MOVE, ADJ
-- 재고 사유: GENERAL, PURCHASE, RETURN, WORK_ORDER, DISPOSAL, TRANSFER, PLANT_TRANSFER, STOCKTAKING
+- 재고 사유: GENERAL, PURCHASE, RETURN, WORK_ORDER, DISPOSAL, TRANSFER, STOCKTAKING, CANCEL
 - 권한: C(create), R(read), U(update), D(delete)
 - 조직 범위: COMPANY, PLANT
 
@@ -191,16 +186,15 @@ BE의 공통 상수를 단일 원천으로 하고 FE는 표시 라벨과 화면 
 
 - 입고·출고·이동·조정은 all-or-nothing transaction이다.
 - inventory_status의 회사·창고·자재 행을 pessimistic_write로 잠근다.
-- advisory lock은 사용하지 않는다.
-- 월마감 키는 마감과 거래의 경합을 방지하는 트랜잭션 잠금으로 보호한다.
+- 월마감 키는 `pg_advisory_xact_lock`으로 마감과 거래의 경합을 방지하고, 재고 행은 `pessimistic_write`로 보호한다.
 - 출고 부족, 마감 월 거래, 잘못된 창고·자재는 처리 전에 거부한다.
 
 ### 7.2 구매
 
-- PO 생성·allocation 확정·입고·PR 연계 이송은 관련 header/item을 잠그고 하나의 트랜잭션으로 처리한다.
-- 중앙창고 입고는 PO 수량만 갱신한다.
-- 요청창고 직접입고는 PO와 PR 수량을 함께 갱신한다.
-- PR 연계 이송은 MOVE allocation과 PR 수령수량을 함께 갱신한다.
+- PO 생성·allocation 확정은 관련 header/item/allocation을 잠그고 하나의 트랜잭션으로 처리한다.
+- PO 입고는 STK의 일반 입고 전표로 처리하며, `refModule=POR`, `refNo=PO 번호`, `refLineNo=PO item 번호`를 기록한다.
+- 입고 잔량은 PO item의 ordered_qty와 POR 참조 재고전표 item을 조회해 계산하고, 동일 PO item의 잔량을 초과하면 거부한다.
+- 창고 이동은 PUR·POR·allocation과 무관한 warehouse-to-warehouse 거래다. plant는 사용자가 선택한 창고 검색 범위일 뿐 이동의 기준이나 검증 대상이 아니다.
 - 일반 이동은 allocation과 PR을 갱신하지 않는다.
 - 취소는 원전표를 재사용하지 않고 반대 신규 전표를 생성한다.
 

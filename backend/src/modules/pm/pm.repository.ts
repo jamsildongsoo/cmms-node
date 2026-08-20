@@ -61,18 +61,20 @@ export class PmRepository {
       query
         .andWhere('pm.status = :tempStatus', { tempStatus: 'T' })
         .andWhere('pm.createdBy = :userId', { userId: search.userId });
+    } else {
+      query.andWhere('pm.status <> :tempStatus', { tempStatus: 'T' });
     }
-    if (search.showAll !== 'Y' && search.stage === 'P') {
+    if (search.tempOnly !== 'Y' && search.showAll !== 'Y' && search.stage === 'P') {
       query
         .andWhere('pm.closeYn = :open', { open: 'N' })
         .andWhere('(pm.cycleEnd IS NULL OR pm.cycleEnd >= CURRENT_DATE)');
-    } else if (search.showAll !== 'Y' && !search.stage) {
+    } else if (search.tempOnly !== 'Y' && search.showAll !== 'Y' && !search.stage) {
       query.andWhere(
         "(pm.stepStage <> 'P' OR (pm.closeYn = 'N' AND (pm.cycleEnd IS NULL OR pm.cycleEnd >= CURRENT_DATE)))",
       );
     }
 
-    if (search.searchValue) {
+    if (search.tempOnly !== 'Y' && search.searchValue) {
       const value = `%${search.searchValue}%`;
       if (search.searchType === 'id') {
         query.andWhere('pm.id ILIKE :value', { value });

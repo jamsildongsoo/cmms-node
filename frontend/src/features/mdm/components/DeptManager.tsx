@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Edit2, FolderTree, Plus, Trash2 } from 'lucide-react';
 import ListIconButton from '../../../components/ListIconButton';
+import BoundedSelect from '../../../components/BoundedSelect';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { requestConfirmation } from '../../../utils/userActionDialog';
-import { departmentApi, roleApi } from '../mdm.api';
-import type { Department, Role } from '../mdm.types';
+import { departmentApi } from '../mdm.api';
+import type { Department } from '../mdm.types';
 import type { MdmManagerProps } from '../mdm.utils';
 
 export default function DeptManager({ notify, canCreate, canUpdate, canDelete }: MdmManagerProps) {
@@ -12,35 +13,29 @@ export default function DeptManager({ notify, canCreate, canUpdate, canDelete }:
   const [id, setId] = useState('');
   const [name, setName] = useState('');
   const [parentId, setParentId] = useState('');
-  const [roleId, setRoleId] = useState('');
-  const [scope, setScope] = useState<'COMPANY' | 'PLANT'>('PLANT');
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [roles, setRoles] = useState<Role[]>([]);
 
-  const fetchDepts = async () => {
+  const loadDepts = useCallback(async () => {
     try {
       setDepts(await departmentApi.getAll());
     } catch (err) {
       notify('error', getApiErrorMessage(err, '부서 목록 조회에 실패했습니다.'));
     }
-  };
+  }, [notify]);
 
   useEffect(() => {
-    let active = true;
-    Promise.all([departmentApi.getAll(), roleApi.getAll()])
-      .then(([loaded, loadedRoles]) => { if (active) { setDepts(loaded); setRoles(loadedRoles); } })
-      .catch((err) => {
-        if (active) notify('error', getApiErrorMessage(err, '부서 목록 조회에 실패했습니다.'));
-      });
-    return () => { active = false; };
-  }, [notify]);
+    const run = async () => {
+      await loadDepts();
+    };
+    void run();
+  }, [loadDepts]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!id || !name) return;
 
     try {
-      const payload = { id, name, parentId: parentId || null, roleId, scope };
+      const payload = { id, name, parentId: parentId || null };
       if (editingId) {
         await departmentApi.update(editingId, payload);
         notify('success', '부서 정보가 수정되었습니다.');
@@ -48,8 +43,8 @@ export default function DeptManager({ notify, canCreate, canUpdate, canDelete }:
         await departmentApi.create(payload);
         notify('success', '새 부서가 생성되었습니다.');
       }
-      setId(''); setName(''); setParentId(''); setRoleId(''); setScope('PLANT'); setEditingId(null);
-      fetchDepts();
+      setId(''); setName(''); setParentId(''); setEditingId(null);
+      await loadDepts();
     } catch (err) {
       notify('error', getApiErrorMessage(err, '저장에 실패했습니다.'));
     }
@@ -60,7 +55,7 @@ export default function DeptManager({ notify, canCreate, canUpdate, canDelete }:
     try {
       await departmentApi.delete(deptId);
       notify('success', '부서가 삭제되었습니다.');
-      fetchDepts();
+      await loadDepts();
     } catch (err) {
       notify('error', getApiErrorMessage(err, '삭제에 실패했습니다.'));
     }
@@ -100,33 +95,11 @@ export default function DeptManager({ notify, canCreate, canUpdate, canDelete }:
           </div>
           <div>
             <label className="block text-slate-400 text-xs mb-1.5">상위 부서 (계층 구조)</label>
-            <select
+            <BoundedSelect
               value={parentId}
-              onChange={(e) => setParentId(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 text-xs outline-none transition-colors"
-            >
-              <option value="">없음 (최상위 부서)</option>
-              {depts.filter(d => d.id !== editingId).map(dept => (
-                <option key={dept.id} value={dept.id}>{dept.name} ({dept.id})</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-slate-400 text-xs mb-1.5">기본 Role</label>
-            <select
-              value={roleId}
-              onChange={(e) => setRoleId(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 text-xs outline-none transition-colors"
-            >
-              <option value="">없음</option>
-              {roles.map((role) => <option key={role.id} value={role.id}>{role.roleName} ({role.id})</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-slate-400 text-xs mb-1.5">기본 Scope</label>
-            <select value={scope} onChange={(e) => setScope(e.target.value as 'COMPANY' | 'PLANT')} className="w-full bg-slate-900 border border-slate-800 rounded-lg py-2 px-3 text-slate-200 text-xs outline-none">
-              <option value="PLANT">현재 Plant</option><option value="COMPANY">회사 전체</option>
-            </select>
+              onChange={setParentId}
+              options={[{ value: '', label: '없음 (최상위 부서)' }, ...depts.filter((d) => d.id !== editingId).map((dept) => ({ value: dept.id, label: `${dept.name} (${dept.id})` }))]}
+            />
           </div>
           <div className="flex gap-2">
             <button
@@ -138,7 +111,7 @@ export default function DeptManager({ notify, canCreate, canUpdate, canDelete }:
             {editingId && (
               <button
                 type="button"
-              onClick={() => { setEditingId(null); setId(''); setName(''); setParentId(''); setRoleId(''); setScope('PLANT'); }}
+              onClick={() => { setEditingId(null); setId(''); setName(''); setParentId(''); }}
                 className="bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg py-2 px-3 text-xs transition-colors cursor-pointer border-0"
               >
                 취소
@@ -158,14 +131,12 @@ export default function DeptManager({ notify, canCreate, canUpdate, canDelete }:
                 <th className="p-3 font-semibold">부서 코드</th>
                 <th className="p-3 font-semibold">부서명</th>
                 <th className="p-3 font-semibold">상위 부서</th>
-                <th className="p-3 font-semibold">기본 Role</th>
-                <th className="p-3 font-semibold">Scope</th>
                 <th className="p-3 font-semibold text-right">작업</th>
               </tr>
             </thead>
             <tbody>
               {depts.length === 0 ? (
-                <tr><td colSpan={6} className="p-8 text-center text-slate-600">등록된 부서가 없습니다.</td></tr>
+                <tr><td colSpan={4} className="p-8 text-center text-slate-600">등록된 부서가 없습니다.</td></tr>
               ) : (
                 depts.map((dept) => (
                   <tr key={dept.id} className="border-b border-slate-900 hover:bg-slate-900/30 text-slate-300">
@@ -181,8 +152,6 @@ export default function DeptManager({ notify, canCreate, canUpdate, canDelete }:
                       )}
                     </td>
                     <td className="p-3 font-mono text-slate-500">{dept.parentId || '-'}</td>
-                    <td className="p-3 font-mono text-slate-500">{dept.roleId || '-'}</td>
-                    <td className="p-3 font-mono text-slate-500">{dept.scope}</td>
                     <td className="p-3 text-right space-x-2">
                       {canUpdate && <ListIconButton
                         onClick={() => {
@@ -190,8 +159,6 @@ export default function DeptManager({ notify, canCreate, canUpdate, canDelete }:
                           setId(dept.id);
                           setName(dept.name);
                           setParentId(dept.parentId || '');
-                          setRoleId(dept.roleId || '');
-                          setScope(dept.scope);
                         }}
                         label={`${dept.name} 수정`}
                         icon={Edit2}

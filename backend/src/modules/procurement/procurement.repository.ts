@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { PurchaseRequest } from '../../entities/purchase-request.entity';
 import { PurchaseRequestItem } from '../../entities/purchase-request-item.entity';
 
@@ -18,7 +18,9 @@ export class ProcurementRepository {
       ? { companyId, plantId, deleteYn: 'N' as const }
       : { companyId, deleteYn: 'N' as const };
     if (tempOnly) {
-      Object.assign(where, { status: 'T', requesterId });
+      Object.assign(where, { status: 'T', createdBy: requesterId });
+    } else {
+      Object.assign(where, { status: Not('T') });
     }
     return this.requests.find({
       where,

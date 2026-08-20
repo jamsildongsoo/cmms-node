@@ -1,6 +1,7 @@
 import { Type, Transform } from 'class-transformer';
 import {
-  IsBoolean,
+  ArrayNotEmpty,
+  IsArray,
   IsDateString,
   IsIn,
   IsInt,
@@ -93,16 +94,6 @@ export class SaveProcurementDto {
   items?: ProcurementItemDto[];
 }
 
-export class PlaceOrderDto {
-  @IsOptional()
-  @IsDateString()
-  orderDate?: string;
-
-  @IsOptional()
-  @IsDateString()
-  etaDate?: string;
-}
-
 export class IntegratedOrderLineDto {
   @IsNotEmpty()
   @IsString()
@@ -132,44 +123,54 @@ export class CreateIntegratedOrderDto {
   lines!: IntegratedOrderLineDto[];
 }
 
-export class StartShippingDto {
-  @IsOptional()
-  @IsDateString()
-  shipStartDate?: string;
-}
-
-export class ReceiveLineDto {
-  @IsInt()
-  @Min(1)
-  itemNo!: number;
-
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 4 })
-  @Min(0.0001)
-  qty!: number;
-
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 4 })
-  @Min(0)
-  unitPrice!: number;
-}
-
-export class ReceiveProcurementDto {
+/** PUR 연결 없이 POR 자체 품목으로 임시 구매오더를 생성한다. */
+export class CreateStandaloneOrderDto {
   @IsNotEmpty()
   @IsString()
-  warehouseId!: string;
+  plantId!: string;
+
+  @IsOptional()
+  @IsString()
+  warehouseId?: string | null;
 
   @IsOptional()
   @IsDateString()
-  txDate?: string;
+  orderDate?: string;
 
   @IsOptional()
-  @IsBoolean()
-  close?: boolean;
+  @IsDateString()
+  etaDate?: string;
 
   @ValidateNested({ each: true })
-  @Type(() => ReceiveLineDto)
-  lines!: ReceiveLineDto[];
+  @IsArray()
+  @ArrayNotEmpty()
+  @Type(() => ProcurementItemDto)
+  items!: ProcurementItemDto[];
+}
+
+/** 임시저장 상태의 POR를 수정한다. 배부 기반 POR의 품목은 allocation API에서 관리한다. */
+export class UpdatePurchaseOrderDto {
+  @IsNotEmpty()
+  @IsString()
+  plantId!: string;
+
+  @IsOptional()
+  @IsString()
+  warehouseId?: string | null;
+
+  @IsOptional()
+  @IsDateString()
+  orderDate?: string;
+
+  @IsOptional()
+  @IsDateString()
+  etaDate?: string;
+
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @IsArray()
+  @Type(() => ProcurementItemDto)
+  items?: ProcurementItemDto[];
 }
 
 export class ProcurementAllocationLineDto {
@@ -195,66 +196,4 @@ export class SaveProcurementAllocationsDto {
   @ValidateNested({ each: true })
   @Type(() => ProcurementAllocationLineDto)
   lines!: ProcurementAllocationLineDto[];
-}
-
-export class TransferProcurementLineDto {
-  @IsInt()
-  @Min(1)
-  docItemNo!: number;
-
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 4 })
-  @Min(0.0001)
-  qty!: number;
-}
-
-export class TransferProcurementDto {
-  @IsNotEmpty()
-  @IsString()
-  sourceWarehouseId!: string;
-
-  @IsNotEmpty()
-  @IsString()
-  targetWarehouseId!: string;
-
-  @IsOptional()
-  @IsDateString()
-  txDate?: string;
-
-  @ValidateNested({ each: true })
-  @Type(() => TransferProcurementLineDto)
-  lines!: TransferProcurementLineDto[];
-}
-
-export class PrTransferLineDto {
-  @IsNotEmpty()
-  @IsString()
-  prId!: string;
-
-  @IsInt()
-  @Min(1)
-  prItemNo!: number;
-
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 4 })
-  @Min(0.0001)
-  qty!: number;
-}
-
-export class CreatePrTransferDto {
-  @IsNotEmpty()
-  @IsString()
-  sourceWarehouseId!: string;
-
-  @IsNotEmpty()
-  @IsString()
-  targetWarehouseId!: string;
-
-  @IsOptional()
-  @IsDateString()
-  txDate?: string;
-
-  @ValidateNested({ each: true })
-  @Type(() => PrTransferLineDto)
-  lines!: PrTransferLineDto[];
 }

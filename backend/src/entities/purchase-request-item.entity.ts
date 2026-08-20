@@ -21,9 +21,6 @@ export class PurchaseRequestItem {
   @Column({ type: 'varchar',  name: 'unit', length: 20, nullable: true })
   unit!: string | null;
 
-  @Column({ name: 'received_qty', type: 'numeric', precision: 15, scale: 4, default: '0' })
-  receivedQty!: string;
-
   @Column({ name: 'remarks', type: 'text', nullable: true })
   remarks!: string | null;
 

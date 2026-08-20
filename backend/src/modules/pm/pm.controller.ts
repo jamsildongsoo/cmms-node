@@ -21,7 +21,7 @@ import {
   SavePmRecordDto,
 } from './dto/pm.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { PermissionGuard, ModuleAccess, ModulePermission } from '../../common/guards/permission.guard';
+import { PermissionGuard, ModulePermission } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
@@ -31,7 +31,7 @@ export class PmController {
   constructor(private readonly pmService: PmService) {}
 
   @Get('schedules')
-  @ModuleAccess(AppModule.PM)
+  @ModulePermission(AppModule.PM, 'R')
   async getPmSchedules(
     @Query('targetDate') targetDateStr?: string,
   ): Promise<PmScheduleResponseDto[]> {
@@ -41,7 +41,7 @@ export class PmController {
   }
 
   @Get('records')
-  @ModuleAccess(AppModule.PM)
+  @ModulePermission(AppModule.PM, 'R')
   async getPmRecords(
     @Query('stepStage') stepStage?: string,
     @Query('searchType') searchType?: string,
@@ -55,7 +55,7 @@ export class PmController {
   }
 
   @Get('records/:id')
-  @ModuleAccess(AppModule.PM)
+  @ModulePermission(AppModule.PM, 'R')
   async getPmRecordDetails(
     @Param('id') id: string,
     @Query('plantId') plantId: string,
@@ -65,7 +65,7 @@ export class PmController {
   }
 
   @Get('templates')
-  @ModuleAccess(AppModule.PM)
+  @ModulePermission(AppModule.PM, 'R')
   async getCheckTemplates(
     @Query('plantId') plantId: string,
     @Query('checkTypeCode') checkTypeCode: string,
@@ -75,7 +75,7 @@ export class PmController {
   }
 
   @Post('records')
-  @ModuleAccess(AppModule.PM)
+  @ModulePermission(AppModule.PM, 'C')
   async savePmRecord(@Body() request: SavePmRecordDto): Promise<PmRecordResponseDto> {
     const { companyId, userId, roleId } = getTenantContext();
     return this.pmService.savePmRecord(companyId, request, userId, 'create', roleId);

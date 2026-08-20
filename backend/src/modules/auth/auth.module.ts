@@ -7,7 +7,6 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { User } from '../../entities/users.entity';
-import { Plant } from '../../entities/plant.entity';
 import { Company } from '../../entities/company.entity';
 import { LoginHistory } from '../../entities/login-history.entity';
 import { AuthRefreshSession } from '../../entities/auth-refresh-session.entity';
@@ -19,7 +18,6 @@ import { PermissionPolicyModule } from '../../common/permissions/permission-poli
     PassportModule.register({ defaultStrategy: 'jwt' }),
     TypeOrmModule.forFeature([
       User,
-      Plant,
       Company,
       LoginHistory,
       AuthRefreshSession,

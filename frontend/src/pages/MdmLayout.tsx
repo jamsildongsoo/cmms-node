@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import CodeManager from '../features/mdm/components/CodeManager';
@@ -25,10 +25,10 @@ export default function MdmLayout() {
   const user = useAuthStore((state) => state.user);
   const capabilities = getMdmCapabilities(user?.moduleAccess);
   const [subTab, setSubTab] = useState<MdmTab>('plant');
-  const notify = (type: 'success' | 'error', text: string) => {
+  const notify = useCallback((type: 'success' | 'error', text: string) => {
     if (type === 'success') toast.success(text);
     else toast.error(text);
-  };
+  }, []);
 
   return (
     <div className="space-y-6">

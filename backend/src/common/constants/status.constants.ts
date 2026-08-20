@@ -30,26 +30,6 @@ export const DocStatusLabel: Record<DocStatus, string> = {
   [DocStatus.EXPIRED]: '만료',
 };
 
-/**
- * 구매 진행상태 (`proc_status` 컬럼) — purchase-request 전용
- * NULL = 미시작
- */
-export enum ProcStatus {
-  ORDERED = 'O', // 발주
-  SHIPPING = 'D', // 배송중 (Delivery)
-  PARTIAL_RECEIVED = 'P', // 부분입고
-  RECEIVED = 'I', // 입고완료
-  CLOSED = 'E', // 종료 (End)
-}
-
-export const ProcStatusLabel: Record<ProcStatus, string> = {
-  [ProcStatus.ORDERED]: '발주',
-  [ProcStatus.SHIPPING]: '배송중',
-  [ProcStatus.PARTIAL_RECEIVED]: '부분입고',
-  [ProcStatus.RECEIVED]: '입고완료',
-  [ProcStatus.CLOSED]: '종료',
-};
-
 /** 재고 거래유형 (`tx_type_code`) — inventory transaction */
 export enum TxType {
   IN = 'IN', // 입고
@@ -73,8 +53,8 @@ export enum TxReason {
   WORK_ORDER = 'WORK_ORDER',
   DISPOSAL = 'DISPOSAL',
   TRANSFER = 'TRANSFER',
-  PLANT_TRANSFER = 'PLANT_TRANSFER',
   STOCKTAKING = 'STOCKTAKING',
+  CANCEL = 'CANCEL',
 }
 
 export const TxReasonLabel: Record<TxReason, string> = {
@@ -84,8 +64,8 @@ export const TxReasonLabel: Record<TxReason, string> = {
   [TxReason.WORK_ORDER]: '작업지시',
   [TxReason.DISPOSAL]: '폐기',
   [TxReason.TRANSFER]: '창고이동',
-  [TxReason.PLANT_TRANSFER]: '사업장 이동',
   [TxReason.STOCKTAKING]: '재고실사',
+  [TxReason.CANCEL]: '취소',
 };
 
 /** 예방점검 판정 (`judge_code`) */

@@ -18,7 +18,7 @@ import {
   WorkOrderResponseDto,
 } from './dto/work-order.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { PermissionGuard, ModuleAccess, ModulePermission } from '../../common/guards/permission.guard';
+import { PermissionGuard, ModulePermission } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
@@ -28,7 +28,7 @@ export class WorkOrderController {
   constructor(private readonly workOrderService: WorkOrderService) {}
 
   @Get()
-  @ModuleAccess(AppModule.WO)
+  @ModulePermission(AppModule.WO, 'R')
   async getWorkOrders(
     @Query('searchType') searchType?: string,
     @Query('searchValue') searchValue?: string,
@@ -40,7 +40,7 @@ export class WorkOrderController {
   }
 
   @Get(':id')
-  @ModuleAccess(AppModule.WO)
+  @ModulePermission(AppModule.WO, 'R')
   async getWorkOrderDetails(
     @Param('id') id: string,
     @Query('plantId') plantId: string,
@@ -50,7 +50,7 @@ export class WorkOrderController {
   }
 
   @Post()
-  @ModuleAccess(AppModule.WO)
+  @ModulePermission(AppModule.WO, 'C')
   async saveWorkOrder(
     @Body() request: SaveWorkOrderDto,
   ): Promise<WorkOrderResponseDto> {
@@ -80,4 +80,3 @@ export class WorkOrderController {
     await this.workOrderService.deleteWorkOrder(companyId, plantId, id, userId, roleId);
   }
 }
-

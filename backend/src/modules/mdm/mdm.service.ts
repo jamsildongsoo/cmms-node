@@ -98,11 +98,11 @@ const DEFAULT_CODE_GROUPS = [
   },
 ] as const;
 
-export type MdmUserInput = Partial<Omit<User, 'lastLoginPlantId'>> & {
+export type MdmUserInput = Partial<Omit<User, 'homePlantId'>> & {
   homePlantId?: string | null;
 };
 
-export type MdmUserResponse = Omit<User, 'passwordHash' | 'lastLoginPlantId'> & {
+export type MdmUserResponse = Omit<User, 'passwordHash' | 'homePlantId'> & {
   homePlantId: string | null;
   initialPassword?: string;
 };
@@ -146,8 +146,8 @@ export class MdmService {
     ]);
     if (!user) return [];
     let allowedPlants = plants;
-    if (user.scope !== 'COMPANY' && user.roleId?.toUpperCase() !== 'SYSTEM') {
-      allowedPlants = plants.filter((plant) => plant.id === user.lastLoginPlantId);
+    if (user.scope !== 'COMPANY') {
+      allowedPlants = plants.filter((plant) => plant.id === user.homePlantId);
     }
     return requestedPlantId
       ? allowedPlants.filter((plant) => plant.id === requestedPlantId)
@@ -207,13 +207,26 @@ export class MdmService {
     return this.departmentRepo.find({ where: { companyId, deleteYn: 'N' } });
   }
 
+  async getDepartmentOptions(
+    companyId: string,
+    keyword?: string,
+    limit = '30',
+  ): Promise<Department[]> {
+    const normalized = keyword?.trim().toLowerCase();
+    const take = this.parseLookupLimit(limit);
+    const departments = await this.getDepartmentsByCompany(companyId);
+    return departments
+      .filter((department) => !normalized
+        || department.id.toLowerCase().includes(normalized)
+        || department.name.toLowerCase().includes(normalized))
+      .slice(0, take);
+  }
+
   async saveDepartment(companyId: string, deptDto: Partial<Department>, operator: string): Promise<Department> {
     const id = CodeUtil.normalize(deptDto.id);
     if (!id) throw new BadRequestException('부서 ID는 필수입니다.');
 
     const parentId = CodeUtil.normalizeOrNull(deptDto.parentId);
-    const roleId = CodeUtil.normalizeOrNull(deptDto.roleId) || 'USER';
-    const scope = deptDto.scope || 'PLANT';
 
     const exists = await this.departmentRepo.findOne({ where: { companyId, id } });
     if (exists) {
@@ -222,8 +235,6 @@ export class MdmService {
       } else {
         exists.name = deptDto.name || id;
         exists.parentId = parentId;
-        exists.roleId = roleId;
-        exists.scope = scope;
         exists.deleteYn = 'N';
         exists.updatedBy = operator;
         return this.departmentRepo.save(exists);
@@ -235,8 +246,6 @@ export class MdmService {
       companyId,
       id,
       parentId,
-      roleId,
-      scope,
       createdBy: operator,
       updatedBy: operator,
     });
@@ -249,8 +258,6 @@ export class MdmService {
 
     dept.name = deptDto.name || dept.name;
     dept.parentId = CodeUtil.normalizeOrNull(deptDto.parentId);
-    dept.roleId = CodeUtil.normalizeOrNull(deptDto.roleId);
-    dept.scope = deptDto.scope || dept.scope;
     dept.updatedBy = operator;
     return this.departmentRepo.save(dept);
   }
@@ -399,9 +406,10 @@ export class MdmService {
         position: true,
         departmentId: true,
         roleId: true,
+        scope: true,
         email: true,
         phone: true,
-        lastLoginPlantId: true,
+        homePlantId: true,
         useYn: true,
         department: {
           name: true
@@ -409,9 +417,9 @@ export class MdmService {
       }
     });
 
-    return users.map(({ lastLoginPlantId, ...u }) => ({
+    return users.map(({ homePlantId, ...u }) => ({
       ...u,
-      homePlantId: lastLoginPlantId ?? null,
+      homePlantId: homePlantId ?? null,
       departmentName: u.department?.name ?? null,
     })) as MdmUserResponse[];
   }
@@ -443,6 +451,27 @@ export class MdmService {
     })) as Partial<User>[];
   }
 
+  async getUserOptions(
+    companyId: string,
+    keyword?: string,
+    limit = '30',
+  ): Promise<Partial<User>[]> {
+    const normalized = keyword?.trim().toLowerCase();
+    const take = this.parseLookupLimit(limit);
+    const users = await this.getUsersForUse(companyId);
+    return users
+      .filter((user) => !normalized
+        || user.id?.toLowerCase().includes(normalized)
+        || user.name?.toLowerCase().includes(normalized))
+      .slice(0, take);
+  }
+
+  private parseLookupLimit(value?: string): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 30;
+    return Math.min(Math.floor(parsed), 100);
+  }
+
   async saveUser(companyId: string, userDto: MdmUserInput, operator: string): Promise<MdmUserResponse> {
     const initialPassword = this.config.get<string>('INITIAL_USER_PASSWORD', 'init1234');
     if (initialPassword.length < 8) {
@@ -454,14 +483,15 @@ export class MdmService {
     // [C5] SYSTEM 역할 배정 차단
     const requestedRoleId = CodeUtil.normalizeOrNull(userDto.roleId);
     const departmentId = CodeUtil.normalizeOrNull(userDto.departmentId);
-    const departmentRole = departmentId
-      ? await this.departmentRepo.findOne({ where: { companyId, id: departmentId, deleteYn: 'N' } })
-      : null;
-    const roleId = requestedRoleId || departmentRole?.roleId || 'USER';
-    const scope = departmentRole?.scope || 'PLANT';
+    const roleId = requestedRoleId || 'USER';
+    const scope = userDto.scope || 'PLANT';
     if (roleId && roleId.toUpperCase() === 'SYSTEM') {
       throw new BadRequestException('사용자에게 SYSTEM 역할을 할당할 수 없습니다.');
     }
+    if (scope !== 'COMPANY' && scope !== 'PLANT') {
+      throw new BadRequestException('Scope는 COMPANY 또는 PLANT이어야 합니다.');
+    }
+    const homePlantId = await this.validateHomePlant(companyId, scope, userDto.homePlantId);
 
     const exists = await this.userRepo.findOne({ where: { companyId, id } });
     if (exists) {
@@ -477,14 +507,14 @@ export class MdmService {
         exists.phone = userDto.phone || null;
         exists.position = userDto.position || null;
         exists.title = userDto.title || null;
-        exists.lastLoginPlantId = CodeUtil.normalizeOrNull(userDto.homePlantId);
+        exists.homePlantId = homePlantId;
         exists.passwordHash = await bcrypt.hash(initialPassword, 12);
         exists.useYn = 'Y';
         exists.deleteYn = 'N';
         exists.updatedBy = operator;
         const saved = await this.userRepo.save(exists);
-        const { passwordHash: _passwordHash, lastLoginPlantId, ...safeUser } = saved;
-        return { ...safeUser, homePlantId: lastLoginPlantId ?? null, initialPassword };
+        const { passwordHash: _passwordHash, homePlantId: savedHomePlantId, ...safeUser } = saved;
+        return { ...safeUser, homePlantId: savedHomePlantId ?? null, initialPassword };
       }
     }
 
@@ -500,7 +530,7 @@ export class MdmService {
       phone: userDto.phone || null,
       position: userDto.position || null,
       title: userDto.title || null,
-      lastLoginPlantId: CodeUtil.normalizeOrNull(userDto.homePlantId),
+      homePlantId,
       passwordHash: hash,
       useYn: 'Y',
       mustChangePassword: 'Y',
@@ -508,8 +538,8 @@ export class MdmService {
       updatedBy: operator,
     });
     const saved = await this.userRepo.save(user);
-    const { passwordHash: _passwordHash, lastLoginPlantId, ...safeUser } = saved;
-    return { ...safeUser, homePlantId: lastLoginPlantId ?? null, initialPassword };
+    const { passwordHash: _passwordHash, homePlantId: savedHomePlantId, ...safeUser } = saved;
+    return { ...safeUser, homePlantId: savedHomePlantId ?? null, initialPassword };
   }
 
   async updateUser(companyId: string, id: string, userDto: MdmUserInput, operator: string): Promise<MdmUserResponse> {
@@ -517,7 +547,7 @@ export class MdmService {
     if (!user) throw new BadRequestException('사용자를 찾을 수 없습니다.');
 
     const targetRoleId = CodeUtil.normalizeOrNull(userDto.roleId);
-    const targetScope = userDto.scope;
+    const targetScope = userDto.scope || user.scope;
     const targetUseYn = userDto.useYn;
 
     // [C5] SYSTEM 역할 배정 차단
@@ -539,18 +569,44 @@ export class MdmService {
     user.name = userDto.name || user.name;
     user.departmentId = CodeUtil.normalizeOrNull(userDto.departmentId);
     user.roleId = targetRoleId || user.roleId;
-    user.scope = targetScope || user.scope;
+    if (targetScope !== 'COMPANY' && targetScope !== 'PLANT') {
+      throw new BadRequestException('Scope는 COMPANY 또는 PLANT이어야 합니다.');
+    }
+    const homePlantId = await this.validateHomePlant(
+      companyId,
+      targetScope,
+      userDto.homePlantId !== undefined ? userDto.homePlantId : user.homePlantId,
+    );
+    user.scope = targetScope;
     user.email = userDto.email || null;
     user.phone = userDto.phone || null;
     user.position = userDto.position || null;
     user.title = userDto.title || null;
     user.useYn = targetUseYn || user.useYn;
-    user.lastLoginPlantId = userDto.homePlantId || null;
+    user.homePlantId = homePlantId;
     user.updatedBy = operator;
 
     const saved = await this.userRepo.save(user);
-    const { passwordHash: _passwordHash, lastLoginPlantId, ...safeUser } = saved;
-    return { ...safeUser, homePlantId: lastLoginPlantId ?? null };
+    const { passwordHash: _passwordHash, homePlantId: savedHomePlantId, ...safeUser } = saved;
+    return { ...safeUser, homePlantId: savedHomePlantId ?? null };
+  }
+
+  private async validateHomePlant(
+    companyId: string,
+    scope: 'COMPANY' | 'PLANT',
+    requestedHomePlantId?: string | null,
+  ): Promise<string | null> {
+    const homePlantId = CodeUtil.normalizeOrNull(requestedHomePlantId);
+    if (scope === 'PLANT' && !homePlantId) {
+      throw new BadRequestException('PLANT 범위 사용자는 Home Plant가 필수입니다.');
+    }
+    if (!homePlantId) return null;
+    const plant = await this.plantRepo.findOne({
+      select: { id: true },
+      where: { companyId, id: homePlantId, deleteYn: 'N' },
+    });
+    if (!plant) throw new BadRequestException('유효하지 않은 Home Plant입니다.');
+    return homePlantId;
   }
 
   async deleteUser(companyId: string, id: string, operator: string): Promise<void> {
@@ -852,23 +908,6 @@ export class MdmService {
 
       // 신규 회사의 ADMIN이 즉시 전체 모듈을 사용할 수 있도록
       // ADMIN Role과 전체 CRUD 권한을 회사 생성 트랜잭션 안에서 함께 만든다.
-      const initialDepartmentId = 'ADMIN';
-      const departmentRepository = manager.getRepository(Department);
-      await departmentRepository.save(
-        departmentRepository.create({
-          companyId: coId,
-          id: initialDepartmentId,
-          name: '관리부서',
-          parentId: null,
-          warehouseId: null,
-          roleId: 'ADMIN',
-          scope: 'COMPANY',
-          createdBy: operator,
-          updatedBy: operator,
-          deleteYn: 'N',
-        }),
-      );
-
       const rolesToSeed = [
         { id: 'ADMIN', name: '관리자' },
         { id: 'MANAGER', name: '현장관리자' },
@@ -976,7 +1015,7 @@ export class MdmService {
           useYn: 'Y',
           roleId: 'ADMIN',
           scope: 'COMPANY',
-          departmentId: initialDepartmentId,
+          departmentId: null,
           mustChangePassword: 'Y',
           failedLoginCount: 0,
           createdBy: operator,

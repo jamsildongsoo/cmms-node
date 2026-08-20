@@ -35,8 +35,8 @@ export class PurchaseOrder extends BaseEntity {
   @Column({ name: 'ship_start_date', type: 'date', nullable: true })
   shipStartDate!: string | null;
 
-  @Column({ name: 'proc_status', length: 1, default: 'O' })
-  procStatus!: string;
+  @Column({ name: 'status', length: 1, default: 'T' })
+  status!: string;
 
   @Column({ name: 'closed_at', type: 'timestamptz', nullable: true })
   closedAt!: Date | null;

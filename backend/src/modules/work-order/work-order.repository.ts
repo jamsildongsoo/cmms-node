@@ -32,8 +32,10 @@ export class WorkOrderRepository {
       query
         .andWhere('wo.status = :tempStatus', { tempStatus: 'T' })
         .andWhere('wo.createdBy = :userId', { userId });
+    } else {
+      query.andWhere('wo.status <> :tempStatus', { tempStatus: 'T' });
     }
-    if (searchValue) {
+    if (tempOnly !== 'Y' && searchValue) {
       const value = `%${searchValue}%`;
       if (searchType === 'id') query.andWhere('wo.id ILIKE :value', { value });
       if (searchType === 'title') query.andWhere('wo.title ILIKE :value', { value });

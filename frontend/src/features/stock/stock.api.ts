@@ -4,6 +4,8 @@ import type {
   StockHistory,
   StockDocument,
   StockStatus,
+  ReceivablePurchaseOrder,
+  ReceivablePurchaseOrderDetail,
 } from './stock.types';
 
 export const stockApi = {
@@ -48,6 +50,32 @@ export const stockApi = {
   },
   async process(request: ProcessStockRequest): Promise<void> {
     await axiosInstance.post('/inventory-tx', request);
+  },
+  async getReceivableOrders(plantId?: string | null): Promise<ReceivablePurchaseOrder[]> {
+    const response = await axiosInstance.get<ReceivablePurchaseOrder[]>('/procurement/orders/receivable', {
+      params: { plantId: plantId || undefined },
+    });
+    return response.data.map((order) => ({
+      ...order,
+      remainingQty: order.remainingQty === undefined ? undefined : Number(order.remainingQty),
+    }));
+  },
+  async getReceivableOrderDetail(orderId: string, plantId?: string | null): Promise<ReceivablePurchaseOrderDetail> {
+    const response = await axiosInstance.get<ReceivablePurchaseOrderDetail>(
+      `/procurement/orders/receivable/${encodeURIComponent(orderId)}`,
+      { params: { plantId: plantId || undefined } },
+    );
+    return {
+      ...response.data,
+      items: response.data.items.map((item) => ({
+        ...item,
+        qty: Number(item.qty),
+      })),
+    };
+  },
+  async cancelDocument(originalDocumentId: string): Promise<string> {
+    const response = await axiosInstance.post<{ documentId: string }>('/inventory-tx/cancellations', { originalDocumentId });
+    return response.data.documentId;
   },
   async closeMonth(closingYm: string): Promise<void> {
     await axiosInstance.post('/inventory-tx/close', undefined, { params: { closingYm } });

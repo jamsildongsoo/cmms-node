@@ -1,4 +1,4 @@
-import { hasModuleManage } from '../../utils/moduleAccess';
+import { hasModuleCreate, hasModuleDelete, hasModuleUpdate } from '../../utils/moduleAccess';
 import type { ModuleAccessMap } from '../../utils/moduleAccess';
 
 export interface MdmCapabilities {
@@ -12,7 +12,7 @@ export interface MdmManagerProps extends MdmCapabilities {
 }
 
 export const getMdmCapabilities = (access?: ModuleAccessMap): MdmCapabilities => ({
-  canCreate: hasModuleManage(access, 'MDM'),
-  canUpdate: hasModuleManage(access, 'MDM'),
-  canDelete: hasModuleManage(access, 'MDM'),
+  canCreate: hasModuleCreate(access, 'MDM'),
+  canUpdate: hasModuleUpdate(access, 'MDM'),
+  canDelete: hasModuleDelete(access, 'MDM'),
 });

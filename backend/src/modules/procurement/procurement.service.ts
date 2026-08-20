@@ -4,13 +4,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DataSource, EntityManager, In, MoreThan } from 'typeorm';
+import { DataSource, EntityManager, In } from 'typeorm';
 import Decimal from 'decimal.js';
 import { SequenceService, AppModule } from '../../common/sequence/sequence.service';
-import { InventoryTxService, TxItem } from '../inventory-tx/inventory-tx.service';
 import {
   DocStatus,
-  ProcStatus,
   TxReason,
   TxType,
 } from '../../common/constants/status.constants';
@@ -20,10 +18,11 @@ import { PurchaseRequestItem } from '../../entities/purchase-request-item.entity
 import { PurchaseOrder } from '../../entities/purchase-order.entity';
 import { PurchaseOrderItem } from '../../entities/purchase-order-item.entity';
 import { Allocation } from '../../entities/allocation.entity';
-import { InventoryDocument } from '../../entities/inventory-document.entity';
-import { InventoryHistory } from '../../entities/inventory-history.entity';
 import { User } from '../../entities/users.entity';
 import { Warehouse } from '../../entities/warehouse.entity';
+import { Plant } from '../../entities/plant.entity';
+import { InventoryDocument } from '../../entities/inventory-document.entity';
+import { InventoryDocumentItem } from '../../entities/inventory-document-item.entity';
 import { ProcurementRepository } from './procurement.repository';
 import { PermissionPolicyService } from '../../common/permissions/permission-policy.service';
 import { FileStorageService } from '../file/file-storage.service';
@@ -33,7 +32,6 @@ export interface ItemLine {
   inventoryId: string;
   qty: string;
   unit?: string | null;
-  receivedQty?: string;
   remarks?: string | null;
 }
 export interface SaveRequest {
@@ -52,16 +50,6 @@ export interface SaveRequest {
   items?: ItemLine[];
 }
 export interface RequestDetail { header: PurchaseRequestResponse; items: ItemLine[] }
-export interface OrderRequest {
-  requestId: string;
-  orderDate?: string | Date; etaDate?: string | Date;
-}
-export interface ShipRequest { requestId: string; shipStartDate?: string | Date }
-export interface ReceiveLine { itemNo: number; qty: string; unitPrice: string }
-export interface ReceiveRequest {
-  requestId: string; warehouseId: string; txDate?: string | Date;
-  lines?: ReceiveLine[]; close?: boolean;
-}
 export interface PurchaseRequestResponse {
   companyId: string; id: string; plantId: string; warehouseId: string;
   requesterId: string; departmentId: string | null; requestDate: string; requestType: string | null;
@@ -71,14 +59,12 @@ export interface PurchaseRequestResponse {
   shipStartDate: string | null;
   purchaseManager: string | null; purchaseManagerContact: string | null;
   purchaseManagerRemarks: string | null;
-  status: string; procStatus: string | null;
+  status: string;
   remarks: string | null; createdAt: string; createdBy: string;
   purchaseRequestId?: string;
   purchaseOrderId?: string;
-}
-export interface ReceivableRequestResponse extends PurchaseRequestResponse {
-  requestedQty: string;
-  remainingQty: string;
+  closedAt?: string | null;
+  remainingQty?: string;
 }
 export interface PurchaseOrderAllocationResponse {
   docId: string;
@@ -89,33 +75,44 @@ export interface PurchaseOrderAllocationResponse {
   inventoryId: string;
   allocatedQty: string;
 }
+export interface PurchaseOrderLinkResponse {
+  orderId: string;
+  status: string;
+}
+export interface PurchaseOrderInventoryDocumentResponse {
+  id: string;
+  txDate: Date | string;
+  refModule: string | null;
+  refNo: string | null;
+  remarks: string | null;
+  createdBy: string;
+  createdAt: Date;
+  reverseDocumentId: string | null;
+}
 interface PurchaseOrderAllocationInput {
   docItemNo: number;
   prId: string;
   prItemNo: number;
   allocatedQty: string;
 }
-interface TransferOrderInput {
-  sourceWarehouseId: string;
-  targetWarehouseId: string;
-  txDate?: string;
-  lines: Array<{ docItemNo: number; qty: string }>;
-}
 interface IntegratedOrderInput {
   orderDate?: string;
   etaDate?: string;
   lines: Array<{ prId: string; prItemNo: number; qty: string }>;
 }
-interface PrTransferInput {
-  sourceWarehouseId: string;
-  targetWarehouseId: string;
-  txDate?: string;
-  lines: Array<{ prId: string; prItemNo: number; qty: string }>;
+interface StandaloneOrderInput {
+  plantId: string;
+  warehouseId?: string | null;
+  orderDate?: string;
+  etaDate?: string;
+  items: ItemLine[];
 }
-interface OrderReceiveInput {
-  warehouseId: string;
-  txDate?: string;
-  lines: Array<{ itemNo: number; qty: string; unitPrice: string }>;
+interface UpdateOrderInput {
+  plantId: string;
+  warehouseId?: string | null;
+  orderDate?: string;
+  etaDate?: string;
+  items?: ItemLine[];
 }
 const dateOnly = (value?: string | Date | null): string | null => {
   if (!value) return null;
@@ -128,7 +125,6 @@ export class ProcurementService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly sequenceService: SequenceService,
-    private readonly inventoryTxService: InventoryTxService,
     private readonly procurementRepository: ProcurementRepository,
     private readonly permissionPolicyService: PermissionPolicyService,
     private readonly fileStorageService: FileStorageService,
@@ -162,10 +158,7 @@ export class ProcurementService {
       if (!canReadStock) {
         throw new ForbiddenException('구매입고 대상 조회 권한이 없습니다.');
       }
-      requests = requests.filter((request) =>
-        [DocStatus.CONFIRMED, DocStatus.SELF_CONFIRMED].includes(request.status as DocStatus)
-        && [ProcStatus.ORDERED, ProcStatus.SHIPPING, ProcStatus.PARTIAL_RECEIVED]
-          .includes(request.procStatus as ProcStatus));
+      requests = requests.filter((request) => request.status === DocStatus.CONFIRMED);
     }
     return requests.map((entity) => this.toResponse(entity));
   }
@@ -189,15 +182,41 @@ export class ProcurementService {
     roleId: string,
     requestedPlantId?: string | null,
     receivableOnly = false,
+    accessModule: AppModule = AppModule.POR,
+    tempOnly = false,
   ): Promise<PurchaseRequestResponse[]> {
     const activePlantId = await resolveActivePlantId(
-      this.dataSource, companyId, operator, requestedPlantId, AppModule.POR,
+      this.dataSource, companyId, operator, requestedPlantId, accessModule,
     );
-    const orders = await this.dataSource.getRepository(PurchaseOrder).find({
-      where: { companyId, deleteYn: 'N' },
-      order: { id: 'DESC' },
-    });
+    const orderQuery = this.dataSource.getRepository(PurchaseOrder)
+      .createQueryBuilder('purchaseOrder')
+      .where('purchaseOrder.companyId = :companyId', { companyId })
+      .andWhere('purchaseOrder.deleteYn = :deleteYn', { deleteYn: 'N' });
+    if (tempOnly) {
+      orderQuery
+        .andWhere('purchaseOrder.status = :tempStatus', { tempStatus: DocStatus.TEMP })
+        .andWhere('purchaseOrder.createdBy = :operator', { operator });
+    } else {
+      orderQuery.andWhere('purchaseOrder.status <> :tempStatus', { tempStatus: DocStatus.TEMP });
+    }
+    const orders = await orderQuery.orderBy('purchaseOrder.id', 'DESC').getMany();
     const allocationRepository = this.dataSource.getRepository(Allocation);
+    const orderItems = orders.length
+      ? await this.dataSource.getRepository(PurchaseOrderItem).find({
+        where: { companyId, orderId: In(orders.map((order) => order.id)) },
+        order: { itemNo: 'ASC' },
+      })
+      : [];
+    const receivedByOrderLine = await this.getReceivedQuantities(
+      companyId,
+      orders.map((order) => order.id),
+    );
+    const orderItemsByOrder = new Map<string, PurchaseOrderItem[]>();
+    orderItems.forEach((item) => {
+      const current = orderItemsByOrder.get(item.orderId) ?? [];
+      current.push(item);
+      orderItemsByOrder.set(item.orderId, current);
+    });
     const result: PurchaseRequestResponse[] = [];
     for (const order of orders) {
       const seedAllocation = await allocationRepository.findOne({
@@ -205,14 +224,22 @@ export class ProcurementService {
         order: { prId: 'ASC', prItemNo: 'ASC' },
       });
       const requestId = order.purchaseRequestId ?? seedAllocation?.prId;
-      if (!requestId) continue;
+      if (!requestId) {
+        if (activePlantId && order.plantId !== activePlantId) continue;
+        if (receivableOnly && ![DocStatus.CONFIRMED, DocStatus.SELF_CONFIRMED].includes(order.status as DocStatus)) continue;
+        if (receivableOnly && order.closedAt) continue;
+        const response = this.toStandaloneOrderResponse(order);
+        response.remainingQty = this.getRemainingOrderQty(order.id, orderItemsByOrder, receivedByOrderLine);
+        if (receivableOnly && response.remainingQty === '0.0000') continue;
+        result.push(response);
+        continue;
+      }
       const request = await this.dataSource.getRepository(PurchaseRequest).findOne({
         where: { companyId, id: requestId, deleteYn: 'N' },
       });
-      if (!request || ![DocStatus.CONFIRMED, DocStatus.SELF_CONFIRMED].includes(request.status as DocStatus)) continue;
+      if (!request || request.status !== DocStatus.CONFIRMED) continue;
       if (activePlantId && request.plantId !== activePlantId) continue;
-      if (receivableOnly && ![ProcStatus.ORDERED, ProcStatus.SHIPPING, ProcStatus.PARTIAL_RECEIVED]
-        .includes(order.procStatus as ProcStatus)) continue;
+      if (receivableOnly && order.closedAt) continue;
       const response = this.toResponse(request);
       response.id = order.id;
       response.purchaseRequestId = order.purchaseRequestId ?? undefined;
@@ -221,7 +248,10 @@ export class ProcurementService {
       response.orderDate = order.orderDate;
       response.etaDate = order.etaDate;
       response.shipStartDate = order.shipStartDate;
-      response.procStatus = order.procStatus;
+      response.status = order.status;
+      response.closedAt = order.closedAt?.toISOString() ?? null;
+      response.remainingQty = this.getRemainingOrderQty(order.id, orderItemsByOrder, receivedByOrderLine);
+      if (receivableOnly && response.remainingQty === '0.0000') continue;
       result.push(response);
     }
     return result;
@@ -252,7 +282,7 @@ export class ProcurementService {
         .andWhere('request.deleteYn = :deleteYn', { deleteYn: 'N' })
         .getMany();
       if (requests.length !== requestIds.length) throw new NotFoundException('일부 구매요청을 찾을 수 없습니다.');
-      if (requests.some((request) => ![DocStatus.CONFIRMED, DocStatus.SELF_CONFIRMED].includes(request.status as DocStatus))) {
+      if (requests.some((request) => request.status !== DocStatus.CONFIRMED)) {
         throw new BadRequestException('결재완료된 구매요청만 통합 발주할 수 있습니다.');
       }
       const items = await runner.manager.getRepository(PurchaseRequestItem)
@@ -301,7 +331,7 @@ export class ProcurementService {
         orderDate: input.orderDate || today(),
         etaDate: input.etaDate || null,
         shipStartDate: null,
-        procStatus: ProcStatus.ORDERED,
+        status: DocStatus.TEMP,
         closedAt: null,
         closeReason: null,
         createdBy: operator,
@@ -321,7 +351,6 @@ export class ProcurementService {
           purchaseRequestItemNo: null,
           inventoryId: group.inventoryId,
           orderedQty: group.qty.toFixed(4),
-          receivedQty: '0',
           unit: group.unit,
         });
         orderItems.push(savedItem);
@@ -349,7 +378,8 @@ export class ProcurementService {
       response.warehouseId = '';
       response.orderDate = order.orderDate;
       response.etaDate = order.etaDate;
-      response.procStatus = order.procStatus;
+      response.status = order.status;
+      response.closedAt = order.closedAt?.toISOString() ?? null;
       return response;
     } catch (error) {
       await runner.rollbackTransaction();
@@ -357,6 +387,184 @@ export class ProcurementService {
     } finally {
       await runner.release();
     }
+  }
+
+  async createStandaloneOrder(
+    companyId: string,
+    input: StandaloneOrderInput,
+    operator: string,
+  ): Promise<PurchaseRequestResponse> {
+    if (!input.items.length) throw new BadRequestException('구매오더 품목이 없습니다.');
+    const warehouse = input.warehouseId
+      ? await this.dataSource.getRepository(Warehouse).findOne({
+        where: { companyId, id: input.warehouseId, deleteYn: 'N' },
+      })
+      : null;
+    if (input.warehouseId && !warehouse) throw new NotFoundException('구매오더 창고를 찾을 수 없습니다.');
+    const plant = await this.dataSource.getRepository(Plant).findOne({
+      where: { companyId, id: input.plantId, deleteYn: 'N' },
+    });
+    if (!plant) throw new NotFoundException('구매오더 플랜트를 찾을 수 없습니다.');
+    const duplicateItems = new Set<number>();
+    for (const item of input.items) {
+      if (duplicateItems.has(item.itemNo)) throw new BadRequestException(`중복된 POR item입니다: ${item.itemNo}`);
+      duplicateItems.add(item.itemNo);
+      if (!item.inventoryId || !new Decimal(item.qty).isFinite() || new Decimal(item.qty).lte(0)) {
+        throw new BadRequestException('구매오더 품목과 수량을 확인하세요.');
+      }
+    }
+    const orderRepository = this.dataSource.getRepository(PurchaseOrder);
+    const orderItemRepository = this.dataSource.getRepository(PurchaseOrderItem);
+    const orderId = await this.sequenceService.generateNextNo(companyId, AppModule.POR, null);
+    const order = orderRepository.create({
+      companyId,
+      id: orderId,
+      purchaseRequestId: null,
+      plantId: input.plantId,
+      warehouseId: input.warehouseId ?? null,
+      requesterId: operator,
+      departmentId: null,
+      orderDate: input.orderDate || today(),
+      etaDate: input.etaDate || null,
+      shipStartDate: null,
+      status: DocStatus.TEMP,
+      closedAt: null,
+      closeReason: null,
+      createdBy: operator,
+      updatedBy: operator,
+      deleteYn: 'N',
+    });
+    await orderRepository.save(order);
+    await orderItemRepository.save(input.items.map((item) => orderItemRepository.create({
+      companyId,
+      orderId,
+      itemNo: item.itemNo,
+      purchaseRequestId: null,
+      purchaseRequestItemNo: null,
+      inventoryId: item.inventoryId,
+      orderedQty: new Decimal(item.qty).toFixed(4),
+      unit: item.unit ?? null,
+    })));
+    return {
+      companyId,
+      id: orderId,
+      plantId: order.plantId,
+      warehouseId: order.warehouseId ?? '',
+      requesterId: operator,
+      departmentId: null,
+      requestDate: order.orderDate,
+      requestType: null,
+      fileGroupId: null,
+      title: '독립 구매오더',
+      approvalId: null,
+      orderDate: order.orderDate,
+      etaDate: order.etaDate,
+      shipStartDate: null,
+      purchaseManager: null,
+      purchaseManagerContact: null,
+      purchaseManagerRemarks: null,
+      status: order.status,
+      remarks: null,
+      createdAt: order.createdAt.toISOString(),
+      createdBy: operator,
+      purchaseOrderId: orderId,
+      closedAt: null,
+    };
+  }
+
+  async updatePurchaseOrder(
+    companyId: string,
+    orderId: string,
+    input: UpdateOrderInput,
+    operator: string,
+  ): Promise<RequestDetail> {
+    const activePlantId = await resolveActivePlantId(
+      this.dataSource,
+      companyId,
+      operator,
+      input.plantId,
+      AppModule.POR,
+    );
+    if (!activePlantId) throw new BadRequestException('구매오더 플랜트를 확인할 수 없습니다.');
+
+    const warehouse = input.warehouseId
+      ? await this.dataSource.getRepository(Warehouse).findOne({
+        where: { companyId, id: input.warehouseId, deleteYn: 'N' },
+      })
+      : null;
+    if (input.warehouseId && !warehouse) {
+      throw new NotFoundException('구매오더 창고를 찾을 수 없습니다.');
+    }
+    if (warehouse?.plantId && warehouse.plantId !== activePlantId) {
+      throw new BadRequestException('선택한 플랜트 범위의 창고만 지정할 수 있습니다.');
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      const orderRepository = manager.getRepository(PurchaseOrder);
+      const order = await orderRepository
+        .createQueryBuilder('purchaseOrder')
+        .setLock('pessimistic_write')
+        .where('purchaseOrder.companyId = :companyId', { companyId })
+        .andWhere('purchaseOrder.id = :orderId', { orderId })
+        .andWhere('purchaseOrder.deleteYn = :deleteYn', { deleteYn: 'N' })
+        .getOne();
+      if (!order) throw new NotFoundException('구매오더를 찾을 수 없습니다.');
+      if (order.status !== DocStatus.TEMP) {
+        throw new BadRequestException('임시저장 상태의 POR만 수정할 수 있습니다.');
+      }
+      if (order.createdBy !== operator) {
+        throw new ForbiddenException('본인이 임시저장한 POR만 수정할 수 있습니다.');
+      }
+
+      const hasAllocation = await manager.getRepository(Allocation).exists({
+        where: { companyId, allocationType: 'PO', docId: orderId },
+      });
+      const isLinkedOrder = !!order.purchaseRequestId || hasAllocation;
+      if (isLinkedOrder && order.plantId !== activePlantId) {
+        throw new BadRequestException('PR 배부 기반 POR의 플랜트는 변경할 수 없습니다.');
+      }
+      if (isLinkedOrder && input.items !== undefined) {
+        throw new BadRequestException('PR 배부 기반 POR의 품목은 배부 정보에서 관리해야 합니다.');
+      }
+
+      if (!isLinkedOrder) {
+        if (!input.items?.length) throw new BadRequestException('구매오더 품목이 없습니다.');
+        const itemNumbers = new Set<number>();
+        for (const item of input.items) {
+          if (itemNumbers.has(item.itemNo)) {
+            throw new BadRequestException(`중복된 POR item입니다: ${item.itemNo}`);
+          }
+          itemNumbers.add(item.itemNo);
+          const qty = new Decimal(item.qty);
+          if (!item.inventoryId || !qty.isFinite() || qty.lte(0)) {
+            throw new BadRequestException('구매오더 품목과 수량을 확인하세요.');
+          }
+        }
+        const itemRepository = manager.getRepository(PurchaseOrderItem);
+        await itemRepository.delete({ companyId, orderId });
+        await itemRepository.save(input.items.map((item) => itemRepository.create({
+          companyId,
+          orderId,
+          itemNo: item.itemNo,
+          purchaseRequestId: null,
+          purchaseRequestItemNo: null,
+          inventoryId: item.inventoryId,
+          orderedQty: new Decimal(item.qty).toFixed(4),
+          unit: item.unit ?? null,
+        })));
+      }
+
+      Object.assign(order, {
+        plantId: activePlantId,
+        warehouseId: input.warehouseId ?? null,
+        orderDate: input.orderDate || order.orderDate,
+        etaDate: input.etaDate ?? null,
+        updatedBy: operator,
+      });
+      await orderRepository.save(order);
+    });
+
+    return this.getPurchaseOrderDetail(companyId, orderId, operator, activePlantId);
   }
 
   private async getRequestDetail(
@@ -386,7 +594,6 @@ export class ProcurementService {
         inventoryId: item.inventoryId,
         qty: item.qty,
         unit: item.unit,
-        receivedQty: item.receivedQty,
         remarks: item.remarks,
       })),
     };
@@ -401,11 +608,40 @@ export class ProcurementService {
     return this.getRequestDetail(companyId, id, operator, requestedPlantId);
   }
 
+  async getPurchaseOrderLinks(
+    companyId: string,
+    requestId: string,
+  ): Promise<PurchaseOrderLinkResponse[]> {
+    const rows = await this.dataSource.getRepository(Allocation)
+      .createQueryBuilder('allocation')
+      .innerJoin(PurchaseOrder, 'order',
+        'order.companyId = allocation.companyId AND order.id = allocation.docId AND order.deleteYn = :deleteYn',
+        { deleteYn: 'N' })
+      .select('order.id', 'orderId')
+      .addSelect('order.status', 'status')
+      .where('allocation.companyId = :companyId', { companyId })
+      .andWhere('allocation.prId = :requestId', { requestId })
+      .andWhere('allocation.allocationType = :allocationType', { allocationType: 'PO' })
+      .groupBy('order.id')
+      .addGroupBy('order.status')
+      .orderBy('order.id', 'ASC')
+      .getRawMany<{ orderId: string; status: string }>();
+    return rows;
+  }
+
+  async getPurchaseOrderInventoryDocuments(companyId: string, orderId: string): Promise<PurchaseOrderInventoryDocumentResponse[]> {
+    return this.dataSource.getRepository(InventoryDocument).find({
+      where: { companyId, refModule: AppModule.POR, refNo: orderId, deleteYn: 'N' },
+      order: { txDate: 'DESC', id: 'DESC' },
+    });
+  }
+
   async getPurchaseOrderDetail(
     companyId: string,
     id: string,
     operator?: string,
     requestedPlantId?: string | null,
+    accessModule: AppModule = AppModule.POR,
   ): Promise<RequestDetail> {
     const order = await this.dataSource.getRepository(PurchaseOrder).findOne({
       where: { companyId, id, deleteYn: 'N' },
@@ -416,10 +652,36 @@ export class ProcurementService {
         order: { prId: 'ASC', prItemNo: 'ASC' },
       })
       : null;
-    const requestId = order?.purchaseRequestId ?? seedAllocation?.prId ?? id;
+    const requestId = order?.purchaseRequestId ?? seedAllocation?.prId;
+    if (!order) throw new NotFoundException('구매오더를 찾을 수 없습니다.');
+    if (accessModule === AppModule.STK
+      && (![DocStatus.CONFIRMED, DocStatus.SELF_CONFIRMED].includes(order.status as DocStatus) || order.closedAt)) {
+      throw new NotFoundException('입고 가능한 구매오더가 아닙니다.');
+    }
+    if (!requestId) {
+      const activePlantId = operator
+        ? await resolveActivePlantId(this.dataSource, companyId, operator, requestedPlantId, accessModule)
+        : null;
+      if (activePlantId && order.plantId !== activePlantId) {
+        throw new ForbiddenException('현재 선택한 플랜트 범위의 구매오더가 아닙니다.');
+      }
+      const orderItems = await this.dataSource.getRepository(PurchaseOrderItem).find({
+        where: { companyId, orderId: order.id },
+        order: { itemNo: 'ASC' },
+      });
+      const receivedByOrderLine = await this.getReceivedQuantities(companyId, [order.id]);
+      return {
+        header: this.toStandaloneOrderResponse(order),
+        items: orderItems.map((item) => ({
+          itemNo: item.itemNo,
+          inventoryId: item.inventoryId,
+          qty: this.getRemainingOrderLineQty(order.id, item, receivedByOrderLine),
+          unit: item.unit,
+        })).filter((item) => item.qty !== '0.0000'),
+      };
+    }
     const detail = await this.getRequestDetail(companyId, requestId, operator, requestedPlantId);
-    if (![DocStatus.CONFIRMED, DocStatus.SELF_CONFIRMED]
-      .includes(detail.header.status as DocStatus)) {
+    if (detail.header.status !== DocStatus.CONFIRMED) {
       throw new NotFoundException('구매관리 대상 문서를 찾을 수 없습니다.');
     }
     if (order) {
@@ -429,62 +691,70 @@ export class ProcurementService {
       detail.header.orderDate = order.orderDate;
       detail.header.etaDate = order.etaDate;
       detail.header.shipStartDate = order.shipStartDate;
-      detail.header.procStatus = order.procStatus;
+      detail.header.status = order.status;
+      detail.header.closedAt = order.closedAt?.toISOString() ?? null;
       if (!order.purchaseRequestId) {
         const orderItems = await this.dataSource.getRepository(PurchaseOrderItem).find({
           where: { companyId, orderId: order.id },
           order: { itemNo: 'ASC' },
         });
+        const receivedByOrderLine = await this.getReceivedQuantities(companyId, [order.id]);
         detail.items = orderItems.map((item) => ({
           itemNo: item.itemNo,
           inventoryId: item.inventoryId,
-          qty: item.orderedQty,
+          qty: this.getRemainingOrderLineQty(order.id, item, receivedByOrderLine),
           unit: item.unit,
-          receivedQty: item.receivedQty,
-        }));
+        })).filter((item) => item.qty !== '0.0000');
       }
     }
     return detail;
   }
 
-  async getReceivableRequest(companyId: string, id: string, operator: string): Promise<RequestDetail> {
-    const request = await this.mustGetConfirmed(companyId, id);
-    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, null, AppModule.PUR);
-    if (activePlantId && request.plantId !== activePlantId) {
-      throw new ForbiddenException('현재 선택한 플랜트 범위의 구매요청만 조회할 수 있습니다.');
-    }
-    if (![ProcStatus.ORDERED, ProcStatus.SHIPPING, ProcStatus.PARTIAL_RECEIVED]
-      .includes(request.procStatus as ProcStatus)) {
-      throw new BadRequestException('발주·배송중·부분입고 상태의 구매요청만 입고할 수 있습니다.');
-    }
-    return this.getRequestDetail(companyId, id, operator);
+  private async getReceivedQuantities(
+    companyId: string,
+    orderIds: string[],
+  ): Promise<Map<string, Decimal>> {
+    if (!orderIds.length) return new Map();
+    const documents = await this.dataSource.getRepository(InventoryDocument).find({
+      where: { companyId, refModule: AppModule.POR, refNo: In(orderIds), deleteYn: 'N' },
+    });
+    if (!documents.length) return new Map();
+    const items = await this.dataSource.getRepository(InventoryDocumentItem).find({
+      where: {
+        companyId,
+        documentId: In(documents.map((document) => document.id)),
+        txTypeCode: TxType.IN,
+      },
+    });
+    const orderByDocument = new Map(documents.map((document) => [document.id, document.refNo ?? '']));
+    const received = new Map<string, Decimal>();
+    items.forEach((item) => {
+      if (!item.refLineNo) return;
+      const orderId = orderByDocument.get(item.documentId);
+      if (!orderId) return;
+      const key = `${orderId}:${item.refLineNo}`;
+      received.set(key, (received.get(key) ?? new Decimal(0)).add(item.qty));
+    });
+    return received;
   }
 
-  async getReceivableRequests(companyId: string, operator: string): Promise<ReceivableRequestResponse[]> {
-    const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, null, AppModule.PUR);
-    const requests = (await this.procurementRepository.findAll(companyId, activePlantId ?? undefined))
-      .filter((request) =>
-        [DocStatus.CONFIRMED, DocStatus.SELF_CONFIRMED].includes(request.status as DocStatus)
-        && [ProcStatus.ORDERED, ProcStatus.SHIPPING, ProcStatus.PARTIAL_RECEIVED]
-          .includes(request.procStatus as ProcStatus));
-    const result: ReceivableRequestResponse[] = [];
-    for (const request of requests) {
-      const items = await this.procurementRepository.findItems(companyId, request.id);
-      const requestedQty = items.reduce(
-        (sum, item) => sum.add(item.qty), new Decimal(0),
-      );
-      const remainingQty = items.reduce(
-        (sum, item) => sum.add(Decimal.max(new Decimal(item.qty).sub(item.receivedQty), 0)),
-        new Decimal(0),
-      );
-      if (remainingQty.lte(0)) continue;
-      result.push({
-        ...this.toResponse(request),
-        requestedQty: requestedQty.toFixed(4),
-        remainingQty: remainingQty.toFixed(4),
-      });
-    }
-    return result;
+  private getRemainingOrderLineQty(
+    orderId: string,
+    item: PurchaseOrderItem,
+    receivedByOrderLine: Map<string, Decimal>,
+  ): string {
+    const received = receivedByOrderLine.get(`${orderId}:${item.itemNo}`) ?? new Decimal(0);
+    return Decimal.max(new Decimal(0), new Decimal(item.orderedQty).sub(received)).toFixed(4);
+  }
+
+  private getRemainingOrderQty(
+    orderId: string,
+    itemsByOrder: Map<string, PurchaseOrderItem[]>,
+    receivedByOrderLine: Map<string, Decimal>,
+  ): string {
+    return (itemsByOrder.get(orderId) ?? [])
+      .reduce((total, item) => total.add(this.getRemainingOrderLineQty(orderId, item, receivedByOrderLine)), new Decimal(0))
+      .toFixed(4);
   }
 
   async createOrUpdate(
@@ -532,7 +802,6 @@ export class ProcurementService {
           departmentId: user.departmentId,
           requestDate: dateOnly(header.requestDate) || today(),
           status: DocStatus.TEMP,
-          procStatus: null,
           createdBy: operator,
           deleteYn: 'N',
         });
@@ -587,7 +856,6 @@ export class ProcurementService {
             inventoryId: item.inventoryId,
             qty: new Decimal(item.qty).toFixed(4),
             unit: item.unit ?? null,
-            receivedQty: '0',
             remarks: item.remarks ?? null,
           }),
         ));
@@ -602,99 +870,35 @@ export class ProcurementService {
     return this.toResponse(await this.mustGetActive(companyId, id));
   }
 
-  async confirm(
-    companyId: string, requestId: string, operator: string,
-  ): Promise<PurchaseRequestResponse> {
-    const entity = await this.mustGetActive(companyId, requestId);
-    if (entity.status !== DocStatus.TEMP) {
-      throw new BadRequestException('저장 상태(T)에서만 확정할 수 있습니다.');
-    }
-    const count = await this.dataSource.getRepository(PurchaseRequestItem).count({
-      where: { companyId, requestId },
+  async confirmOrder(
+    companyId: string, orderId: string, operator: string,
+  ): Promise<RequestDetail> {
+    const repository = this.dataSource.getRepository(PurchaseOrder);
+    const order = await repository.findOne({
+      where: { companyId, id: orderId, deleteYn: 'N' },
     });
-    if (!count) throw new BadRequestException('자재 라인이 없는 구매요청은 확정할 수 없습니다.');
-    // 관리용 호환 경로. 일반 FE에서는 직접확정을 제거했지만 기존 관리 호출이
-    // status='S'를 저장할 수 있도록 이 상태 전이와 후속 수량 처리를 유지한다.
-    entity.status = DocStatus.SELF_CONFIRMED;
-    entity.updatedBy = operator;
-    return this.toResponse(await this.dataSource.getRepository(PurchaseRequest).save(entity));
+    if (!order) throw new NotFoundException('구매오더를 찾을 수 없습니다.');
+    if (order.status !== DocStatus.TEMP) {
+      throw new BadRequestException('임시저장 상태의 POR만 확정할 수 있습니다.');
+    }
+    order.status = DocStatus.SELF_CONFIRMED;
+    order.updatedBy = operator;
+    await repository.save(order);
+    return this.getPurchaseOrderDetail(companyId, orderId, operator);
   }
 
-  async placeOrder(
-    companyId: string, req: OrderRequest, operator: string,
-  ): Promise<PurchaseRequestResponse> {
-    const entity = await this.mustGetConfirmed(companyId, await this.resolveRequestId(companyId, req.requestId));
-    if (!entity.purchaseManager) {
-      const manager = await this.dataSource.getRepository(User).findOne({
-        select: { id: true, phone: true },
-        where: { companyId, id: operator, deleteYn: 'N' },
-      });
-      if (!manager) throw new BadRequestException('구매담당자 정보를 찾을 수 없습니다.');
-      entity.purchaseManager = manager.id;
-      entity.purchaseManagerContact = manager.phone;
-    }
-    Object.assign(entity, {
-      orderDate: dateOnly(req.orderDate) || today(),
-      etaDate: dateOnly(req.etaDate),
-      procStatus: ProcStatus.ORDERED,
-      updatedBy: operator,
+  async deleteOrder(companyId: string, orderId: string, operator: string): Promise<void> {
+    const repository = this.dataSource.getRepository(PurchaseOrder);
+    const order = await repository.findOne({
+      where: { companyId, id: orderId, deleteYn: 'N' },
     });
-    const saved = await this.dataSource.getRepository(PurchaseRequest).save(entity);
-    const orderRepository = this.dataSource.getRepository(PurchaseOrder);
-    const existingOrder = await orderRepository.findOne({
-      where: { companyId, purchaseRequestId: entity.id },
-    });
-    if (!existingOrder) {
-      const orderId = await this.sequenceService.generateNextNo(companyId, AppModule.POR, entity.departmentId);
-      const order = orderRepository.create({
-        companyId,
-        id: orderId,
-        purchaseRequestId: entity.id,
-        plantId: entity.plantId,
-        warehouseId: entity.warehouseId,
-        requesterId: entity.requesterId,
-        departmentId: entity.departmentId,
-        orderDate: entity.orderDate!,
-        etaDate: entity.etaDate,
-        shipStartDate: entity.shipStartDate,
-        procStatus: ProcStatus.ORDERED,
-        closedAt: null,
-        closeReason: null,
-        createdBy: operator,
-        updatedBy: operator,
-        deleteYn: 'N',
-      });
-      await orderRepository.save(order);
-      const requestItems = await this.procurementRepository.findItems(companyId, entity.id);
-      await this.dataSource.getRepository(PurchaseOrderItem).save(requestItems.map((item) => ({
-        companyId,
-        orderId,
-        itemNo: item.itemNo,
-        purchaseRequestId: item.requestId,
-        purchaseRequestItemNo: item.itemNo,
-        inventoryId: item.inventoryId,
-        orderedQty: item.qty,
-        receivedQty: '0',
-        unit: item.unit,
-      })));
-      await this.dataSource.getRepository(Allocation).save(requestItems.map((item) => ({
-        companyId,
-        allocationType: 'PO' as const,
-        docId: orderId,
-        docItemNo: item.itemNo,
-        prId: item.requestId,
-        prItemNo: item.itemNo,
-        inventoryId: item.inventoryId,
-        allocationQty: item.qty,
-      })));
-    } else {
-      existingOrder.orderDate = entity.orderDate!;
-      existingOrder.etaDate = entity.etaDate;
-      existingOrder.procStatus = ProcStatus.ORDERED;
-      existingOrder.updatedBy = operator;
-      await orderRepository.save(existingOrder);
+    if (!order) throw new NotFoundException('구매오더를 찾을 수 없습니다.');
+    if (order.status !== DocStatus.TEMP) {
+      throw new BadRequestException('임시저장 상태의 POR만 삭제할 수 있습니다.');
     }
-    return this.toResponse(saved);
+    order.deleteYn = 'Y';
+    order.updatedBy = operator;
+    await repository.save(order);
   }
 
   async getOrderAllocations(
@@ -746,8 +950,11 @@ export class ProcurementService {
         .andWhere('order.deleteYn = :deleteYn', { deleteYn: 'N' })
         .getOne();
       if (!order) throw new NotFoundException('구매오더를 찾을 수 없습니다.');
-      if (order.procStatus !== ProcStatus.ORDERED) {
-        throw new BadRequestException('발주 상태에서만 배부를 변경할 수 있습니다.');
+      if (order.status !== DocStatus.TEMP) {
+        throw new BadRequestException('임시저장 상태에서만 배부를 변경할 수 있습니다.');
+      }
+      if (order.createdBy !== operator) {
+        throw new ForbiddenException('본인이 임시저장한 POR만 수정할 수 있습니다.');
       }
       const orderItems = await runner.manager.getRepository(PurchaseOrderItem).find({
         where: { companyId, orderId },
@@ -816,705 +1023,22 @@ export class ProcurementService {
     }
   }
 
-  async transferOrder(
-    companyId: string,
-    orderId: string,
-    input: TransferOrderInput,
-    operator: string,
-  ): Promise<PurchaseOrderAllocationResponse[]> {
-    if (!input.lines.length) throw new BadRequestException('이송 라인이 비어 있습니다.');
-    const runner = this.dataSource.createQueryRunner();
-    await runner.connect();
-    await runner.startTransaction('READ COMMITTED');
-    try {
-      const order = await runner.manager.getRepository(PurchaseOrder)
-        .createQueryBuilder('order')
-        .setLock('pessimistic_write')
-        .where('order.companyId = :companyId', { companyId })
-        .andWhere('order.id = :orderId', { orderId })
-        .andWhere('order.deleteYn = :deleteYn', { deleteYn: 'N' })
-        .getOne();
-      if (!order) throw new NotFoundException('구매오더를 찾을 수 없습니다.');
-      if (input.sourceWarehouseId === input.targetWarehouseId) {
-        throw new BadRequestException('출발창고와 도착창고는 달라야 합니다.');
-      }
-      if (order.warehouseId && input.targetWarehouseId !== order.warehouseId) {
-        throw new BadRequestException('요청창고로만 이송할 수 있습니다.');
-      }
-      const inputLineKeys = new Set<number>();
-      for (const line of input.lines) {
-        if (inputLineKeys.has(line.docItemNo)) {
-          throw new BadRequestException(`중복된 PO item 이송 라인입니다: ${line.docItemNo}`);
-        }
-        inputLineKeys.add(line.docItemNo);
-      }
-      const warehouses = await runner.manager.getRepository(Warehouse).find({
-        where: [
-          { companyId, id: input.sourceWarehouseId, deleteYn: 'N' },
-          { companyId, id: input.targetWarehouseId, deleteYn: 'N' },
-        ],
-      });
-      const source = warehouses.find((warehouse) => warehouse.id === input.sourceWarehouseId);
-      const target = warehouses.find((warehouse) => warehouse.id === input.targetWarehouseId);
-      if (!source || !target) throw new BadRequestException('유효한 이송 창고가 아닙니다.');
-      if (source.plantId !== null || target.plantId === null) {
-        throw new BadRequestException('공통 중앙창고에서 사업장 요청창고로만 이송할 수 있습니다.');
-      }
-      const transferDocNo = await this.sequenceService.generateNextNo(companyId, AppModule.STK, null);
-      const orderItems = await runner.manager.getRepository(PurchaseOrderItem).find({
-        where: { companyId, orderId },
-      });
-      const itemByLine = new Map(orderItems.map((item) => [item.itemNo, item]));
-      const allocationRepository = runner.manager.getRepository(Allocation);
-      const allocations = await allocationRepository.find({
-        where: { companyId, allocationType: 'PO', docId: orderId },
-        order: { docItemNo: 'ASC', prItemNo: 'ASC' },
-      });
-      if (!allocations.length) {
-        throw new BadRequestException('PO allocation이 없어 이송할 수 없습니다.');
-      }
-      const requestIds = [...new Set(allocations.map((allocation) => allocation.prId))];
-      const requests = await runner.manager.getRepository(PurchaseRequest).find({
-        where: requestIds.map((requestId) => ({ companyId, id: requestId, deleteYn: 'N' })),
-      });
-      const requestById = new Map(requests.map((request) => [request.id, request]));
-      const transferDocuments = await runner.manager.getRepository(InventoryDocument).find({
-        where: { companyId, refModule: AppModule.POR, refNo: orderId, deleteYn: 'N' },
-      });
-      const movedAllocations = transferDocuments.length
-        ? await allocationRepository.find({
-          where: { companyId, allocationType: 'MOVE', docId: In(transferDocuments.map((doc) => doc.id)) },
-        })
-        : [];
-      const movedByKey = new Map<string, Decimal>();
-      for (const allocation of movedAllocations) {
-        const key = `${allocation.prId}:${allocation.prItemNo}`;
-        movedByKey.set(key, (movedByKey.get(key) ?? new Decimal(0)).add(allocation.allocationQty));
-      }
-      const allocationByLine = new Map<number, Allocation[]>();
-      for (const allocation of allocations) {
-        const list = allocationByLine.get(allocation.docItemNo) ?? [];
-        list.push(allocation);
-        allocationByLine.set(allocation.docItemNo, list);
-      }
-      const txItems: TxItem[] = [];
-      const moveAllocations: Partial<Allocation>[] = [];
-      const movedNowByKey = new Map<string, Decimal>();
-      for (const line of input.lines) {
-        const orderItem = itemByLine.get(line.docItemNo);
-        if (!orderItem) throw new BadRequestException(`PO item ${line.docItemNo}을 찾을 수 없습니다.`);
-        const lineAllocations = allocationByLine.get(line.docItemNo) ?? [];
-        if (!lineAllocations.length) {
-          throw new BadRequestException(`PO item ${line.docItemNo}의 allocation이 없습니다.`);
-        }
-        for (const allocation of lineAllocations) {
-          const request = requestById.get(allocation.prId);
-          if (!request || request.warehouseId !== input.targetWarehouseId) {
-            throw new BadRequestException(
-              `PO item ${line.docItemNo}은 선택한 요청창고로 이송할 수 없습니다. PR 요청창고별로 나누어 이송하세요.`,
-            );
-          }
-        }
-        const qty = new Decimal(line.qty);
-        if (!qty.isFinite() || qty.lte(0)) throw new BadRequestException('이송수량은 0보다 커야 합니다.');
-        let remaining = qty;
-        for (const allocation of lineAllocations) {
-          const moved = movedByKey.get(`${allocation.prId}:${allocation.prItemNo}`) ?? new Decimal(0);
-          const available = new Decimal(allocation.allocationQty).sub(moved);
-          if (available.lte(0)) continue;
-          const applied = Decimal.min(available, remaining);
-          moveAllocations.push({
-            companyId,
-            allocationType: 'MOVE',
-            docId: transferDocNo,
-            docItemNo: input.lines.indexOf(line) * 2 + 2,
-            prId: allocation.prId,
-            prItemNo: allocation.prItemNo,
-            inventoryId: allocation.inventoryId,
-            allocationQty: applied.toFixed(4),
-          });
-          const allocationKey = `${allocation.prId}:${allocation.prItemNo}`;
-          movedNowByKey.set(
-            allocationKey,
-            (movedNowByKey.get(allocationKey) ?? new Decimal(0)).add(applied),
-          );
-          remaining = remaining.sub(applied);
-          if (remaining.lte(0)) break;
-        }
-        if (remaining.gt(0)) throw new BadRequestException(`PO item ${line.docItemNo}의 미이송 수량을 초과했습니다.`);
-        txItems.push({
-          txTypeCode: TxType.MOVE,
-          txReasonCode: TxReason.PLANT_TRANSFER,
-          warehouseId: input.sourceWarehouseId,
-          targetWarehouseId: input.targetWarehouseId,
-          inventoryId: orderItem.inventoryId,
-          qty: qty.toString(),
-          txDate: input.txDate ? new Date(input.txDate) : new Date(),
-          docNo: transferDocNo,
-          refNo: order.id,
-          refModule: AppModule.POR,
-          refLineNo: String(line.docItemNo),
-        });
-      }
-      await this.inventoryTxService.processTransactions(
-        { items: txItems },
-        { runner, companyId, userId: operator },
-      );
-      await allocationRepository.save(moveAllocations);
-      const requestItemRepository = runner.manager.getRepository(PurchaseRequestItem);
-      for (const requestId of requestIds) {
-        const request = requestById.get(requestId);
-        if (!request) continue;
-        const requestItems = await requestItemRepository
-          .createQueryBuilder('item')
-          .setLock('pessimistic_write')
-          .where('item.companyId = :companyId', { companyId })
-          .andWhere('item.requestId = :requestId', { requestId })
-          .orderBy('item.itemNo', 'ASC')
-          .getMany();
-        for (const item of requestItems) {
-          const moved = movedNowByKey.get(`${requestId}:${item.itemNo}`);
-          if (moved) {
-            item.receivedQty = new Decimal(item.receivedQty).add(moved).toFixed(4);
-          }
-        }
-        await requestItemRepository.save(requestItems);
-        const allReceived = requestItems.length > 0 && requestItems.every((item) =>
-          new Decimal(item.receivedQty).gte(item.qty),
-        );
-        request.procStatus = allReceived ? ProcStatus.RECEIVED : ProcStatus.PARTIAL_RECEIVED;
-        request.updatedBy = operator;
-        await runner.manager.getRepository(PurchaseRequest).save(request);
-      }
-      await runner.commitTransaction();
-      return this.getOrderAllocations(companyId, order.id);
-    } catch (error) {
-      await runner.rollbackTransaction();
-      throw error;
-    } finally {
-      await runner.release();
-    }
-  }
-
-  async transferPurchaseRequests(
-    companyId: string,
-    input: PrTransferInput,
-    operator: string,
-  ): Promise<void> {
-    if (!input.lines.length) throw new BadRequestException('이송 라인이 비어 있습니다.');
-    if (input.sourceWarehouseId === input.targetWarehouseId) {
-      throw new BadRequestException('출발창고와 도착창고는 달라야 합니다.');
-    }
-    const keys = new Set<string>();
-    for (const line of input.lines) {
-      const key = `${line.prId}:${line.prItemNo}`;
-      if (keys.has(key)) throw new BadRequestException(`중복된 PR 이송 라인입니다: ${key}`);
-      keys.add(key);
-    }
-    const runner = this.dataSource.createQueryRunner();
-    await runner.connect();
-    await runner.startTransaction('READ COMMITTED');
-    try {
-      const warehouses = await runner.manager.getRepository(Warehouse).find({
-        where: [
-          { companyId, id: input.sourceWarehouseId, deleteYn: 'N' },
-          { companyId, id: input.targetWarehouseId, deleteYn: 'N' },
-        ],
-      });
-      if (warehouses.length !== 2) throw new BadRequestException('유효한 이송 창고가 아닙니다.');
-      const sourceWarehouse = warehouses.find((warehouse) => warehouse.id === input.sourceWarehouseId);
-      const targetWarehouse = warehouses.find((warehouse) => warehouse.id === input.targetWarehouseId);
-      if (!sourceWarehouse || !targetWarehouse || sourceWarehouse.plantId !== null || targetWarehouse.plantId === null) {
-        throw new BadRequestException('PR 연계 이송은 공통 중앙창고에서 사업장 요청창고로만 처리할 수 있습니다.');
-      }
-      const requests = await runner.manager.getRepository(PurchaseRequest).find({
-        where: [...new Set(input.lines.map((line) => line.prId))]
-          .map((id) => ({ companyId, id, deleteYn: 'N' })),
-      });
-      if (requests.length !== new Set(input.lines.map((line) => line.prId)).size) {
-        throw new NotFoundException('일부 구매요청을 찾을 수 없습니다.');
-      }
-      const requestById = new Map(requests.map((request) => [request.id, request]));
-      const items = await runner.manager.getRepository(PurchaseRequestItem)
-        .createQueryBuilder('item')
-        .setLock('pessimistic_write')
-        .where('item.companyId = :companyId', { companyId })
-        .andWhere('item.requestId IN (:...requestIds)', {
-          requestIds: [...requestById.keys()],
-        })
-        .getMany();
-      const itemByKey = new Map(items.map((item) => [`${item.requestId}:${item.itemNo}`, item]));
-      const existingMoves = await runner.manager.getRepository(Allocation).find({
-        where: {
-          companyId,
-          allocationType: 'MOVE',
-          prId: In([...requestById.keys()]),
-        },
-      });
-      const movedByKey = new Map<string, Decimal>();
-      for (const allocation of existingMoves) {
-        const key = `${allocation.prId}:${allocation.prItemNo}`;
-        movedByKey.set(key, (movedByKey.get(key) ?? new Decimal(0)).add(allocation.allocationQty));
-      }
-      const docNo = await this.sequenceService.generateNextNo(companyId, AppModule.STK, null);
-      const txItems: TxItem[] = [];
-      const moveAllocations: Partial<Allocation>[] = [];
-      for (const line of input.lines) {
-        const request = requestById.get(line.prId);
-        const item = itemByKey.get(`${line.prId}:${line.prItemNo}`);
-        if (!request || !item) throw new NotFoundException(`PR item을 찾을 수 없습니다: ${line.prId}:${line.prItemNo}`);
-        if (request.warehouseId !== input.targetWarehouseId) {
-          throw new BadRequestException('PR 요청창고와 이송 도착창고가 일치하지 않습니다.');
-        }
-        const qty = new Decimal(line.qty);
-        const moved = movedByKey.get(`${line.prId}:${line.prItemNo}`) ?? new Decimal(0);
-        const consumed = Decimal.max(new Decimal(item.receivedQty), moved);
-        const available = new Decimal(item.qty).sub(consumed);
-        if (qty.gt(available)) throw new BadRequestException(`PR item ${line.prId}:${line.prItemNo}의 이송 가능수량을 초과했습니다.`);
-        moveAllocations.push({
-          companyId,
-          allocationType: 'MOVE',
-          docId: docNo,
-          docItemNo: input.lines.indexOf(line) * 2 + 2,
-          prId: line.prId,
-          prItemNo: line.prItemNo,
-          inventoryId: item.inventoryId,
-          allocationQty: qty.toFixed(4),
-        });
-        txItems.push({
-          txTypeCode: TxType.MOVE,
-          txReasonCode: TxReason.PLANT_TRANSFER,
-          warehouseId: input.sourceWarehouseId,
-          targetWarehouseId: input.targetWarehouseId,
-          inventoryId: item.inventoryId,
-          qty: qty.toString(),
-          txDate: input.txDate ? new Date(input.txDate) : new Date(),
-          docNo,
-          refNo: line.prId,
-          refModule: AppModule.PUR,
-          refLineNo: String(line.prItemNo),
-        });
-        item.receivedQty = new Decimal(item.receivedQty).add(qty).toFixed(4);
-        movedByKey.set(`${line.prId}:${line.prItemNo}`, moved.add(qty));
-      }
-      await this.inventoryTxService.processTransactions(
-        { items: txItems },
-        { runner, companyId, userId: operator },
-      );
-      await runner.manager.getRepository(Allocation).save(moveAllocations);
-      await runner.manager.getRepository(PurchaseRequestItem).save(items);
-      for (const request of requestById.values()) {
-        const requestItems = items.filter((item) => item.requestId === request.id);
-        const complete = requestItems.length > 0 && requestItems.every((item) =>
-          new Decimal(item.receivedQty).gte(item.qty),
-        );
-        request.procStatus = complete ? ProcStatus.RECEIVED : ProcStatus.PARTIAL_RECEIVED;
-        request.updatedBy = operator;
-      }
-      await runner.manager.getRepository(PurchaseRequest).save([...requestById.values()]);
-      await runner.commitTransaction();
-    } catch (error) {
-      await runner.rollbackTransaction();
-      throw error;
-    } finally {
-      await runner.release();
-    }
-  }
-
-  async startShipping(
-    companyId: string, req: ShipRequest, operator: string,
-  ): Promise<PurchaseRequestResponse> {
-    const entity = await this.mustGetConfirmed(companyId, await this.resolveRequestId(companyId, req.requestId));
-    entity.shipStartDate = dateOnly(req.shipStartDate) || today();
-    entity.procStatus = ProcStatus.SHIPPING;
-    entity.updatedBy = operator;
-    const saved = await this.dataSource.getRepository(PurchaseRequest).save(entity);
-    const order = await this.dataSource.getRepository(PurchaseOrder).findOne({
-      where: { companyId, purchaseRequestId: entity.id, deleteYn: 'N' },
-    });
-    if (order) {
-      order.shipStartDate = entity.shipStartDate;
-      order.procStatus = ProcStatus.SHIPPING;
-      order.updatedBy = operator;
-      await this.dataSource.getRepository(PurchaseOrder).save(order);
-    }
-    return this.toResponse(saved);
-  }
-
   async close(
     companyId: string, requestId: string, operator: string,
   ): Promise<PurchaseRequestResponse> {
     const entity = await this.mustGetConfirmed(companyId, await this.resolveRequestId(companyId, requestId));
-    if (entity.procStatus === ProcStatus.CLOSED) {
-      throw new BadRequestException('이미 종료된 요청입니다.');
-    }
-    entity.procStatus = ProcStatus.CLOSED;
-    entity.updatedBy = operator;
-    const saved = await this.dataSource.getRepository(PurchaseRequest).save(entity);
     const order = await this.dataSource.getRepository(PurchaseOrder).findOne({
       where: { companyId, purchaseRequestId: entity.id, deleteYn: 'N' },
     });
-    if (order) {
-      order.procStatus = ProcStatus.CLOSED;
-      order.closedAt = new Date();
-      order.updatedBy = operator;
-      await this.dataSource.getRepository(PurchaseOrder).save(order);
+    if (!order) throw new NotFoundException('구매오더를 찾을 수 없습니다.');
+    if (![DocStatus.CONFIRMED, DocStatus.SELF_CONFIRMED].includes(order.status as DocStatus)) {
+      throw new BadRequestException('확정된 POR만 종료할 수 있습니다.');
     }
-    return this.toResponse(saved);
-  }
-
-  async receive(
-    companyId: string, req: ReceiveRequest, operator: string,
-  ): Promise<PurchaseRequestResponse> {
-    if (!req.lines?.length) throw new BadRequestException('입고 라인이 비어 있습니다.');
-    if (!req.warehouseId) throw new BadRequestException('입고 창고를 선택하세요.');
-    const requestId = await this.resolveRequestId(companyId, req.requestId);
-    const user = await this.dataSource.getRepository(User).findOne({
-      where: { companyId, id: operator, deleteYn: 'N' },
-    });
-    const docNo = await this.sequenceService.generateNextNo(
-      companyId, AppModule.STK, user?.departmentId ?? null,
-    );
-    const txDate = dateOnly(req.txDate) || today();
-    const runner = this.dataSource.createQueryRunner();
-    await runner.connect();
-    await runner.startTransaction('READ COMMITTED');
-    try {
-      const request = await runner.manager.getRepository(PurchaseRequest)
-        .createQueryBuilder('request')
-        .setLock('pessimistic_write')
-        .where('request.companyId = :companyId', { companyId })
-        .andWhere('request.id = :requestId', { requestId })
-        .andWhere('request.deleteYn = :deleteYn', { deleteYn: 'N' })
-        .getOne();
-      if (!request) throw new NotFoundException('구매요청을 찾을 수 없습니다.');
-      if (![DocStatus.SELF_CONFIRMED, DocStatus.CONFIRMED].includes(request.status as DocStatus)) {
-        throw new BadRequestException('결재완료(C) 또는 직접확정(S) 상태가 아닙니다.');
-      }
-      if (![ProcStatus.ORDERED, ProcStatus.SHIPPING, ProcStatus.PARTIAL_RECEIVED]
-        .includes(request.procStatus as ProcStatus)) {
-        throw new BadRequestException(
-          `입고는 발주·배송중·부분입고 상태에서만 가능합니다. 현재: ${request.procStatus ?? 'null'}`,
-        );
-      }
-      const warehouse = await runner.manager.getRepository(Warehouse).findOne({
-        where: { companyId, id: req.warehouseId, deleteYn: 'N' },
-      });
-      if (!warehouse) throw new BadRequestException('유효한 입고 창고를 찾을 수 없습니다.');
-      const directRequestReceipt = req.warehouseId === request.warehouseId;
-      const itemRepository = runner.manager.getRepository(PurchaseRequestItem);
-      const items = await itemRepository.createQueryBuilder('item')
-        .setLock('pessimistic_write')
-        .where('item.companyId = :companyId', { companyId })
-        .andWhere('item.requestId = :requestId', { requestId: request.id })
-        .orderBy('item.itemNo', 'ASC')
-        .getMany();
-      const order = await runner.manager.getRepository(PurchaseOrder).findOne({
-        where: { companyId, purchaseRequestId: request.id, deleteYn: 'N' },
-      });
-      const orderItems = order
-        ? await runner.manager.getRepository(PurchaseOrderItem)
-          .createQueryBuilder('item')
-          .setLock('pessimistic_write')
-          .where('item.companyId = :companyId', { companyId })
-          .andWhere('item.orderId = :orderId', { orderId: order.id })
-        .orderBy('item.itemNo', 'ASC')
-          .getMany()
-        : [];
-      const changed = new Map<number, string>();
-      const txItems = req.lines.map((line) => {
-        const orderItem = orderItems.find((candidate) => candidate.itemNo === line.itemNo);
-        const item = items.find((candidate) =>
-          candidate.itemNo === (orderItem?.purchaseRequestItemNo ?? line.itemNo));
-        if (!item) throw new BadRequestException(`PR item ${line.itemNo}을 찾을 수 없습니다.`);
-        const input = new Decimal(line.qty);
-        if (!input.isFinite() || input.lte(0)) {
-          throw new BadRequestException(`item ${line.itemNo}의 입고수량은 0보다 커야 합니다.`);
-        }
-        const received = new Decimal(orderItem?.receivedQty ?? (directRequestReceipt ? item.receivedQty : '0'));
-        const ordered = new Decimal(orderItem?.orderedQty ?? item.qty);
-        const next = received.add(input);
-        if (next.gt(ordered)) {
-          throw new BadRequestException(
-            `입고 수량을 초과합니다. item ${line.itemNo}: 요청=${ordered.toFixed(4)}, `
-            + `기입고=${received.toFixed(4)}, 입고=${input.toFixed(4)}, `
-            + `잔여=${ordered.sub(received).toFixed(4)}`,
-          );
-        }
-        changed.set(item.itemNo, next.toFixed(4));
-        return {
-          txTypeCode: TxType.IN,
-          txReasonCode: TxReason.PURCHASE,
-          warehouseId: req.warehouseId,
-          inventoryId: orderItem?.inventoryId ?? item.inventoryId,
-          qty: input.toString(),
-          unitPrice: new Decimal(line.unitPrice ?? 0).toString(),
-          txDate: new Date(txDate),
-          docNo,
-          refNo: request.id,
-          refModule: AppModule.PUR,
-          refLineNo: String(item.itemNo),
-        };
-      });
-      await this.inventoryTxService.processTransactions(
-        { items: txItems },
-        { runner, companyId, userId: operator },
-      );
-      if (directRequestReceipt) {
-        await itemRepository.save(items
-          .filter((item) => changed.has(item.itemNo))
-          .map((item) => {
-            item.receivedQty = changed.get(item.itemNo)!;
-            return item;
-          }));
-        const allReceived = items.every((item) =>
-          new Decimal(changed.get(item.itemNo) ?? item.receivedQty).gte(item.qty));
-        request.procStatus = req.close
-          ? ProcStatus.CLOSED
-          : allReceived ? ProcStatus.RECEIVED : ProcStatus.PARTIAL_RECEIVED;
-        request.updatedBy = operator;
-      }
-      const saved = directRequestReceipt
-        ? await runner.manager.getRepository(PurchaseRequest).save(request)
-        : request;
-      if (order) {
-        for (const orderItem of orderItems) {
-          const received = orderItem.purchaseRequestItemNo == null
-            ? undefined
-            : changed.get(orderItem.purchaseRequestItemNo);
-          if (received !== undefined) orderItem.receivedQty = received;
-        }
-        await runner.manager.getRepository(PurchaseOrderItem).save(orderItems);
-        const orderComplete = orderItems.length > 0 && orderItems.every((item) =>
-          new Decimal(item.receivedQty).gte(item.orderedQty));
-        order.procStatus = orderComplete ? ProcStatus.RECEIVED : ProcStatus.PARTIAL_RECEIVED;
-        if (directRequestReceipt && request.procStatus === ProcStatus.CLOSED) order.closedAt = new Date();
-        order.updatedBy = operator;
-        await runner.manager.getRepository(PurchaseOrder).save(order);
-      }
-      await runner.commitTransaction();
-      return this.toResponse(saved);
-    } catch (error) {
-      await runner.rollbackTransaction();
-      throw error;
-    } finally {
-      await runner.release();
-    }
-  }
-
-  async receiveOrder(
-    companyId: string,
-    orderId: string,
-    input: OrderReceiveInput,
-    operator: string,
-  ): Promise<void> {
-    if (!input.lines.length) throw new BadRequestException('입고 라인이 비어 있습니다.');
-    const runner = this.dataSource.createQueryRunner();
-    await runner.connect();
-    await runner.startTransaction('READ COMMITTED');
-    try {
-      const order = await runner.manager.getRepository(PurchaseOrder)
-        .createQueryBuilder('order')
-        .setLock('pessimistic_write')
-        .where('order.companyId = :companyId', { companyId })
-        .andWhere('order.id = :orderId', { orderId })
-        .andWhere('order.deleteYn = :deleteYn', { deleteYn: 'N' })
-        .getOne();
-      if (!order) throw new NotFoundException('구매오더를 찾을 수 없습니다.');
-      const warehouse = await runner.manager.getRepository(Warehouse).findOne({
-        where: { companyId, id: input.warehouseId, deleteYn: 'N' },
-      });
-      if (!warehouse) throw new BadRequestException('유효한 입고 창고를 찾을 수 없습니다.');
-      const orderItems = await runner.manager.getRepository(PurchaseOrderItem)
-        .createQueryBuilder('item')
-        .setLock('pessimistic_write')
-        .where('item.companyId = :companyId', { companyId })
-        .andWhere('item.orderId = :orderId', { orderId })
-        .orderBy('item.itemNo', 'ASC')
-        .getMany();
-      const itemByNo = new Map(orderItems.map((item) => [item.itemNo, item]));
-      const allocations = await runner.manager.getRepository(Allocation).find({
-        where: { companyId, allocationType: 'PO', docId: orderId },
-      });
-      const requestIds = [...new Set(allocations.map((allocation) => allocation.prId))];
-      const requests = requestIds.length
-        ? await runner.manager.getRepository(PurchaseRequest).find({
-          where: requestIds.map((id) => ({ companyId, id, deleteYn: 'N' })),
-        })
-        : [];
-      const requestById = new Map(requests.map((request) => [request.id, request]));
-      const requestItems = requestIds.length
-        ? await runner.manager.getRepository(PurchaseRequestItem).find({
-          where: requestIds.map((requestId) => ({ companyId, requestId })),
-        })
-        : [];
-      const requestItemByKey = new Map(requestItems.map((item) => [`${item.requestId}:${item.itemNo}`, item]));
-      const duplicateLines = new Set<number>();
-      const txItems: TxItem[] = [];
-      const directCredit = new Map<string, Decimal>();
-      for (const line of input.lines) {
-        if (duplicateLines.has(line.itemNo)) throw new BadRequestException(`중복된 PO item입니다: ${line.itemNo}`);
-        duplicateLines.add(line.itemNo);
-        const orderItem = itemByNo.get(line.itemNo);
-        if (!orderItem) throw new NotFoundException(`PO item을 찾을 수 없습니다: ${line.itemNo}`);
-        const qty = new Decimal(line.qty);
-        const received = new Decimal(orderItem.receivedQty);
-        const remaining = new Decimal(orderItem.orderedQty).sub(received);
-        if (!qty.isFinite() || qty.lte(0) || qty.gt(remaining)) {
-          throw new BadRequestException(`PO item ${line.itemNo}의 잔여 입고수량을 초과했습니다.`);
-        }
-        const lineAllocations = allocations.filter((allocation) => allocation.docItemNo === line.itemNo);
-        const targetWarehouses = [...new Set(lineAllocations.map((allocation) =>
-          requestById.get(allocation.prId)?.warehouseId).filter((id): id is string => Boolean(id)))];
-        const isCentralReceipt = warehouse.plantId === null;
-        if (!isCentralReceipt && (targetWarehouses.length !== 1 || targetWarehouses[0] !== input.warehouseId)) {
-          throw new BadRequestException('통합 PO의 요청창고 직접입고는 같은 요청창고 라인만 처리할 수 있습니다.');
-        }
-        txItems.push({
-          txTypeCode: TxType.IN,
-          txReasonCode: TxReason.PURCHASE,
-          warehouseId: input.warehouseId,
-          inventoryId: orderItem.inventoryId,
-          qty: qty.toString(),
-          unitPrice: new Decimal(line.unitPrice).toString(),
-          txDate: input.txDate ? new Date(input.txDate) : new Date(),
-          refNo: order.id,
-          refModule: AppModule.POR,
-          refLineNo: String(line.itemNo),
-        });
-        orderItem.receivedQty = received.add(qty).toFixed(4);
-        if (!isCentralReceipt) {
-          let remainingToCredit = qty;
-          for (const allocation of lineAllocations) {
-            const requestItem = requestItemByKey.get(`${allocation.prId}:${allocation.prItemNo}`);
-            if (!requestItem) continue;
-            const creditable = Decimal.max(new Decimal(requestItem.qty).sub(requestItem.receivedQty), 0);
-            const credited = Decimal.min(creditable, remainingToCredit, allocation.allocationQty);
-            if (credited.gt(0)) {
-              requestItem.receivedQty = new Decimal(requestItem.receivedQty).add(credited).toFixed(4);
-              directCredit.set(allocation.prId, (directCredit.get(allocation.prId) ?? new Decimal(0)).add(credited));
-              remainingToCredit = remainingToCredit.sub(credited);
-            }
-            if (remainingToCredit.lte(0)) break;
-          }
-          if (remainingToCredit.gt(0)) throw new BadRequestException(`PO item ${line.itemNo}의 PR 배부수량을 확인할 수 없습니다.`);
-        }
-      }
-      await this.inventoryTxService.processTransactions(
-        { items: txItems },
-        { runner, companyId, userId: operator },
-      );
-      await runner.manager.getRepository(PurchaseOrderItem).save(orderItems);
-      if (directCredit.size) {
-        await runner.manager.getRepository(PurchaseRequestItem).save(requestItems);
-        for (const requestId of directCredit.keys()) {
-          const request = requestById.get(requestId);
-          const related = requestItems.filter((item) => item.requestId === requestId);
-          if (request && related.every((item) => new Decimal(item.receivedQty).gte(item.qty))) {
-            request.procStatus = ProcStatus.RECEIVED;
-            request.updatedBy = operator;
-          } else if (request) {
-            request.procStatus = ProcStatus.PARTIAL_RECEIVED;
-            request.updatedBy = operator;
-          }
-        }
-        await runner.manager.getRepository(PurchaseRequest).save([...requestById.values()]);
-      }
-      order.procStatus = orderItems.every((item) => new Decimal(item.receivedQty).gte(item.orderedQty))
-        ? ProcStatus.RECEIVED : ProcStatus.PARTIAL_RECEIVED;
-      order.updatedBy = operator;
-      await runner.manager.getRepository(PurchaseOrder).save(order);
-      await runner.commitTransaction();
-    } catch (error) {
-      await runner.rollbackTransaction();
-      throw error;
-    } finally {
-      await runner.release();
-    }
-  }
-
-  async cancelSlip(
-    companyId: string, docNo: string, _operator: string,
-  ): Promise<void> {
-    const historyRepository = this.dataSource.getRepository(InventoryHistory);
-    const histories = await historyRepository.find({
-      where: { companyId, docNo },
-      order: { historyNo: 'ASC' },
-    });
-    if (!histories.length) {
-      throw new BadRequestException(`전표를 찾을 수 없습니다: ${docNo}`);
-    }
-    const firstType = histories[0].txTypeCode;
-    if (firstType !== TxType.IN && firstType !== TxType.OUT) {
-      throw new BadRequestException(`IN/OUT 전표만 취소 가능합니다 (현재: ${firstType}).`);
-    }
-    let requestId: string | null = null;
-    for (const history of histories) {
-      if (history.txTypeCode !== firstType) {
-        throw new BadRequestException('동일 전표 내 거래 타입이 일관되지 않습니다.');
-      }
-      if (!requestId && history.refModule === AppModule.PUR) requestId = history.refNo;
-      const subsequent = await historyRepository.exists({
-        where: {
-          companyId,
-          warehouseId: history.warehouseId,
-          inventoryId: history.inventoryId,
-          historyNo: MoreThan(history.historyNo),
-        },
-      });
-      if (subsequent) {
-        throw new BadRequestException(
-          `후속 거래가 있어 취소할 수 없습니다 (품목 ${history.inventoryId}).`,
-        );
-      }
-    }
-    const reverseType = firstType === TxType.IN ? TxType.OUT : TxType.IN;
-    await this.inventoryTxService.processTransactions({
-      items: histories.map((history) => ({
-        warehouseId: history.warehouseId,
-        inventoryId: history.inventoryId,
-        txTypeCode: reverseType,
-        txReasonCode: TxReason.GENERAL,
-        qty: new Decimal(history.qty).abs().toString(),
-        ...(firstType === TxType.OUT
-          ? { unitPrice: new Decimal(history.unitPrice).toString() } : {}),
-        txDate: new Date(),
-        refNo: docNo,
-        refModule: AppModule.STK,
-        refLineNo: history.refLineNo ?? undefined,
-      })),
-    });
-    if (firstType === TxType.IN && requestId) {
-      const items = await this.procurementRepository.findItems(companyId, requestId);
-      for (const history of histories) {
-        const item = items.find(
-          (candidate) => String(candidate.itemNo) === history.refLineNo,
-        );
-        if (!item) continue;
-        item.receivedQty = Decimal.max(
-          new Decimal(item.receivedQty).sub(history.qty), 0,
-        ).toFixed(4);
-      }
-      await this.dataSource.getRepository(PurchaseRequestItem).save(items);
-      const order = await this.dataSource.getRepository(PurchaseOrder).findOne({
-        where: { companyId, purchaseRequestId: requestId, deleteYn: 'N' },
-      });
-      if (order) {
-        const orderItems = await this.dataSource.getRepository(PurchaseOrderItem).find({
-          where: { companyId, orderId: order.id },
-        });
-        for (const orderItem of orderItems) {
-          const requestItem = items.find((item) => item.itemNo === orderItem.purchaseRequestItemNo);
-          if (requestItem) orderItem.receivedQty = requestItem.receivedQty;
-        }
-        await this.dataSource.getRepository(PurchaseOrderItem).save(orderItems);
-        const allReceived = orderItems.length > 0 && orderItems.every((item) =>
-          new Decimal(item.receivedQty).gte(item.orderedQty));
-        order.procStatus = allReceived ? ProcStatus.RECEIVED : ProcStatus.PARTIAL_RECEIVED;
-        order.updatedBy = _operator;
-        await this.dataSource.getRepository(PurchaseOrder).save(order);
-      }
-    }
+    if (order.closedAt) throw new BadRequestException('이미 종료된 POR입니다.');
+    order.closedAt = new Date();
+    order.updatedBy = operator;
+    await this.dataSource.getRepository(PurchaseOrder).save(order);
+    return this.toResponse(entity);
   }
 
   async deleteRequest(
@@ -1567,8 +1091,8 @@ export class ProcurementService {
     companyId: string, requestId: string,
   ): Promise<PurchaseRequest> {
     const entity = await this.mustGetActive(companyId, requestId);
-    if (![DocStatus.SELF_CONFIRMED, DocStatus.CONFIRMED].includes(entity.status as DocStatus)) {
-      throw new BadRequestException('결재완료(C) 또는 직접확정(S) 상태가 아닙니다.');
+    if (entity.status !== DocStatus.CONFIRMED) {
+      throw new BadRequestException('결재완료(C) 상태가 아닙니다.');
     }
     return entity;
   }
@@ -1607,10 +1131,37 @@ export class ProcurementService {
       purchaseManagerContact: entity.purchaseManagerContact,
       purchaseManagerRemarks: entity.purchaseManagerRemarks,
       status: entity.status,
-      procStatus: entity.procStatus,
       remarks: entity.remarks,
       createdAt: entity.createdAt.toISOString(),
       createdBy: entity.createdBy,
+    };
+  }
+
+  private toStandaloneOrderResponse(order: PurchaseOrder): PurchaseRequestResponse {
+    return {
+      companyId: order.companyId,
+      id: order.id,
+      plantId: order.plantId,
+      warehouseId: order.warehouseId ?? '',
+      requesterId: order.requesterId,
+      departmentId: order.departmentId,
+      requestDate: order.orderDate,
+      requestType: null,
+      fileGroupId: null,
+      title: '독립 구매오더',
+      approvalId: null,
+      orderDate: order.orderDate,
+      etaDate: order.etaDate,
+      shipStartDate: null,
+      purchaseManager: null,
+      purchaseManagerContact: null,
+      purchaseManagerRemarks: null,
+      status: order.status,
+      remarks: null,
+      createdAt: order.createdAt.toISOString(),
+      createdBy: order.createdBy,
+      purchaseOrderId: order.id,
+      closedAt: order.closedAt?.toISOString() ?? null,
     };
   }
 

@@ -6,7 +6,7 @@ export class Allocation {
   companyId!: string;
 
   @PrimaryColumn({ name: 'allocation_type', length: 20 })
-  allocationType!: 'PO' | 'MOVE';
+  allocationType!: 'PO';
 
   @PrimaryColumn({ name: 'doc_id', length: 50 })
   docId!: string;

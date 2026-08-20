@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
 import { formatDateTime } from '../utils/datetime';
@@ -36,19 +36,20 @@ export default function SystemAdmin() {
   const [histUserId, setHistUserId] = useState('');
   const [history, setHistory] = useState<LoginHistory[]>([]);
 
-  const fetchCompanies = async () => {
+  const loadCompanies = useCallback(async () => {
     try {
       setCompanies(await systemAdminApi.getCompanies());
     } catch {
       toast.error('회사 목록을 불러오지 못했습니다.');
     }
-  };
+  }, []);
 
   useEffect(() => {
-    void systemAdminApi.getCompanies()
-      .then((loadedCompanies) => setCompanies(loadedCompanies))
-      .catch(() => toast.error('회사 목록을 불러오지 못했습니다.'));
-  }, []);
+    const run = async () => {
+      await loadCompanies();
+    };
+    void run();
+  }, [loadCompanies]);
 
   const createCompany = async () => {
     if (!coId.trim() || !coName.trim()) {
@@ -77,7 +78,7 @@ export default function SystemAdmin() {
       toast.success(`회사 '${coId.trim().toUpperCase()}' + 관리자 '${coAdminId.trim()}'(ADMIN) 생성 완료. 첫 로그인 시 비밀번호 변경이 필요합니다.`);
       setCoId(''); setCoName(''); setCoBizNo(''); setCoEmail('');
       setCoAdminId(''); setCoAdminName(''); setCoAdminPw('');
-      fetchCompanies();
+      await loadCompanies();
     } catch (err: unknown) {
       toastApiError(err, '회사 생성 실패');
     } finally {
@@ -85,27 +86,40 @@ export default function SystemAdmin() {
     }
   };
 
-  const fetchUsers = async () => {
+  const loadUsers = useCallback(async () => {
     try {
       setUsers(await systemAdminApi.getUsers(userCompanyId || undefined));
     } catch {
       toast.error('사용자 목록을 불러오지 못했습니다.');
     }
-  };
+  }, [userCompanyId]);
 
-  const fetchHistory = async () => {
+  const loadHistory = useCallback(async (companyId?: string, userId?: string) => {
     try {
       setHistory(await systemAdminApi.getLoginHistory({
-        companyId: histCompanyId || undefined,
-        userId: histUserId || undefined,
+        companyId: companyId || undefined,
+        userId: userId || undefined,
       }));
     } catch {
       toast.error('로그인 이력을 불러오지 못했습니다.');
     }
-  };
+  }, []);
 
-  useEffect(() => { if (tab === 'users') fetchUsers(); }, [tab, userCompanyId]); // eslint-disable-line
-  useEffect(() => { if (tab === 'history') fetchHistory(); }, [tab]); // eslint-disable-line
+  useEffect(() => {
+    if (tab !== 'users') return;
+    const run = async () => {
+      await loadUsers();
+    };
+    void run();
+  }, [loadUsers, tab]);
+
+  useEffect(() => {
+    if (tab !== 'history') return;
+    const run = async () => {
+      await loadHistory();
+    };
+    void run();
+  }, [loadHistory, tab]);
 
   const toggleUseYn = async (u: SystemUser) => {
     const next = u.useYn === 'Y' ? 'N' : 'Y';
@@ -113,7 +127,7 @@ export default function SystemAdmin() {
     try {
       await systemAdminApi.updateUserUseYn(u.companyId, u.id, next);
       toast.success('사용여부를 변경했습니다.');
-      fetchUsers();
+      await loadUsers();
     } catch (err: unknown) {
       toastApiError(err, '변경 실패');
     }
@@ -250,7 +264,7 @@ export default function SystemAdmin() {
             </select>
             <input value={histUserId} onChange={e => setHistUserId(e.target.value)} placeholder="아이디(선택)"
               className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200" />
-            <button onClick={fetchHistory} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 text-white">조회</button>
+            <button onClick={() => void loadHistory(histCompanyId, histUserId)} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 text-white">조회</button>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-slate-300">

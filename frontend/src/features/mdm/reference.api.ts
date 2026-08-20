@@ -6,7 +6,7 @@ const getCodeOptionsByGroup = async (groupId: string): Promise<CodeItem[]> => {
   return response.data;
 };
 
-export const referenceApi = {
+export const mdmLookupApi = {
   async getPlantOptions(plantId?: string | null): Promise<Plant[]> {
     const response = await axiosInstance.get<Plant[]>('/mdm/plants', {
       params: { plantId: plantId || undefined },
@@ -14,7 +14,9 @@ export const referenceApi = {
     return response.data;
   },
   async getDepartmentOptions(): Promise<Department[]> {
-    const response = await axiosInstance.get<Department[]>('/mdm/departments');
+    const response = await axiosInstance.get<Department[]>('/mdm/lookups/departments', {
+      params: { limit: 30 },
+    });
     return response.data;
   },
   async getWarehouseOptions(plantId?: string | null): Promise<Warehouse[]> {
@@ -24,7 +26,9 @@ export const referenceApi = {
     return response.data;
   },
   async getUserOptions(): Promise<ReferenceUser[]> {
-    const response = await axiosInstance.get<ReferenceUser[]>('/mdm/users');
+    const response = await axiosInstance.get<ReferenceUser[]>('/mdm/lookups/users', {
+      params: { limit: 30 },
+    });
     return response.data;
   },
   async getProcurementTypeOptions(): Promise<CodeItem[]> {

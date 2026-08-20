@@ -5,6 +5,26 @@ import { User } from '../../entities/users.entity';
 import { LoginHistory } from '../../entities/login-history.entity';
 import { AuthRefreshSession } from '../../entities/auth-refresh-session.entity';
 
+export interface SystemUserResponse {
+  companyId: string;
+  id: string;
+  name: string;
+  useYn: string;
+  roleId: string;
+  email: string | null;
+  phone: string | null;
+  position: string | null;
+  title: string | null;
+}
+
+export interface LoginHistoryResponse {
+  companyId: string;
+  userId: string;
+  loginIp: string | null;
+  loginResult: string;
+  loginAt: Date;
+}
+
 @Injectable()
 export class SystemService {
   constructor(
@@ -16,7 +36,7 @@ export class SystemService {
     private readonly refreshSessionRepository: Repository<AuthRefreshSession>,
   ) {}
 
-  async getUsers(companyId?: string): Promise<any[]> {
+  async getUsers(companyId?: string): Promise<SystemUserResponse[]> {
     const cleanCompanyId = companyId?.trim().toUpperCase();
     return this.userRepository.find({
       select: {
@@ -35,7 +55,7 @@ export class SystemService {
     });
   }
 
-  async getLoginHistory(companyId?: string, userId?: string): Promise<any[]> {
+  async getLoginHistory(companyId?: string, userId?: string): Promise<LoginHistoryResponse[]> {
     const cleanCompanyId = companyId?.trim().toUpperCase();
     const cleanUserId = userId?.trim();
     return this.loginHistoryRepository.find({

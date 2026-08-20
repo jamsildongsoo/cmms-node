@@ -20,25 +20,13 @@ export const STATUS_LABELS: Record<string, string> = {
   T: '임시저장',
   P: '결재진행',
   C: '결재확정(완료)',
+  S: '자체확정',
   R: '반려',
   X: '취소',
 };
 
 export const getCommonStatusLabel = (s: string): string => {
   return STATUS_LABELS[s] || s;
-};
-
-// 구매 진행상태 (proc_status) — 구매요청 전용
-export const PROC_STATUS_LABELS: Record<string, string> = {
-  O: '발주',
-  D: '배송중',
-  P: '부분입고',
-  I: '입고완료',
-  E: '종료',
-};
-
-export const getProcStatusLabel = (p?: string | null): string => {
-  return p ? PROC_STATUS_LABELS[p] || p : '발주대기';
 };
 
 /** BE PmJudge/PmJudgeLabel의 FE 표시용 복제본. 업무 기준은 BE 상수이다. */
@@ -70,21 +58,21 @@ export const TX_REASON = {
   WORK_ORDER: 'WORK_ORDER',
   DISPOSAL: 'DISPOSAL',
   TRANSFER: 'TRANSFER',
-  PLANT_TRANSFER: 'PLANT_TRANSFER',
   STOCKTAKING: 'STOCKTAKING',
+  CANCEL: 'CANCEL',
 } as const;
 
 export type TxReason = (typeof TX_REASON)[keyof typeof TX_REASON];
 
 export const TX_REASON_LABELS: Record<TxReason, string> = {
   [TX_REASON.GENERAL]: '일반',
-  [TX_REASON.PURCHASE]: '구매요청',
+  [TX_REASON.PURCHASE]: '구매오더',
   [TX_REASON.RETURN]: '반품/회수',
   [TX_REASON.WORK_ORDER]: '작업지시',
   [TX_REASON.DISPOSAL]: '폐기',
   [TX_REASON.TRANSFER]: '창고이동',
-  [TX_REASON.PLANT_TRANSFER]: '플랜트이동',
   [TX_REASON.STOCKTAKING]: '재고실사',
+  [TX_REASON.CANCEL]: '취소',
 };
 
 export const TX_REASON_OPTIONS: ReadonlyArray<{ id: TxReason; name: string }> = [
@@ -94,15 +82,15 @@ export const TX_REASON_OPTIONS: ReadonlyArray<{ id: TxReason; name: string }> = 
   { id: TX_REASON.WORK_ORDER, name: TX_REASON_LABELS[TX_REASON.WORK_ORDER] },
   { id: TX_REASON.DISPOSAL, name: TX_REASON_LABELS[TX_REASON.DISPOSAL] },
   { id: TX_REASON.TRANSFER, name: TX_REASON_LABELS[TX_REASON.TRANSFER] },
-  { id: TX_REASON.PLANT_TRANSFER, name: TX_REASON_LABELS[TX_REASON.PLANT_TRANSFER] },
   { id: TX_REASON.STOCKTAKING, name: TX_REASON_LABELS[TX_REASON.STOCKTAKING] },
+  { id: TX_REASON.CANCEL, name: TX_REASON_LABELS[TX_REASON.CANCEL] },
 ] as const;
 
 export const TX_REASON_BY_TYPE: Record<string, readonly TxReason[]> = {
-  IN: [TX_REASON.GENERAL, TX_REASON.PURCHASE, TX_REASON.RETURN, TX_REASON.PLANT_TRANSFER],
-  OUT: [TX_REASON.GENERAL, TX_REASON.WORK_ORDER, TX_REASON.DISPOSAL, TX_REASON.PLANT_TRANSFER],
-  MOVE: [TX_REASON.TRANSFER],
-  ADJ: [TX_REASON.STOCKTAKING],
+  IN: [TX_REASON.GENERAL, TX_REASON.PURCHASE, TX_REASON.RETURN, TX_REASON.CANCEL],
+  OUT: [TX_REASON.GENERAL, TX_REASON.WORK_ORDER, TX_REASON.DISPOSAL, TX_REASON.CANCEL],
+  MOVE: [TX_REASON.TRANSFER, TX_REASON.CANCEL],
+  ADJ: [TX_REASON.STOCKTAKING, TX_REASON.CANCEL],
 };
 
 export const getTxReasonLabel = (reason?: string | null): string =>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Edit2, Plus, Trash2 } from 'lucide-react';
 import ListBadge from '../../../components/ListBadge';
 import ListIconButton from '../../../components/ListIconButton';
@@ -7,6 +7,7 @@ import { requestConfirmation } from '../../../utils/userActionDialog';
 import { departmentApi, plantApi, roleApi, userApi } from '../mdm.api';
 import type { Department, MdmUser, Plant, Role, YesNo } from '../mdm.types';
 import type { MdmManagerProps } from '../mdm.utils';
+import BoundedSelect from '../../../components/BoundedSelect';
 
 export default function UserManager({
   notify,
@@ -34,7 +35,7 @@ export default function UserManager({
   const [homePlantId, setHomePlantId] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const fetchData = async () => {
+  const loadList = useCallback(async () => {
     try {
       const [loadedUsers, loadedDepts, loadedRoles, loadedPlants] = await Promise.all([
         userApi.getAll(),
@@ -49,33 +50,19 @@ export default function UserManager({
     } catch (err) {
       notify('error', getApiErrorMessage(err, '데이터를 조회하는 도중 오류가 발생했습니다.'));
     }
-  };
+  }, [notify]);
 
   useEffect(() => {
-    let active = true;
-    void Promise.all([
-      userApi.getAll(),
-      departmentApi.getAll(),
-      roleApi.getAll(),
-      plantApi.getAll(),
-    ])
-      .then(([loadedUsers, loadedDepts, loadedRoles, loadedPlants]) => {
-        if (!active) return;
-        setUsers(loadedUsers);
-        setDepts(loadedDepts);
-        setRoles(loadedRoles);
-        setPlants(loadedPlants);
-      })
-      .catch((err) => {
-        if (active) notify('error', getApiErrorMessage(err, '데이터를 조회하는 도중 오류가 발생했습니다.'));
-      });
-    return () => { active = false; };
-  }, [notify]);
+    const run = async () => {
+      await loadList();
+    };
+    void run();
+  }, [loadList]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!id || !name) return;
-    if (!homePlantId) {
+    if (scope === 'PLANT' && !homePlantId) {
       notify('error', '지정 플랜트를 선택해주세요.');
       return;
     }
@@ -105,7 +92,7 @@ export default function UserManager({
         );
       }
       resetForm();
-      fetchData();
+      await loadList();
     } catch (err) {
       notify('error', getApiErrorMessage(err, '저장에 실패했습니다.'));
     }
@@ -116,7 +103,7 @@ export default function UserManager({
     try {
       await userApi.delete(userId);
       notify('success', '사용자가 시스템에서 삭제되었습니다.');
-      fetchData();
+      await loadList();
     } catch (err) {
       notify('error', getApiErrorMessage(err, '삭제 실패.'));
     }
@@ -163,44 +150,15 @@ export default function UserManager({
           </div>
           <div>
             <label className="block text-slate-400 text-xs mb-1.5">부서</label>
-            <select
-              value={departmentId}
-              onChange={(e) => {
-                const nextDepartmentId = e.target.value;
-                setDepartmentId(nextDepartmentId);
-                if (!editingId) {
-                  const department = depts.find((item) => item.id === nextDepartmentId);
-                  setRoleId(department?.roleId || '');
-                  setScope(department?.scope || 'PLANT');
-                }
-              }}
-              className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 text-xs outline-none transition-colors"
-            >
-              <option value="">없음</option>
-              {depts.map(d => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
+            <BoundedSelect value={departmentId} onChange={setDepartmentId} options={[{ value: '', label: '없음' }, ...depts.map((d) => ({ value: d.id, label: `${d.name} (${d.id})` }))]} />
           </div>
           <div>
             <label className="block text-slate-400 text-xs mb-1.5">권한 등급</label>
-            <select
-              disabled={editingId === currentUserId}
-              value={roleId}
-              onChange={(e) => setRoleId(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 text-xs outline-none transition-colors disabled:opacity-50"
-            >
-              <option value="">권한 선택</option>
-              {roles.map(r => (
-                <option key={r.id} value={r.id}>{r.roleName}</option>
-              ))}
-            </select>
+            <BoundedSelect disabled={editingId === currentUserId} value={roleId} onChange={setRoleId} options={[{ value: '', label: '권한 선택' }, ...roles.map((r) => ({ value: r.id, label: `${r.roleName} (${r.id})` }))]} />
           </div>
           <div>
             <label className="block text-slate-400 text-xs mb-1.5">데이터 Scope</label>
-            <select value={scope} onChange={(e) => setScope(e.target.value as 'COMPANY' | 'PLANT')} className="w-full bg-slate-900 border border-slate-800 rounded-lg py-2 px-3 text-slate-200 text-xs outline-none">
-              <option value="PLANT">현재 Plant</option><option value="COMPANY">회사 전체</option>
-            </select>
+            <BoundedSelect value={scope} onChange={(value) => setScope(value as 'COMPANY' | 'PLANT')} options={[{ value: 'PLANT', label: '현재 Plant' }, { value: 'COMPANY', label: '회사 전체' }]} />
           </div>
           <div>
             <label className="block text-slate-400 text-xs mb-1.5">이메일</label>
@@ -255,16 +213,8 @@ export default function UserManager({
             </select>
           </div>
           <div>
-            <label className="block text-slate-400 text-xs mb-1.5">지정 플랜트 <span className="text-rose-500">*</span></label>
-            <select
-              required
-              value={homePlantId}
-              onChange={(e) => setHomePlantId(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 text-xs outline-none transition-colors"
-            >
-              <option value="">-- 지정 플랜트 선택 --</option>
-              {plants.map(p => <option key={p.id} value={p.id}>{p.id} — {p.name}</option>)}
-            </select>
+            <label className="block text-slate-400 text-xs mb-1.5">Home Plant {scope === 'PLANT' && <span className="text-rose-500">*</span>}</label>
+            <BoundedSelect value={homePlantId} onChange={setHomePlantId} options={[{ value: '', label: '-- 지정 플랜트 선택 --' }, ...plants.map((p) => ({ value: p.id, label: `${p.id} — ${p.name}` }))]} />
           </div>
           <div className="md:col-span-4 flex justify-end gap-2 mt-2">
             {editingId && (

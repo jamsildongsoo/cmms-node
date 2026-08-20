@@ -29,8 +29,10 @@ export class WorkPermitRepository {
       query
         .andWhere('wp.status = :tempStatus', { tempStatus: 'T' })
         .andWhere('wp.createdBy = :userId', { userId });
+    } else {
+      query.andWhere('wp.status <> :tempStatus', { tempStatus: 'T' });
     }
-    if (searchValue) {
+    if (tempOnly !== 'Y' && searchValue) {
       const value = `%${searchValue}%`;
       if (searchType === 'id') query.andWhere('wp.id ILIKE :value', { value });
       if (searchType === 'title') query.andWhere('wp.title ILIKE :value', { value });

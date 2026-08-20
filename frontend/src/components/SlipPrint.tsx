@@ -12,7 +12,9 @@ interface SlipPrintItem {
 
 interface SlipPrintProps {
   txTypeCode: string;
+  txReasonCode?: string | null;
   docNo?: string | null;
+  refNo?: string | null;
   txDate: string;
   departmentName: string;
   managerName: string;
@@ -57,6 +59,14 @@ export default function SlipPrint(p: SlipPrintProps) {
           <div className="grid grid-cols-[72px_1fr] gap-2 p-3">
             <dt className="font-semibold">처리창고</dt>
             <dd>{Array.from(new Set(p.items.map((item) => item.warehouseName))).join(', ') || '-'}</dd>
+          </div>
+          <div className="grid grid-cols-[72px_1fr] gap-2 border-t border-r border-gray-400 p-3">
+            <dt className="font-semibold">처리사유</dt>
+            <dd>{p.txReasonCode || '-'}</dd>
+          </div>
+          <div className="grid grid-cols-[72px_1fr] gap-2 border-t border-gray-400 p-3">
+            <dt className="font-semibold">원본전표</dt>
+            <dd className="font-mono">{p.refNo || '-'}</dd>
           </div>
         </dl>
       </section>

@@ -1,13 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
 import { useAuthStore } from '../store/useAuthStore';
-import { hasModuleManage } from '../utils/moduleAccess';
+import { hasModuleCreate } from '../utils/moduleAccess';
 import { getCommonStatusLabel as getStatusLabel, getJudgeLabel } from '../constants/status';
 import { APP_MODULE } from '../constants/module';
 import { formatDateOnly, formatDateTimeSeconds, todayLocal } from '../utils/datetime';
 import { toastApiError } from '../utils/apiError';
-import PrintHeader from '../components/PrintHeader';
+import { requestConfirmation } from '../utils/userActionDialog';
 import PmReportPrint from '../components/PmReportPrint';
 import PrintWindowLayout from '../components/PrintWindowLayout';
 import ApprovalDraftModal from '../features/approval/components/ApprovalDraftModal';
@@ -20,14 +20,26 @@ import type { RichTextDocument } from '../types/richText';
 import { createPmApprovalContent } from '../utils/pmApprovalContent';
 import type { PmRecord, PmRecordItem, PmStage, PmTab } from '../features/pm/pm.types';
 import { pmApi } from '../features/pm/pm.api';
-import { referenceApi } from '../features/mdm/reference.api';
-import { masterReferenceApi } from '../features/master/master-reference.api';
+import { mdmLookupApi } from '../features/mdm/reference.api';
+import { masterLookupApi } from '../features/master/master-reference.api';
 import type { EquipmentReference } from '../features/master/master-reference.types';
+import DocumentListPanel from '../components/DocumentListPanel';
+import PmFormModal from '../features/pm/components/PmFormModal';
 import {
-  ClipboardList, ClipboardCheck, Edit2, Trash2, Printer, X, Plus, MinusCircle, PlayCircle
+  ClipboardList, ClipboardCheck, Edit2, Printer, Plus, PlayCircle
 } from 'lucide-react';
 
 const isConfirmed = (status: string) => status === 'C';
+
+const normalizeRecord = (record: PmRecord): PmRecord => ({
+  ...record,
+  stepStage: (record.stepStage || 'R') as PmStage,
+  cycleFrom: formatDateOnly(record.cycleFrom) || null,
+  cycleEnd: formatDateOnly(record.cycleEnd) || null,
+  workDate: formatDateOnly(record.workDate) || null,
+  certExpireDate: formatDateOnly(record.certExpireDate) || null,
+  closeYn: record.closeYn || 'N',
+});
 
 export default function PmRecord() {
   const user = useAuthStore((s) => s.user);
@@ -66,12 +78,13 @@ export default function PmRecord() {
   const [certExpireDate, setCertExpireDate] = useState('');
   const [certAgency, setCertAgency] = useState('');
   const [approvalId, setApprovalId] = useState('');
+  const [fileGroupId, setFileGroupId] = useState<number | null>(null);
   const [refNo, setRefNo] = useState('');
   const [createdAt, setCreatedAt] = useState('');
   const [createdBy, setCreatedBy] = useState('');
   const [recordStatus, setRecordStatus] = useState('T');
   const [checkItems, setCheckItems] = useState<PmRecordItem[]>([]);
-  const [pendingAction, setPendingAction] = useState<{ type: 'close' | 'delete'; record: PmRecord } | null>(null);
+  const [pendingClose, setPendingClose] = useState<PmRecord | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [approvalRef, setApprovalRef] = useState<{
@@ -80,24 +93,17 @@ export default function PmRecord() {
     content: RichTextDocument;
   } | null>(null);
 
-  const canCreate = hasModuleManage(user?.moduleAccess, APP_MODULE.PM);
+  const canCreate = hasModuleCreate(user?.moduleAccess, APP_MODULE.PM);
   const canUpdate = canCreate;
   const canDelete = canCreate;
   const canEditCurrent = !pmNo
     ? canCreate
     : canUpdate || (recordStatus === 'T' && createdBy === user?.id);
+  const canDeleteCurrent = !!pmNo
+    && recordStatus === 'T'
+    && (canDelete || createdBy === user?.id);
 
-  const normalizeRecord = (record: PmRecord): PmRecord => ({
-    ...record,
-    stepStage: (record.stepStage || 'R') as PmStage,
-    cycleFrom: formatDateOnly(record.cycleFrom) || null,
-    cycleEnd: formatDateOnly(record.cycleEnd) || null,
-    workDate: formatDateOnly(record.workDate) || null,
-    certExpireDate: formatDateOnly(record.certExpireDate) || null,
-    closeYn: record.closeYn || 'N',
-  });
-
-  const fetchData = async () => {
+  const loadList = useCallback(async () => {
     try {
       const params = new URLSearchParams();
       params.set('stepStage', activeTab === 'plans' ? 'P' : 'R');
@@ -111,10 +117,10 @@ export default function PmRecord() {
       // 폼 선택값 구성을 위한 시스템 참조값 조회다. 예방점검 목록 R 권한을 대체하지 않는다.
       const [loadedRecords, loadedDepartments, loadedEquipments, loadedUsers, loadedPmTypes] = await Promise.all([
         pmApi.getAll(params, activePlantId),
-        referenceApi.getDepartmentOptions(),
-        masterReferenceApi.getEquipments(),
-        referenceApi.getUserOptions(),
-        referenceApi.getPmTypeOptions(),
+        mdmLookupApi.getDepartmentOptions(),
+        masterLookupApi.getEquipments(),
+        mdmLookupApi.getUserOptions(),
+        mdmLookupApi.getPmTypeOptions(),
       ]);
       const records = (loadedRecords || []).map(normalizeRecord);
       if (activeTab === 'plans') {
@@ -132,14 +138,15 @@ export default function PmRecord() {
     } catch (err) {
       toastApiError(err, '예방점검 목록을 불러오지 못했습니다.');
     }
-  };
+  }, [activePlantId, activeTab, searchType, searchValue, showAll, tempOnly]);
 
   // 검색 실행은 버튼이 담당하고 탭/전체보기 변경만 자동 조회한다.
   useEffect(() => {
-    const timer = window.setTimeout(() => { void fetchData(); }, 0);
-    return () => window.clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePlantId, activeTab, showAll, tempOnly]);
+    const run = async () => {
+      await loadList();
+    };
+    void run();
+  }, [loadList]);
 
   const resetForm = (stage: PmStage) => {
     setStepStage(stage);
@@ -161,6 +168,7 @@ export default function PmRecord() {
     setCertExpireDate('');
     setCertAgency('');
     setApprovalId('');
+    setFileGroupId(null);
     setRefNo('');
     setCreatedAt('');
     setCreatedBy('');
@@ -173,7 +181,7 @@ export default function PmRecord() {
     setIsFormOpen(true);
   };
 
-  const loadRecordIntoForm = async (record: PmRecord) => {
+  const loadDetail = async (record: PmRecord) => {
     setIsLoading(true);
     try {
       const detail = await pmApi.getDetail(record.plantId, record.id);
@@ -200,6 +208,7 @@ export default function PmRecord() {
       setCertExpireDate(formatDateOnly(r.certExpireDate));
       setCertAgency(r.certAgency || '');
       setApprovalId('');
+      setFileGroupId(isRejected ? null : r.fileGroupId ?? null);
       setRefNo(r.refNo || '');
       setCreatedAt(isRejected ? '' : (r.createdAt || ''));
       setCreatedBy(isRejected ? '' : (r.createdBy || ''));
@@ -297,13 +306,6 @@ export default function PmRecord() {
     }
   };
 
-  const handleEquipmentChange = (value: string) => {
-    const selected = equipments.find((eq) => `${eq.plantId}:${eq.id}` === value);
-    setPlantId(selected?.plantId || '');
-    setEquipmentId(selected?.id || '');
-    setEquipmentName(selected?.name || '');
-  };
-
   const loadTemplates = async (code: string) => {
     if (!plantId) {
       toast.error('플랜트를 먼저 선택해주세요.');
@@ -376,7 +378,7 @@ export default function PmRecord() {
       title: `${tabLabel} 현황`,
       rows: list,
       getRowKey: (record) => `${record.plantId}:${record.id}`,
-      companyName: user?.companyId || 'CMMS',
+      companyName: user?.companyName || user?.companyId || 'CMMS',
       printerName: user?.name || '-',
       printedAt: stamp,
       columns: [
@@ -397,19 +399,21 @@ export default function PmRecord() {
     try {
       await pmApi.closePlan(record.plantId, record.id);
       toast.success('계획이 종료되었습니다.');
-      setPendingAction(null);
-      fetchData();
+      setPendingClose(null);
+      loadList();
     } catch (err) {
       toastApiError(err, '종료 실패.');
     }
   };
 
-  const handleDelete = async (record: PmRecord) => {
+  const handleDelete = async () => {
+    if (!pmNo || !plantId) return;
+    if (!(await requestConfirmation('예방점검 문서를 삭제하시겠습니까?'))) return;
     try {
-      await pmApi.delete(record.plantId, record.id);
+      await pmApi.delete(plantId, pmNo);
       toast.success('예방점검 문서가 삭제되었습니다.');
-      setPendingAction(null);
-      fetchData();
+      setIsFormOpen(false);
+      await loadList();
     } catch (err) {
       toastApiError(err, '삭제 실패.');
     }
@@ -463,6 +467,7 @@ export default function PmRecord() {
           certExpireDate: certExpireDate || null,
           certAgency: certAgency || null,
           approvalId: approvalId || null,
+          fileGroupId,
           refNo: stepStage === 'R' ? refNo : null,
           refModule: stepStage === 'R' && refNo ? APP_MODULE.PM : null,
           status: saveStatus,
@@ -517,7 +522,7 @@ export default function PmRecord() {
             : '예방점검 계획이 확정되었습니다.',
       );
       setIsFormOpen(false);
-      fetchData();
+      loadList();
     } catch (err) {
       toastApiError(err, '저장 중 오류가 발생했습니다.');
     } finally {
@@ -528,7 +533,7 @@ export default function PmRecord() {
   const currentList = activeTab === 'plans' ? plans : results;
 
   const handleSearch = () => {
-    fetchData();
+    loadList();
   };
 
   return (
@@ -578,29 +583,25 @@ export default function PmRecord() {
         </div>
       </div>
 
-      {pendingAction && (
+      {pendingClose && (
         <div className="no-print flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-800 bg-amber-950/40 px-4 py-3 text-xs">
           <span className="text-amber-200">
-            {pendingAction.type === 'close'
-              ? `[${pendingAction.record.id}] 계획을 종료하시겠습니까? 종료 후 수정할 수 없습니다.`
-              : `[${pendingAction.record.id}] 예방점검 문서를 삭제하시겠습니까?`}
+            [{pendingClose.id}] 계획을 종료하시겠습니까? 종료 후 수정할 수 없습니다.
           </span>
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => setPendingAction(null)}
+              onClick={() => setPendingClose(null)}
               className="rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-slate-300 cursor-pointer"
             >
               취소
             </button>
             <button
               type="button"
-              onClick={() => pendingAction.type === 'close'
-                ? handleClosePlan(pendingAction.record)
-                : handleDelete(pendingAction.record)}
+              onClick={() => handleClosePlan(pendingClose)}
               className="rounded-md border-0 bg-amber-600 px-3 py-1.5 font-semibold text-white cursor-pointer"
             >
-              {pendingAction.type === 'close' ? '종료' : '삭제'}
+              종료
             </button>
           </div>
         </div>
@@ -661,18 +662,15 @@ export default function PmRecord() {
         </div>
       </div>
 
-      <div className={`bg-slate-900 border border-slate-800 rounded-xl p-6 print:border-0 print:bg-transparent print:p-0 print-landscape ${isFormOpen ? 'print:hidden' : ''}`}>
-        <div className="space-y-4 print:block">
-          <h3 className="text-sm font-bold text-slate-200 flex items-center gap-1.5 print:hidden">
-            {activeTab === 'plans' ? <ClipboardList size={16} className="text-blue-500" /> : <ClipboardCheck size={16} className="text-blue-500" />}
-            {activeTab === 'plans' ? '예방점검 계획 목록' : '예방점검 실적 목록'}
-          </h3>
-
-          <PrintHeader />
-          <h1 className="hidden print:block text-center text-xl font-bold tracking-widest text-black border-b-2 border-black pb-2 mb-4">
-            예 방 점 검 {activeTab === 'plans' ? '계 획' : '실 적'} 현 황
-          </h1>
-
+      <DocumentListPanel
+        isFormOpen={isFormOpen}
+        landscape
+        heading={<>
+          {activeTab === 'plans' ? <ClipboardList size={16} className="text-blue-500" /> : <ClipboardCheck size={16} className="text-blue-500" />}
+          {activeTab === 'plans' ? '예방점검 계획 목록' : '예방점검 실적 목록'}
+        </>}
+        printHeading={`예 방 점 검 ${activeTab === 'plans' ? '계 획' : '실 적'} 현 황`}
+      >
           <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/40 print:border-slate-300 print:bg-white print:rounded-none">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
@@ -754,7 +752,7 @@ export default function PmRecord() {
                           )}
                           {canUpdate && activeTab === 'plans' && isConfirmed(rec.status) && rec.closeYn !== 'Y' && (
                             <ListIconButton
-                              onClick={() => setPendingAction({ type: 'close', record: rec })}
+                              onClick={() => setPendingClose(rec)}
                               label="계획 종료"
                               icon={ClipboardCheck}
                               tone="warning"
@@ -762,19 +760,11 @@ export default function PmRecord() {
                           )}
                           {(canUpdate || (rec.status === 'T' && rec.createdBy === user?.id)) && ['T', 'R'].includes(rec.status) && (
                             <ListIconButton
-                              onClick={() => loadRecordIntoForm(rec)}
+                              onClick={() => loadDetail(rec)}
                               label="상세/수정"
                               icon={Edit2}
                               tone="accent"
                             />
-                          )}
-                          {(canDelete || (rec.status === 'T' && rec.createdBy === user?.id)) && rec.status === 'T' && (
-                              <ListIconButton
-                                onClick={() => setPendingAction({ type: 'delete', record: rec })}
-                                label="삭제"
-                                icon={Trash2}
-                                tone="danger"
-                              />
                           )}
                         </div>
                       </td>
@@ -784,327 +774,64 @@ export default function PmRecord() {
               </tbody>
             </table>
           </div>
-        </div>
-      </div>
+      </DocumentListPanel>
 
       {isFormOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto print:absolute print:inset-0 print:bg-white print:p-0">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl print:border-0 print:shadow-none print:max-h-none print:w-full print:h-full">
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0 print:hidden">
-              <h2 className="text-lg font-bold text-slate-200">
-                {pmNo ? `예방점검 ${stepStage === 'P' ? '계획' : '실적'} 상세/수정 [${pmNo}]` : `신규 예방점검 ${stepStage === 'P' ? '계획' : '실적'} 입력`}
-              </h2>
-              <button
-                onClick={() => setIsFormOpen(false)}
-                className="text-slate-500 hover:text-slate-300 p-1 hover:bg-slate-800 rounded transition-colors border-0 cursor-pointer bg-transparent"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 print:hidden">
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-4 text-xs">
-                <div>
-                  <span className="text-slate-500 block mb-0.5">문서번호</span>
-                  <span className="font-mono font-semibold text-slate-300">{pmNo || '(저장 시 자동발행)'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block mb-0.5">작성일</span>
-                  <span className="font-mono text-slate-300">{formatDateOnly(createdAt) || (pmNo ? '-' : '저장 시 기록')}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block mb-0.5">부서</span>
-                  <span className="text-slate-300">
-                    {departmentId || '-'} / {depts.find((dept) => dept.id === departmentId)?.name || '-'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block mb-0.5">작성자</span>
-                  <span className="text-slate-300">
-                    {(createdBy || user?.id) || '-'} / {usersList.find((candidate) => candidate.id === (createdBy || user?.id))?.name || user?.name || '-'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block mb-0.5">단계</span>
-                  <span className="text-slate-300">{stepStage === 'P' ? '계획(P)' : '실적(R)'}</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                <div className="md:col-span-2">
-                  <label className="block text-slate-400 mb-1.5">점검명</label>
-                  <input
-                    type="text"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="예방점검명을 입력하세요"
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 mb-1.5">대상 설비 <span className="text-rose-500">*</span></label>
-                  {!pmNo ? (
-                    <select
-                      value={plantId && equipmentId ? `${plantId}:${equipmentId}` : ''}
-                      onChange={(e) => handleEquipmentChange(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none"
-                    >
-                      <option value="">-- 설비 선택 --</option>
-                      {equipments.map((equipment) => (
-                        <option key={`${equipment.plantId}:${equipment.id}`} value={`${equipment.plantId}:${equipment.id}`}>
-                          {equipment.name} ({equipment.id})
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type="text"
-                      disabled
-                      value={equipmentName || equipmentId}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-slate-200 outline-none disabled:opacity-80"
-                    />
-                  )}
-                </div>
-                <div>
-                  <label className="block text-slate-400 mb-1.5">점검 유형 <span className="text-rose-500">*</span></label>
-                  <div className="flex gap-2">
-                    <select
-                      disabled={stepStage === 'R' && !!refNo}
-                      value={checkTypeCode}
-                      onChange={(e) => handleCheckTypeChange(e.target.value)}
-                      className="flex-1 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none disabled:opacity-80"
-                    >
-                      {pmTypes.map((type) => (
-                        <option key={type.id} value={type.id}>{type.name}</option>
-                      ))}
-                    </select>
-                    {(stepStage === 'P' || !refNo) && (
-                      <button
-                        type="button"
-                        onClick={() => loadTemplates(checkTypeCode)}
-                        className="bg-slate-800 hover:bg-slate-700 text-blue-400 rounded-lg px-3 text-[11px] font-semibold transition-colors border-0 cursor-pointer whitespace-nowrap"
-                      >
-                        템플릿
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {stepStage === 'P' && (
-                  <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-[1fr_auto_1fr_1fr] gap-3 items-end">
-                    <div>
-                      <label className="block text-slate-400 mb-1.5">계획일 {!isRecurring && <span className="text-rose-500">*</span>}</label>
-                      <input
-                        type="date"
-                        disabled={isRecurring}
-                        required={!isRecurring}
-                        value={workDate}
-                        onChange={(e) => setWorkDate(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none disabled:opacity-40"
-                      />
-                    </div>
-                    <label className="flex h-9 items-center gap-2 px-2 text-slate-300 cursor-pointer whitespace-nowrap">
-                      <input
-                        type="checkbox"
-                        checked={isRecurring}
-                        onChange={(event) => {
-                          const checked = event.target.checked;
-                          setIsRecurring(checked);
-                          if (checked) {
-                            setWorkDate('');
-                          } else {
-                            setCycleFrom('');
-                            setCycleEnd('');
-                            setWorkDate((current) => current || todayLocal());
-                          }
-                        }}
-                        className="rounded border-slate-700 bg-slate-950"
-                      />
-                      반복작업
-                    </label>
-                    <div>
-                      <label className="block text-slate-400 mb-1.5">시작일 {isRecurring && <span className="text-rose-500">*</span>}</label>
-                      <input
-                        type="date"
-                        disabled={!isRecurring}
-                        required={isRecurring}
-                        value={cycleFrom}
-                        onChange={(e) => setCycleFrom(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none disabled:opacity-40"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-400 mb-1.5">종료일 {isRecurring && <span className="text-rose-500">*</span>}</label>
-                      <input
-                        type="date"
-                        disabled={!isRecurring}
-                        required={isRecurring}
-                        value={cycleEnd}
-                        onChange={(e) => setCycleEnd(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none disabled:opacity-40"
-                      />
-                    </div>
-                  </div>
-                )}
-                {stepStage === 'R' && (
-                  <div>
-                    <label className="block text-slate-400 mb-1.5">점검일 <span className="text-rose-500">*</span></label>
-                    <input
-                      type="date"
-                      required
-                      value={workDate}
-                      onChange={(e) => setWorkDate(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none"
-                    />
-                  </div>
-                )}
-                {stepStage === 'R' && (
-                  <div>
-                    <label className="block text-slate-400 mb-1.5">종합 판정</label>
-                    <select
-                      value={judgeCode}
-                      onChange={(e) => setJudgeCode(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none"
-                    >
-                      <option value="OK">양호</option>
-                      <option value="NG">불량</option>
-                      <option value="OTHER">기타</option>
-                    </select>
-                  </div>
-                )}
-                <div className="md:col-span-2">
-                  <label className="block text-slate-400 mb-1.5">비고</label>
-                  <textarea
-                    value={remarks}
-                    onChange={(e) => setRemarks(e.target.value)}
-                    rows={2}
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none resize-none"
-                  />
-                </div>
-              </div>
-
-              {stepStage === 'R' && (
-                <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-5">
-                  <h4 className="text-xs font-bold text-amber-400 mb-3 border-l-2 border-amber-500 pl-2">법정 인증 정보</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-                    <input className="bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none" value={certNumber} onChange={(e) => setCertNumber(e.target.value)} placeholder="인증번호" />
-                    <input className="bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none" value={certAgency} onChange={(e) => setCertAgency(e.target.value)} placeholder="인증기관" />
-                    <input type="date" className="bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none" value={certExpireDate} onChange={(e) => setCertExpireDate(e.target.value)} />
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-4">
-                <div className="flex justify-between items-center border-l-2 border-blue-500 pl-2">
-                  <h3 className="text-xs font-bold text-blue-400 uppercase tracking-wider">
-                    {stepStage === 'P' ? '계획 점검 항목' : '실적 측정 항목'}
-                  </h3>
-                  {stepStage === 'P' && (
-                    <button
-                      type="button"
-                      onClick={addPlanItem}
-                      className="bg-slate-800 hover:bg-slate-700 text-blue-400 rounded-lg px-2.5 py-1 text-[11px] font-semibold flex items-center gap-1 transition-colors border-0 cursor-pointer"
-                    >
-                      <Plus size={13} />
-                      항목 추가
-                    </button>
-                  )}
-                </div>
-                <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/20">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-slate-900 text-slate-400 border-b border-slate-800 select-none">
-                        <th className="p-3 font-semibold w-12 text-center">번호</th>
-                        <th className="p-3 font-semibold">점검 항목</th>
-                        <th className="p-3 font-semibold">점검 방법</th>
-                        <th className="p-3 font-semibold text-center">Min</th>
-                        <th className="p-3 font-semibold text-center">Max</th>
-                        <th className="p-3 font-semibold text-center">기준</th>
-                        {stepStage === 'R' && <th className="p-3 font-semibold text-center">측정값</th>}
-                        <th className="p-3 font-semibold w-24">단위</th>
-                        {stepStage === 'P' && <th className="p-3 font-semibold w-12"></th>}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {checkItems.length === 0 ? (
-                        <tr>
-                          <td colSpan={stepStage === 'P' ? 8 : 8} className="p-8 text-center text-slate-600">
-                            등록된 점검항목이 없습니다.
-                          </td>
-                        </tr>
-                      ) : (
-                        checkItems.map((item, idx) => (
-                          <tr key={idx} className="border-b border-slate-900 hover:bg-slate-900/30 text-slate-300">
-                            <td className="p-3 text-center text-slate-500">{idx + 1}</td>
-                            <td className="p-2">
-                              {stepStage === 'P' ? (
-                                <input value={item.checkName} onChange={(e) => updateItem(idx, 'checkName', e.target.value)} className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-1 px-2 text-slate-200 outline-none" />
-                              ) : <span className="font-semibold text-slate-200">{item.checkName}</span>}
-                            </td>
-                            <td className="p-2">
-                              {stepStage === 'P' ? (
-                                <input value={item.checkMethod || ''} onChange={(e) => updateItem(idx, 'checkMethod', e.target.value)} className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-1 px-2 text-slate-200 outline-none" />
-                              ) : <span className="text-slate-400">{item.checkMethod || '-'}</span>}
-                            </td>
-                            {(['minValue', 'maxValue', 'baseValue'] as const).map((field) => (
-                              <td key={field} className="p-2">
-                                {stepStage === 'P' ? (
-                                  <input type="number" step="any" value={item[field] ?? ''} onChange={(e) => updateItem(idx, field, e.target.value)} className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-1 px-2 text-center text-slate-200 outline-none" />
-                                ) : <span className="block text-center text-slate-400">{item[field] ?? '-'}</span>}
-                              </td>
-                            ))}
-                            {stepStage === 'R' && (
-                              <td className="p-2">
-                                <input type="number" step="any" value={item.checkValue ?? ''} onChange={(e) => updateItem(idx, 'checkValue', e.target.value)} className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-1 px-2 text-center text-slate-200 outline-none" />
-                              </td>
-                            )}
-                            <td className="p-2">
-                              {stepStage === 'P' ? (
-                                <input value={item.unit || ''} onChange={(e) => updateItem(idx, 'unit', e.target.value)} className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-1 px-2 text-slate-200 outline-none" />
-                              ) : <span className="text-slate-500">{item.unit || '-'}</span>}
-                            </td>
-                            {stepStage === 'P' && (
-                              <td className="p-2 text-center">
-                                <button onClick={() => removePlanItem(idx)} className="p-1.5 text-rose-500 hover:bg-slate-800 rounded border-0 cursor-pointer bg-transparent">
-                                  <MinusCircle size={15} />
-                                </button>
-                              </td>
-                            )}
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-6 border-t border-slate-800 flex justify-between items-center shrink-0 print:hidden">
-              <div className="flex gap-2 ml-auto">
-                <button
-                  type="button"
-                  onClick={() => setIsFormOpen(false)}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer border-0"
-                >
-                  닫기
-                </button>
-                {canEditCurrent && <button
-                  onClick={() => handleSave('T')}
-                  disabled={isLoading}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-750 rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  임시 저장
-                </button>}
-                {canEditCurrent && <button
-                  onClick={() => handleSave('P')}
-                  disabled={isLoading}
-                  className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer border-0 disabled:opacity-50"
-                >
-                  결재 상신
-                </button>}
-              </div>
-            </div>
-          </div>
-        </div>
+        <PmFormModal
+          title={pmNo ? `예방점검 ${stepStage === 'P' ? '계획' : '실적'} 상세/수정 [${pmNo}]` : `신규 예방점검 ${stepStage === 'P' ? '계획' : '실적'} 입력`}
+          onClose={() => setIsFormOpen(false)}
+          form={{
+            pmNo,
+            stepStage,
+            createdAt,
+            departmentId,
+            depts,
+            createdBy,
+            user,
+            usersList,
+            title,
+            setTitle,
+            equipmentId,
+            equipmentName,
+            plantId,
+            activePlantId,
+            canEditCurrent,
+            canDeleteCurrent,
+            setEquipmentId,
+            setEquipmentName,
+            setPlantId,
+            checkTypeCode,
+            pmTypes,
+            refNo,
+            handleCheckTypeChange,
+            loadTemplates,
+            workDate,
+            setWorkDate,
+            isRecurring,
+            setIsRecurring,
+            cycleFrom,
+            setCycleFrom,
+            cycleEnd,
+            setCycleEnd,
+            judgeCode,
+            setJudgeCode,
+            remarks,
+            setRemarks,
+            certNumber,
+            setCertNumber,
+            certAgency,
+            setCertAgency,
+            certExpireDate,
+            setCertExpireDate,
+            checkItems,
+            addPlanItem,
+            updateItem,
+            removePlanItem,
+            isLoading,
+            handleSave,
+            handleDelete,
+          }}
+        />
       )}
 
       <ApprovalDraftModal
@@ -1121,7 +848,7 @@ export default function PmRecord() {
           setApprovalRef(null);
           setIsFormOpen(false);
           toast.success('예방점검 결재 문서가 상신되었습니다.');
-          fetchData();
+          loadList();
         }}
       />
     </div>

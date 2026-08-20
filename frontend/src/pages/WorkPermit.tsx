@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
 import { useAuthStore } from '../store/useAuthStore';
-import { hasModuleManage } from '../utils/moduleAccess';
+import { hasModuleCreate } from '../utils/moduleAccess';
 import { getCommonStatusLabel as getStatusLabel } from '../constants/status';
 import { APP_MODULE } from '../constants/module';
 import {
@@ -15,7 +15,6 @@ import {
   inputToUtc,
 } from '../utils/datetime';
 import { toastApiError } from '../utils/apiError';
-import PrintHeader from '../components/PrintHeader';
 import WorkPermitPrint from '../components/WorkPermitPrint';
 import PrintWindowLayout from '../components/PrintWindowLayout';
 import { openPrintWindow } from '../utils/printWindow';
@@ -31,8 +30,10 @@ import type {
 } from '../features/work-permit/work-permit.types';
 import { workPermitApi } from '../features/work-permit/work-permit.api';
 import { workOrderApi } from '../features/work-order/work-order.api';
-import { referenceApi } from '../features/mdm/reference.api';
-import { masterReferenceApi } from '../features/master/master-reference.api';
+import { mdmLookupApi } from '../features/mdm/reference.api';
+import { masterLookupApi } from '../features/master/master-reference.api';
+import DocumentListPanel from '../components/DocumentListPanel';
+import WorkPermitFormModal from '../features/work-permit/components/WorkPermitFormModal';
 import {
   INITIAL_CONFINED,
   INITIAL_ELECTRIC,
@@ -44,7 +45,7 @@ import {
   parseCheckItems,
 } from '../features/work-permit/work-permit.defaults';
 import {
-  ClipboardList, Edit2, Trash2, Printer, X, Plus, CheckSquare, Square, ChevronDown, ChevronUp
+  ClipboardList, Edit2, Printer, Plus
 } from 'lucide-react';
 
 export default function WorkPermit() {
@@ -85,6 +86,7 @@ export default function WorkPermit() {
   const [refNo, setRefNo] = useState('');
   const [refModule, setRefModule] = useState('');
   const [approvalId, setApprovalId] = useState('');
+  const [fileGroupId, setFileGroupId] = useState<number | null>(null);
   const [createdAt, setCreatedAt] = useState('');
   const [createdBy, setCreatedBy] = useState('');
   const [recordStatus, setRecordStatus] = useState('T');
@@ -116,17 +118,20 @@ export default function WorkPermit() {
     content: RichTextDocument;
   } | null>(null);
 
-  const canCreate = hasModuleManage(user?.moduleAccess, APP_MODULE.WP);
+  const canCreate = hasModuleCreate(user?.moduleAccess, APP_MODULE.WP);
   const canUpdate = canCreate;
   const canDelete = canCreate;
   const canEditCurrent = !wpNo
     ? canCreate
     : canUpdate || (recordStatus === 'T' && createdBy === user?.id);
+  const canDeleteCurrent = !!wpNo
+    && recordStatus === 'T'
+    && (canDelete || createdBy === user?.id);
   const currentPermits = permits.filter((permit) =>
     activeTab === 'plans' ? permit.stepStage === 'P' : permit.stepStage === 'R',
   );
 
-  const fetchData = async () => {
+  const loadList = useCallback(async () => {
     try {
       const params = new URLSearchParams();
       if (searchValue) {
@@ -137,9 +142,9 @@ export default function WorkPermit() {
       // 폼 선택값 구성을 위한 시스템 참조값 조회다. 작업허가서 목록 R 권한을 대체하지 않는다.
       const [loadedPermits, loadedEquipments, loadedDepartments, loadedUsers, loadedWorkOrders] = await Promise.all([
         workPermitApi.getAll(params, activePlantId),
-        masterReferenceApi.getEquipments(),
-        referenceApi.getDepartmentOptions(),
-        referenceApi.getUserOptions(),
+        masterLookupApi.getEquipments(),
+        mdmLookupApi.getDepartmentOptions(),
+        mdmLookupApi.getUserOptions(),
         workOrderApi.getAll(undefined, activePlantId),
       ]);
       setPermits((loadedPermits || []).map((permit: WorkPermitModel & { step_stage?: string }) => ({
@@ -153,14 +158,15 @@ export default function WorkPermit() {
     } catch (err) {
       toastApiError(err, '목록을 불러오지 못했습니다.');
     }
-  };
+  }, [activePlantId, searchType, searchValue, tempOnly]);
 
   // 검색 실행은 버튼이 담당하므로 최초 진입 시에만 자동 조회한다.
   useEffect(() => {
-    const timer = window.setTimeout(() => { void fetchData(); }, 0);
-    return () => window.clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePlantId, activeTab, tempOnly]);
+    const run = async () => {
+      await loadList();
+    };
+    void run();
+  }, [activeTab, loadList]);
 
   const toggleAccordion = (type: string) => {
     setAccordionOpen(prev => ({ ...prev, [type]: !prev[type] }));
@@ -218,6 +224,7 @@ export default function WorkPermit() {
     setRefNo('');
     setRefModule('');
     setApprovalId('');
+    setFileGroupId(null);
     setCreatedAt('');
     setCreatedBy('');
     setRecordStatus('T');
@@ -238,7 +245,7 @@ export default function WorkPermit() {
     setIsFormOpen(true);
   };
 
-  const handleOpenEdit = async (wp: WorkPermitModel) => {
+  const loadDetail = async (wp: WorkPermitModel) => {
     setIsLoading(true);
     try {
       const w = await workPermitApi.getDetail(wp.plantId, wp.id);
@@ -265,6 +272,7 @@ export default function WorkPermit() {
       setRefNo(w.refNo || '');
       setRefModule(w.refModule || '');
       setApprovalId('');
+      setFileGroupId(isRejected ? null : w.fileGroupId ?? null);
       setCreatedAt(isRejected ? '' : (w.createdAt || ''));
       setCreatedBy(isRejected ? '' : (w.createdBy || ''));
       setRecordStatus(isRejected ? 'T' : (w.status || 'T'));
@@ -298,12 +306,14 @@ export default function WorkPermit() {
     }
   };
 
-  const handleDelete = async (wp: WorkPermitModel) => {
+  const handleDelete = async () => {
+    if (!wpNo || !plantId) return;
     if (!(await requestConfirmation('정말 이 작업허가서를 삭제하시겠습니까?'))) return;
     try {
-      await workPermitApi.delete(wp.plantId, wp.id);
+      await workPermitApi.delete(plantId, wpNo);
       toast.success('작업허가서가 삭제되었습니다.');
-      fetchData();
+      setIsFormOpen(false);
+      await loadList();
     } catch (err) {
       toastApiError(err, '삭제 실패.');
     }
@@ -340,6 +350,7 @@ export default function WorkPermit() {
         jsonExcavation: selectedTypes.includes('EXCAVATION') ? JSON.stringify(excaChecks) : null,
         jsonHeavyLoad: selectedTypes.includes('HEAVY_LOAD') ? JSON.stringify(heavyChecks) : null,
         remarks: remarks || null,
+        fileGroupId,
         refNo: refNo || null,
         refModule: refModule || null,
         approvalId: approvalId || null,
@@ -394,23 +405,13 @@ export default function WorkPermit() {
       }
       toast.success('임시저장 되었습니다.');
       setIsFormOpen(false);
-      fetchData();
+      loadList();
     } catch (err) {
       toastApiError(err, '저장 중 오류가 발생했습니다.');
     } finally {
       setIsLoading(false);
     }
   };
-
-  const handleEquipmentChange = (eqId: string) => {
-    const matched = equipments.find(e => e.id === eqId);
-    if (matched) {
-      setEquipmentId(eqId);
-      setEquipmentName(matched.name);
-      setPlantId(matched.plantId);
-    }
-  };
-
 
   const getWpTypeLabel = (code: string) => {
     return {
@@ -486,7 +487,7 @@ export default function WorkPermit() {
       title: '안전작업허가서 현황',
       rows: currentPermits,
       getRowKey: (permit) => permit.id,
-      companyName: user?.companyId || 'CMMS',
+      companyName: user?.companyName || user?.companyId || 'CMMS',
       printerName: user?.name || '-',
       printedAt: stamp,
       columns: [
@@ -576,11 +577,11 @@ export default function WorkPermit() {
             type="text"
             value={searchValue}
             onChange={(event) => setSearchValue(event.target.value)}
-            onKeyDown={(event) => event.key === 'Enter' && fetchData()}
+            onKeyDown={(event) => event.key === 'Enter' && loadList()}
             placeholder="검색어 입력"
             className="flex-1 min-w-[200px] bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-3 text-xs text-slate-300 outline-none"
           />
-          <button type="button" onClick={fetchData} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-1.5 text-xs font-semibold cursor-pointer border-0">
+          <button type="button" onClick={loadList} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-1.5 text-xs font-semibold cursor-pointer border-0">
             검색
           </button>
           <button
@@ -594,12 +595,12 @@ export default function WorkPermit() {
       </div>
 
       {/* Main Grid View — 모달(허가서) 열림 시 인쇄 제외(전용뷰와 중복 방지) */}
-      <div className={`bg-slate-900 border border-slate-800 rounded-xl p-6 print:border-0 print:bg-transparent print:p-0 print-landscape ${isFormOpen ? 'print:hidden' : ''}`}>
-
-        {/* Print Only Header */}
-        <PrintHeader />
-        <h1 className="hidden print:block text-center text-xl font-bold tracking-widest text-black border-b-2 border-black pb-2 mb-4">작 업 허 가 대 장</h1>
-
+      <DocumentListPanel
+        isFormOpen={isFormOpen}
+        landscape
+        heading={<><ClipboardList size={16} className="text-blue-500" /> 작업허가서 목록</>}
+        printHeading="작 업 허 가 대 장"
+      >
         <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/40 print:border-slate-300 print:bg-white print:rounded-none">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
@@ -635,19 +636,11 @@ export default function WorkPermit() {
                     <td className="p-3 text-right space-x-2 print:hidden">
                       {(canUpdate || (wp.status === 'T' && wp.createdBy === user?.id)) && ['T', 'R'].includes(wp.status) && (
                         <ListIconButton
-                          onClick={() => handleOpenEdit(wp)}
+                          onClick={() => loadDetail(wp)}
                           label="상세/수정"
                           icon={Edit2}
                           tone="accent"
                         />
-                      )}
-                      {(canDelete || (wp.status === 'T' && wp.createdBy === user?.id)) && wp.status === 'T' && (
-                          <ListIconButton
-                            onClick={() => handleDelete(wp)}
-                            label="삭제"
-                            icon={Trash2}
-                            tone="danger"
-                          />
                       )}
                     </td>
                   </tr>
@@ -656,339 +649,59 @@ export default function WorkPermit() {
             </tbody>
           </table>
         </div>
-      </div>
+      </DocumentListPanel>
 
       {/* Input / View Detail Modal */}
       {isFormOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto print:absolute print:inset-0 print:bg-white print:p-0">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[95vh] flex flex-col shadow-2xl print:border-0 print:shadow-none print:max-h-none print:w-full print:h-full">
-            {/* Modal Header */}
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0 print:hidden">
-              <h2 className="text-lg font-bold text-slate-200">
-                {wpNo
-                  ? `작업허가 ${stepStage === 'P' ? '계획' : '실적'} 수정/상세 [${wpNo}] ${equipmentName}`
-                  : `신규 작업허가 ${stepStage === 'P' ? '계획' : '실적'} 작성`}
-              </h2>
-              <button
-                onClick={() => setIsFormOpen(false)}
-                className="text-slate-500 hover:text-slate-300 p-1 hover:bg-slate-800 rounded transition-colors border-0 cursor-pointer bg-transparent"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 print:hidden">
-
-              {/* PAGE 1: GENERAL PERMIT COVER */}
-              <div className="space-y-6">
-
-                {/* Status Header Area */}
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-4 text-xs">
-                  <div>
-                    <span className="text-slate-500 block mb-0.5">문서번호</span>
-                    <span className="font-mono font-semibold text-slate-300">{wpNo || '(저장 시 자동발행)'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block mb-0.5">작성일</span>
-                    <span className="font-mono text-slate-300">{formatDateOnly(createdAt) || (wpNo ? '-' : '저장 시 기록')}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block mb-0.5">부서</span>
-                    <span className="text-slate-300">{departmentId || '-'} / {depts.find((item) => item.id === departmentId)?.name || '-'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block mb-0.5">작성자</span>
-                    <span className="text-slate-300">{createdBy || user?.id || '-'} / {usersList.find((item) => item.id === (createdBy || user?.id))?.name || user?.name || '-'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block mb-0.5">단계</span>
-                    <span className="text-slate-300">{stepStage === 'P' ? '계획(P)' : '실적(R)'}</span>
-                  </div>
-                </div>
-
-                {/* Input Form Grid divided into [일반 정보], [작업 정보], [기타 정보] */}
-                <div className="space-y-6">
-                  {/* [일반 정보] 섹션 */}
-                  <div className="space-y-3">
-                    <h4 className="text-xs font-bold text-blue-400 uppercase tracking-wider pl-2 border-l-2 border-blue-500 print:text-slate-800 print:border-slate-400">
-                      [일반 정보]
-                    </h4>
-                    <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-5 print:bg-white print:border-slate-300">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
-                        <div className="sm:col-span-2 md:col-span-3">
-                          <label className="block text-slate-400 mb-1.5 print:text-slate-600 font-semibold">허가명 <span className="text-rose-500 print:hidden">*</span></label>
-                          <input
-                            type="text"
-                            required
-                            value={title}
-                            onChange={(e) => setTitle(e.target.value)}
-                            placeholder="예: 2공장 전기 집진기 내부 쉘프 정비 작업"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none print:bg-white print:border-slate-300 print:text-slate-800"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">대상 설비 <span className="text-rose-500 print:hidden">*</span></label>
-                          <select
-                            value={equipmentId}
-                            onChange={(e) => handleEquipmentChange(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none print:bg-white print:border-slate-300 print:text-slate-800"
-                          >
-                            {equipments.map(eq => (
-                              <option key={eq.id} value={eq.id}>{eq.name} [{eq.id}]</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">담당자</label>
-                          <input
-                            type="text"
-                            readOnly
-                            value={usersList.find((item) => item.id === (createdBy || user?.id))?.name || user?.name || createdBy || '-'}
-                            className="w-full bg-slate-900 border border-slate-800 rounded-lg py-2 px-3 text-slate-400 outline-none cursor-not-allowed print:bg-white print:border-slate-300 print:text-slate-800"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">감독자</label>
-                          <select
-                            value={supervisorId}
-                            onChange={(e) => setSupervisorId(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none print:bg-white print:border-slate-300 print:text-slate-800"
-                          >
-                            <option value="">-- 감독자 선택 --</option>
-                            {usersList.map((candidate) => (
-                              <option key={candidate.id} value={candidate.id}>{candidate.name} [{candidate.id}]</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="sm:col-span-2 md:col-span-3">
-                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">연계 작업지시서(WO)</label>
-                          <select
-                            value={workOrderId}
-                            onChange={(e) => setWorkOrderId(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none print:bg-white print:border-slate-300 print:text-slate-800"
-                          >
-                            <option value="">(미연계)</option>
-                            {workOrders.map(wo => (
-                              <option key={wo.id} value={wo.id}>{wo.title} [{wo.id}]</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* [작업 정보] 섹션 */}
-                  <div className="space-y-3">
-                    <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider pl-2 border-l-2 border-emerald-500 print:text-slate-800 print:border-slate-400">
-                      [작업 정보]
-                    </h4>
-                    <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-5 print:bg-white print:border-slate-300">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                        <div>
-                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">시작 시간</label>
-                          <input
-                            type="datetime-local"
-                            value={startAt}
-                            onChange={(e) => setStartAt(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none print:bg-white print:border-slate-300 print:text-slate-800"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">종료 시간</label>
-                          <input
-                            type="datetime-local"
-                            value={endAt}
-                            onChange={(e) => setEndAt(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none print:bg-white print:border-slate-300 print:text-slate-800"
-                          />
-                        </div>
-
-                        {/* Checkbox selector for multiple permit types */}
-                        <div className="sm:col-span-2 bg-slate-950 border border-slate-850 p-4 rounded-xl print:bg-slate-50 print:border-slate-300">
-                          <span className="block text-slate-400 mb-2 print:text-slate-700 font-semibold">작업허가 유형 추가 선택 (복수 선택 가능, 일반은 항상 포함)</span>
-                          <div className="flex flex-wrap gap-4">
-                            {['GENERAL', 'FIRE', 'CONFINED', 'ELECTRIC', 'HIGH_PLACE', 'EXCAVATION', 'HEAVY_LOAD'].map(type => {
-                              const isGeneral = type === 'GENERAL';
-                              const isSelected = selectedTypes.includes(type);
-                              return (
-                                <button
-                                  type="button"
-                                  key={type}
-                                  disabled={isGeneral}
-                                  onClick={() => handleTypeToggle(type)}
-                                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-                                    isSelected
-                                      ? 'bg-blue-600/10 text-blue-400 border-blue-600/30'
-                                      : 'bg-slate-900 text-slate-500 border-slate-800 hover:text-slate-300 hover:border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed print:border-slate-300 print:text-slate-700'
-                                  }`}
-                                >
-                                  {isSelected ? <CheckSquare size={13} /> : <Square size={13} />}
-                                  <span>{getWpTypeLabel(type)}</span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* [기타 정보] 섹션 */}
-                  <div className="space-y-3">
-                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider pl-2 border-l-2 border-slate-500 print:text-slate-800 print:border-slate-400">
-                      [기타 정보]
-                    </h4>
-                    <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-5 print:bg-white print:border-slate-300">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                        <div className="sm:col-span-1">
-                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">작업 내용 요약</label>
-                          <textarea
-                            value={workSummary}
-                            onChange={(e) => setWorkSummary(e.target.value)}
-                            placeholder="작업의 목적 및 절차 요약을 기재합니다."
-                            rows={3}
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none resize-none print:bg-white print:border-slate-300 print:text-slate-800"
-                          />
-                        </div>
-                        <div className="sm:col-span-1">
-                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">주요 위험 요인</label>
-                          <textarea
-                            value={riskFactors}
-                            onChange={(e) => setRiskFactors(e.target.value)}
-                            placeholder="작업 중 발생할 수 있는 주요 위험 및 유해 요인(화재, 추락, 감전 등)을 기재합니다."
-                            rows={3}
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none resize-none print:bg-white print:border-slate-300 print:text-slate-800"
-                          />
-                        </div>
-                        <div className="sm:col-span-2">
-                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">핵심 안전 대책</label>
-                          <textarea
-                            value={safetyMeasures}
-                            onChange={(e) => setSafetyMeasures(e.target.value)}
-                            placeholder="위험 요인을 회피하거나 조치하기 위한 물리적 방안 및 관리 대책을 기술합니다."
-                            rows={2}
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none resize-none print:bg-white print:border-slate-300 print:text-slate-800"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* PAGE 2+: ACCORDION CHECKSHEETS & PRINT BREAK */}
-              <div className="space-y-4">
-                <h3 className="text-xs font-bold text-blue-400 uppercase tracking-wider border-l-2 border-blue-500 pl-2 print:hidden">
-                  안전 점검 체크시트 상세 (해당 유형 체크 시 활성화)
-                </h3>
-
-                {checksheets.map(({ id: typeId, name: sheetName, state: checkState }) => {
-                  const isSelected = selectedTypes.includes(typeId);
-                  const isExpanded = accordionOpen[typeId];
-
-                  if (!isSelected && !isFormOpen) return null; // Only show active sheets in print/display
-
-                  return (
-                    <div
-                      key={typeId}
-                      className={`border rounded-xl overflow-hidden transition-all duration-200 ${
-                        isSelected
-                          ? 'border-slate-800 bg-slate-950/10'
-                          : 'border-slate-900 bg-slate-950/5 opacity-40 print:hidden'
-                      } print:border-slate-300 print:bg-white print:rounded-none print:opacity-100 print:break-before-page`}
-                    >
-                      {/* Accordion Header */}
-                      <button
-                        type="button"
-                        onClick={() => toggleAccordion(typeId)}
-                        disabled={!isSelected}
-                        className="w-full px-5 py-3.5 flex justify-between items-center text-xs font-bold text-slate-300 border-0 bg-slate-900/40 hover:bg-slate-900/60 disabled:cursor-not-allowed select-none print:bg-slate-100 print:text-slate-900 print:border-b print:border-slate-300"
-                      >
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${isSelected ? 'bg-blue-500' : 'bg-slate-700'} print:hidden`} />
-                          <span>{sheetName} {!isSelected && '(유형 선택 시 작성 가능)'}</span>
-                        </div>
-                        <div className="print:hidden">
-                          {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                        </div>
-                      </button>
-
-                      {/* Accordion Body */}
-                      {isExpanded && isSelected && (
-                        <div className="p-4 space-y-4">
-                          <table className="w-full text-left text-xs border-collapse">
-                            <thead>
-                              <tr className="border-b border-slate-800 text-slate-500 select-none print:border-slate-300 print:text-slate-700">
-                                <th className="p-2 w-12 text-center">번호</th>
-                                <th className="p-2 w-3/5">안전 조치 및 점검 문항</th>
-                                <th className="p-2 text-center w-24">체크 여부</th>
-                                <th className="p-2">점검 확인사항/비고</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {checkState.map((check, idx) => (
-                                <tr key={idx} className="border-b border-slate-900 hover:bg-slate-900/10 text-slate-300 print:border-slate-200 print:text-slate-800">
-                                  <td className="p-2.5 text-center text-slate-500">{idx + 1}</td>
-                                  <td className="p-2.5 font-semibold">{check.question}</td>
-                                  <td className="p-2 text-center">
-                                    <input
-                                      type="checkbox"
-                                      checked={check.checked}
-                                      onChange={(e) => handleCheckChange(typeId, idx, 'checked', e.target.checked)}
-                                      className="w-4 h-4 cursor-pointer accent-blue-600 print:accent-black"
-                                    />
-                                  </td>
-                                  <td className="p-2">
-                                    <input
-                                      type="text"
-                                      value={check.remarks}
-                                      onChange={(e) => handleCheckChange(typeId, idx, 'remarks', e.target.value)}
-                                      placeholder="특이사항 기록"
-                                      className="w-full bg-slate-950 border border-slate-900 focus:border-blue-500 rounded px-2.5 py-1 text-xs text-slate-300 outline-none print:border-slate-200 print:bg-white print:text-slate-800"
-                                    />
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-6 border-t border-slate-800 flex justify-between items-center shrink-0 print:hidden">
-              <div className="flex gap-2 ml-auto">
-                <button
-                  type="button"
-                  onClick={() => setIsFormOpen(false)}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer border-0"
-                >
-                  닫기
-                </button>
-                {canEditCurrent && <button
-                  onClick={() => handleSave('T')}
-                  disabled={isLoading}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-750 rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  임시 저장
-                </button>}
-                {canEditCurrent && <button
-                  onClick={() => handleSave('P')}
-                  disabled={isLoading}
-                  className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-4 text-xs font-semibold transition-colors cursor-pointer border-0 disabled:opacity-50"
-                >
-                  결재 상신
-                </button>}
-              </div>
-            </div>
-          </div>
-        </div>
+        <WorkPermitFormModal
+          title={wpNo ? `작업허가 ${stepStage === 'P' ? '계획' : '실적'} 수정/상세 [${wpNo}] ${equipmentName}` : `신규 작업허가 ${stepStage === 'P' ? '계획' : '실적'} 작성`}
+          onClose={() => setIsFormOpen(false)}
+          form={{
+            wpNo,
+            stepStage,
+            createdAt,
+            departmentId,
+            depts,
+            createdBy,
+            user,
+            usersList,
+            title,
+            setTitle,
+            equipmentId,
+            plantId,
+            activePlantId,
+            canEditCurrent,
+            canDeleteCurrent,
+            setEquipmentId,
+            setEquipmentName,
+            setPlantId,
+            supervisorId,
+            setSupervisorId,
+            workOrderId,
+            setWorkOrderId,
+            workOrders,
+            startAt,
+            setStartAt,
+            endAt,
+            setEndAt,
+            selectedTypes,
+            handleTypeToggle,
+            getWpTypeLabel,
+            workSummary,
+            setWorkSummary,
+            riskFactors,
+            setRiskFactors,
+            safetyMeasures,
+            setSafetyMeasures,
+            checksheets,
+            accordionOpen,
+            toggleAccordion,
+            handleCheckChange,
+            isLoading,
+            handleSave,
+            handleDelete,
+          }}
+        />
       )}
       <ApprovalDraftModal
         open={!!approvalRef}
@@ -1004,7 +717,7 @@ export default function WorkPermit() {
           setApprovalRef(null);
           setIsFormOpen(false);
           toast.success('작업허가서 결재 문서가 상신되었습니다.');
-          fetchData();
+          loadList();
         }}
       />
     </div>

@@ -33,17 +33,19 @@ export default function PowerGeneration() {
   const [monthly, setMonthly] = useState<PowerGenerationMonthly | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const loadMonth = useCallback(async (month = viewMonth) => {
+  const loadMonth = useCallback(async (month: string) => {
     try {
       setMonthly(await powerGenerationApi.getMonthly(month.replace('-', '')));
     } catch (error) {
       toastApiError(error, '월간 발전량을 불러오지 못했습니다.');
     }
-  }, [viewMonth]);
+  }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void loadMonth(viewMonth); }, 0);
-    return () => window.clearTimeout(timer);
+    const run = async () => {
+      await loadMonth(viewMonth);
+    };
+    void run();
   }, [loadMonth, viewMonth]);
 
   const handleImport = async () => {
@@ -57,7 +59,6 @@ export default function PowerGeneration() {
       const result = await powerGenerationApi.importDay(compactDay);
       const month = tradingDay.slice(0, 7);
       setViewMonth(month);
-      await loadMonth(month);
       toast.success(
         `${result.tradingDay} 발전량 ${result.importedCount}건, ${formatMwh(result.totalMwh)} MWh를 저장했습니다.`,
       );
@@ -100,7 +101,7 @@ export default function PowerGeneration() {
           </label>
           <button
             type="button"
-            onClick={() => void loadMonth()}
+            onClick={() => void loadMonth(viewMonth)}
             className="flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-xs font-bold text-white transition hover:bg-emerald-500"
           >
             <RefreshCw size={15} />

@@ -13,6 +13,7 @@ export abstract class BaseEntity {
   @Column({ name: 'updated_by', length: 50 })
   updatedBy!: string;
 
+  /** 논리삭제 데이터는 일반 조회와 업무 처리에서 제외한다. */
   @Column({ name: 'delete_yn', length: 1, default: 'N' })
   deleteYn!: string;
 }

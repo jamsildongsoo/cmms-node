@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Edit2, Plus, Trash2 } from 'lucide-react';
 import ListIconButton from '../../../components/ListIconButton';
 import { getApiErrorMessage } from '../../../utils/apiError';
@@ -24,7 +24,7 @@ export default function CodeManager({ notify, canCreate, canUpdate, canDelete }:
   const [sortOrder, setSortOrder] = useState(0);
   const [itemEditingId, setItemEditingId] = useState<string | null>(null);
 
-  const fetchGroups = async () => {
+  const loadGroups = useCallback(async () => {
     try {
       const loadedGroups = await codeGroupApi.getAll();
       setGroups(loadedGroups);
@@ -36,39 +36,30 @@ export default function CodeManager({ notify, canCreate, canUpdate, canDelete }:
     } catch (err) {
       notify('error', getApiErrorMessage(err, '공통코드 그룹 조회 실패.'));
     }
-  };
+  }, [notify]);
 
-  const fetchItems = async (groupId: string) => {
+  const loadItems = useCallback(async (groupId: string) => {
     try {
       setItems(await codeGroupApi.getItems(groupId));
     } catch (err) {
       notify('error', getApiErrorMessage(err, '상세 코드 조회 실패.'));
     }
-  };
+  }, [notify]);
 
   useEffect(() => {
-    let active = true;
-    void codeGroupApi.getAll()
-      .then((loadedGroups) => {
-        if (!active) return;
-        setGroups(loadedGroups);
-        setSelectedGroupId(loadedGroups[0]?.id ?? null);
-      })
-      .catch((err) => {
-        if (active) notify('error', getApiErrorMessage(err, '공통코드 그룹 조회 실패.'));
-      });
-    return () => { active = false; };
-  }, [notify]);
+    const run = async () => {
+      await loadGroups();
+    };
+    void run();
+  }, [loadGroups]);
+
   useEffect(() => {
     if (!selectedGroupId) return;
-    let active = true;
-    void codeGroupApi.getItems(selectedGroupId)
-      .then((loaded) => { if (active) setItems(loaded); })
-      .catch((err) => {
-        if (active) notify('error', getApiErrorMessage(err, '상세 코드 조회 실패.'));
-      });
-    return () => { active = false; };
-  }, [notify, selectedGroupId]);
+    const run = async () => {
+      await loadItems(selectedGroupId);
+    };
+    void run();
+  }, [loadItems, selectedGroupId]);
 
   const resetGroupForm = () => {
     setGrpId('');
@@ -89,7 +80,7 @@ export default function CodeManager({ notify, canCreate, canUpdate, canDelete }:
         notify('success', '새 코드 그룹이 추가되었습니다.');
       }
       resetGroupForm();
-      await fetchGroups();
+      await loadGroups();
     } catch (err) {
       notify('error', getApiErrorMessage(err, '그룹 저장 실패.'));
     }
@@ -113,7 +104,7 @@ export default function CodeManager({ notify, canCreate, canUpdate, canDelete }:
         setItems([]);
         resetItemForm();
       }
-      await fetchGroups();
+      await loadGroups();
     } catch (err) {
       notify('error', getApiErrorMessage(err, '그룹 삭제 실패.'));
     }
@@ -133,7 +124,7 @@ export default function CodeManager({ notify, canCreate, canUpdate, canDelete }:
         notify('success', '상세 코드가 등록되었습니다.');
       }
       resetItemForm();
-      fetchItems(selectedGroupId);
+      await loadItems(selectedGroupId);
     } catch (err) {
       notify('error', getApiErrorMessage(err, '저장 실패.'));
     }
@@ -144,7 +135,7 @@ export default function CodeManager({ notify, canCreate, canUpdate, canDelete }:
     try {
       await codeGroupApi.deleteItem(selectedGroupId, id);
       notify('success', '코드가 삭제되었습니다.');
-      fetchItems(selectedGroupId);
+      await loadItems(selectedGroupId);
     } catch (err) {
       notify('error', getApiErrorMessage(err, '삭제 실패.'));
     }

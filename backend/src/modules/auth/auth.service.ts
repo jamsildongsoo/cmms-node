@@ -31,12 +31,11 @@ import {
 } from './dto/auth-request.dto';
 import { AppModule } from '../../common/constants/module.constants';
 import { User } from '../../entities/users.entity';
-import { Plant } from '../../entities/plant.entity';
 import { Company } from '../../entities/company.entity';
 import { LoginHistory } from '../../entities/login-history.entity';
 import { AuthRefreshSession } from '../../entities/auth-refresh-session.entity';
 import { DEFAULT_AVATAR_KEY, isAvatarKey } from '../../common/constants/avatar.constants';
-import { DepartmentAccessService, ModuleAccessMap } from '../../common/permissions/department-access.service';
+import { UserAccessService, ModuleAccessMap } from '../../common/permissions/user-access.service';
 
 @Injectable()
 export class AuthService {
@@ -56,15 +55,13 @@ export class AuthService {
     private readonly config: ConfigService,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-    @InjectRepository(Plant)
-    private readonly plantRepository: Repository<Plant>,
     @InjectRepository(Company)
     private readonly companyRepository: Repository<Company>,
     @InjectRepository(LoginHistory)
     private readonly loginHistoryRepository: Repository<LoginHistory>,
     @InjectRepository(AuthRefreshSession)
     private readonly refreshSessionRepository: Repository<AuthRefreshSession>,
-    private readonly departmentAccessService: DepartmentAccessService,
+    private readonly userAccessService: UserAccessService,
   ) {
     this.passwordExpiryDays = config.get<number>('PASSWORD_EXPIRY_DAYS', 90);
     this.maxFailedAttempts = config.get<number>('PASSWORD_MAX_FAILED', 5);
@@ -128,14 +125,9 @@ export class AuthService {
       throw new UnauthorizedException(msg);
     }
 
-    let homePlantId: string | null = user.lastLoginPlantId;
-    if (!homePlantId) {
-      const plant = await this.plantRepository.findOne({
-        select: { id: true },
-        where: { companyId, deleteYn: 'N' },
-        order: { id: 'ASC' },
-      });
-      homePlantId = plant?.id ?? null;
+    const homePlantId = user.homePlantId;
+    if (user.scope === 'PLANT' && !homePlantId) {
+      throw new UnauthorizedException('PLANT 범위 사용자는 Home Plant가 지정되어야 로그인할 수 있습니다.');
     }
 
     await this.userRepository.update(
@@ -145,7 +137,6 @@ export class AuthService {
         accountLockedUntil: null,
         lastLoginAt: now,
         lastLoginIp: ipAddress,
-        lastLoginPlantId: homePlantId,
       },
     );
     await this.recordLoginHistory(companyId, req.id, ipAddress, 'SUCCESS');
@@ -171,7 +162,6 @@ export class AuthService {
       where: { id: companyId },
     });
     const moduleAccess = await this.resolveModuleAccess(companyId, req.id, user.roleId);
-    const departmentWarehouseId = await this.departmentAccessService.getDepartmentWarehouseId(companyId, req.id);
     const response = this.buildLoginResponse(
       accessToken,
       companyId,
@@ -182,7 +172,6 @@ export class AuthService {
       mustChange,
       expired,
       moduleAccess,
-      departmentWarehouseId,
     );
     const refresh = await this.issueRefreshSession(companyId, req.id, ipAddress, userAgent);
 
@@ -250,6 +239,10 @@ export class AuthService {
       await this.revokeRefreshSession(session, 'SYSTEM');
       throw new UnauthorizedException('사용자를 찾을 수 없습니다.');
     }
+    if (user.scope === 'PLANT' && !user.homePlantId) {
+      await this.revokeRefreshSession(session, 'SYSTEM');
+      throw new UnauthorizedException('PLANT 범위 사용자는 Home Plant가 지정되어야 로그인할 수 있습니다.');
+    }
 
     const payload: JwtPayload = {
       sub: `${decoded.companyId}:${decoded.userId}`,
@@ -258,7 +251,7 @@ export class AuthService {
       roleId: user.roleId ?? '',
       scope: user.scope,
       departmentId: user.departmentId ?? null,
-      homePlantId: user.lastLoginPlantId ?? null,
+      homePlantId: user.homePlantId,
     };
     const accessToken = this.signAccessToken(payload);
     const company = await this.companyRepository.findOne({
@@ -270,10 +263,6 @@ export class AuthService {
       decoded.userId,
       user.roleId,
     );
-    const departmentWarehouseId = await this.departmentAccessService.getDepartmentWarehouseId(
-      decoded.companyId,
-      decoded.userId,
-    );
     const expired = !!(
       user.passwordChangedAt &&
       user.passwordChangedAt.getTime() + this.passwordExpiryDays * 86400000 < Date.now()
@@ -284,11 +273,10 @@ export class AuthService {
       company?.name ?? decoded.companyId,
       decoded.userId,
       user,
-      user.lastLoginPlantId ?? null,
+      user.homePlantId,
       user.mustChangePassword === 'Y' || expired,
       expired,
       moduleAccess,
-      departmentWarehouseId,
     );
     const rotated = await this.rotateRefreshSession(
       session,
@@ -375,7 +363,7 @@ export class AuthService {
       departmentId: user.departmentId ?? null,
       roleId: user.roleId ?? '',
       scope: user.scope,
-      homePlantId: user.lastLoginPlantId ?? null,
+      homePlantId: user.homePlantId,
       mustChangePassword: user.mustChangePassword === 'Y',
     };
   }
@@ -594,7 +582,7 @@ export class AuthService {
         },
       ]));
     }
-    return this.departmentAccessService.getAccessMap(companyId, userId);
+    return this.userAccessService.getAccessMap(companyId, userId);
   }
 
   private buildLoginResponse(
@@ -607,7 +595,6 @@ export class AuthService {
     mustChange: boolean,
     expired: boolean,
     moduleAccess: ModuleAccessMap,
-    departmentWarehouseId: string | null,
   ): LoginResponse {
     return {
       accessToken,
@@ -625,7 +612,6 @@ export class AuthService {
       mustChangePassword: mustChange,
       passwordExpired: expired,
       moduleAccess,
-      departmentWarehouseId,
     };
   }
 }

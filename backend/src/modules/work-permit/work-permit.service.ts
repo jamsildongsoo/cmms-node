@@ -88,20 +88,8 @@ export class WorkPermitService {
       AppModule.WP,
     );
     if (!plantId) throw new BadRequestException('사업장을 확인할 수 없습니다.');
-    // 관리용 호환 경로: 일반 FE에서는 사용하지 않지만, 별도 관리 호출의
-    // status='S' 저장을 위해 기존 직접확정 검증을 유지한다.
-    if (input.status === DocStatus.SELF_CONFIRMED) {
-      await this.permissionPolicyService.assertActionPermission({
-        companyId,
-        roleId: roleId ?? '',
-          userId: operator,
-        module: AppModule.WP,
-        action: 'A',
-        resourceLabel: '작업허가 직접 확정',
-      });
-    }
-    if (![DocStatus.TEMP, DocStatus.SELF_CONFIRMED].includes(input.status as DocStatus)) {
-      throw new BadRequestException('작업허가 저장 상태는 임시저장 또는 직접확정만 허용됩니다.');
+    if (input.status !== DocStatus.TEMP) {
+      throw new BadRequestException('작업허가는 임시저장 상태로만 저장할 수 있습니다.');
     }
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();

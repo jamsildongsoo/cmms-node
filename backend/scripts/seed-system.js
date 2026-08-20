@@ -4,7 +4,7 @@
 
    생성 대상:
      · company       SYSTEM            (시스템)
-     · role          SYSTEM/SYSTEM     (시스템관리자, multi_plant='Y')
+     · role          SYSTEM/SYSTEM     (시스템관리자)
      · users         SYSTEM/system     (bcryptjs 해시, role_id='SYSTEM')
 
    이후 로그인 → 화면의 '회사 생성'(POST /api/system/companies, SYSTEM 권한)으로
@@ -165,8 +165,8 @@ async function main() {
 
     // 롤
     await client.query(
-      `INSERT INTO role (company_id, id, role_name, multi_plant, created_by, updated_by, delete_yn)
-       VALUES ('SYSTEM', 'SYSTEM', '시스템관리자', 'Y', $1, $1, 'N')
+      `INSERT INTO role (company_id, id, role_name, created_by, updated_by, delete_yn)
+       VALUES ('SYSTEM', 'SYSTEM', '시스템관리자', $1, $1, 'N')
        ON CONFLICT (company_id, id) DO NOTHING`,
       [OP],
     );

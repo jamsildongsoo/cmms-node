@@ -4,7 +4,7 @@
 
 /**
  * 권한 액션 (role_detail.perm_c/r/u/d/a)
- * A는 결재·관리 행위 전용 액션으로 사용한다.
+ * A는 직접확정 등 모듈별 확장 업무 action에 사용한다.
  */
 export type PermAction = 'C' | 'R' | 'U' | 'D' | 'A';
 

@@ -42,7 +42,7 @@
 
 *   `POST /approval/:id/actions/approve`
 *   `POST /approval/:id/actions/reject`
-*   `POST /procurement/requests/:id/actions/confirm`
+*   `POST /procurement/orders/:id/actions/confirm`
 *   `POST /procurement/requests/:id/actions/close`
 
 ---
@@ -140,3 +140,79 @@ API의 `path/query/body/actions` 구분과 `companyId`·`plantId` 범위 규칙�
 *   신규 모듈 추가 시 본 문서 규칙을 기본으로 적용합니다.
 *   기존 모듈 리팩터링 시 본 규칙으로 점진적으로 수렴합니다.
 *   규칙 예외를 도입할 경우 `docs/product_spec.md` 또는 별도 설계 문서에 근거를 남깁니다.
+
+---
+
+## 9. FE 페이지 구조 원칙
+
+*   업무 모듈 페이지는 하나의 Container가 목록, 상세/수정, 저장·삭제·상태전이 흐름을 조정합니다.
+*   상세 조회와 수정 화면은 동일 화면을 사용하고, 수정 권한이 있을 때만 저장·삭제·상태전이 버튼을 노출하거나 활성화합니다.
+*   대형 업무문서의 입력 UI는 페이지/Container 파일에 직접 넣지 않고 `{Module}FormModal`로 분리합니다. Container는 상태·API·업무행위 callback을 소유하고 FormModal은 필드·item 입력과 화면 검증을 렌더링합니다.
+*   PUR·POR는 기반 테이블과 업무 흐름이 다르므로 각각 `PurchaseRequestFormModal`, `PurchaseOrderFormModal`이 자신의 필드와 버튼을 소유합니다. 모듈 간에는 공통 `Modal` 껍데기만 공유합니다.
+*   단일 FormModal에서만 사용하는 `FormField`, FormBody, Context, 별도 form types 파일은 만들지 않습니다. 실제 재사용처가 둘 이상이고 상태·UI 계약이 동일한 경우에만 공통 컴포넌트를 둡니다.
+*   입력 하나 수준의 짧은 업무 action은 별도 FormModal을 만들지 않고 공통 `Modal`을 직접 사용합니다. `ApprovalDraftModal`은 결재선·첨부·자동저장·중첩 표시가 결합된 독립 업무 흐름이므로 별도 업무 Modal 예외로 유지합니다.
+*   출력물은 업무 화면과 분리된 `*Print` 컴포넌트 또는 출력 전용 렌더링으로 관리합니다.
+*   목록은 업무별 컬럼·상태·권한 분기를 유지합니다. 데이터 구조와 업무 규칙이 다른 화면을 무리하게 공통화하지 않습니다.
+*   PM·WO·WP처럼 목록 패널 구조가 동일한 경우에는 레이아웃만 공통화하고, 행 표시와 업무 분기는 각 모듈에 둡니다.
+*   공통 화면 요소는 `components`, 업무 의미가 있는 selector·API·출력물은 해당 `features/{module}` 아래에 둡니다. `ReferenceSelector`처럼 여러 도메인 selector를 한 파일에 묶지 않습니다.
+*   `SearchSelect`는 검색 입력·debounce·결과 목록만 담당하고, 설비·자재·사용자·부서의 API와 표시 형식은 각 feature selector가 담당합니다. 10건 이상 선택지는 bounded dropdown 또는 내부 스크롤을 사용합니다.
+*   출력물은 공통 헤더(회사명·출력일시·출력자·페이지)와 표/섹션 레이아웃을 공유하되, 업무별 출력 데이터와 세로·가로 양식은 각 `*Print`에서 결정합니다.
+*   기준정보·마스터정보는 별도 상세 페이지를 강제하지 않고 현재 통합 화면을 유지할 수 있습니다. 다만 조회·저장·삭제 함수명과 API 호출 패턴은 업무 모듈과 통일합니다.
+*   PUR·POR처럼 기반 테이블과 업무 목적이 다른 화면은 진입 페이지와 목록을 분리합니다. 공통화는 실제 상태·필드·동작이 같은 부분에만 적용합니다.
+
+## 10. FE 조회·상태 갱신 패턴
+
+*   목록과 기준정보 조회는 화면별 `loadList` 또는 의미가 명확한 `loadReferences` 한 곳에 둡니다.
+*   초기 조회는 `useEffect`가 로더를 호출합니다. 로더의 변경 요인은 `useCallback` 의존성으로 명시합니다.
+*   effect 안에서는 프로젝트의 `react-hooks/set-state-in-effect` 규칙을 지키기 위해 짧은 비동기 `run` 함수가 `load...`를 호출합니다. 일반 조회에 `setTimeout`이나 `queueMicrotask`를 사용하지 않습니다. 시간 지연이 요구되는 검색 debounce·자동저장·포커스 해제만 예외입니다.
+*   저장·삭제·확정·승인 등 성공 후에는 별도 조회 함수를 만들지 않고 동일한 로더를 직접 호출합니다.
+*   일반 조회를 지연시키기 위해 `setTimeout`을 사용하지 않습니다. 검색 입력 debounce나 임시저장 자동 저장처럼 시간 지연 자체가 업무 요구인 경우에만 예외로 둡니다.
+*   상세 API를 호출해 편집 상태를 채우는 함수명은 `loadDetail`을 기본으로 사용합니다. 저장과 삭제는 `handleSave`, `handleDelete`를 기본으로 사용합니다.
+*   FE 페이지는 API URI를 직접 조합하지 않고 `features/*/*.api.ts` wrapper의 함수만 호출합니다.
+*   요청 DTO와 FE payload에는 BE DTO의 필수 식별자·item 순번·첨부파일 그룹 식별자를 누락하지 않습니다. item 순번은 저장 직전에 `itemNo` 기준으로 정규화할 수 있습니다.
+*   문서 목록의 기본조건은 회사·허용 plant·`deleteYn='N'`입니다. 임시저장 필터 OFF는 `status<>'T'`와 일반 검색조건을 적용하고, ON은 `status='T' AND createdBy=현재 사용자`만 적용해 검색조건을 무시합니다.
+*   신규 임시저장 `POST`는 C, 기존 임시저장 `PUT`은 U, 저장된 T 문서의 직접확정 `T→S` action은 A 권한으로 구분합니다. 현재 직접확정 A는 결재연계 전인 POR에서만 사용하지만 A 권한 모델은 향후 다른 모듈의 확장 action에도 사용할 수 있습니다. 결재 승인·반려는 직접확정이 아니므로 APR 결재선 담당자 검증을 따릅니다.
+
+## 11. 용어·권한·범위 기준
+
+*   DB·BE entity·API·FE 내부 타입의 기준 용어는 기존 `Inventory`를 유지합니다. 화면 표시 문구는 업무 사용성에 따라 `자재`로 표시할 수 있습니다.
+*   일반 사용자의 회사·사업장 범위는 `scope`, `homePlantId`, activePlantId와 `role_detail` 권한으로 판단합니다.
+*   `ADMIN`도 별도 우회 권한을 갖지 않으며, 동일한 모듈 CRUD·범위·문서 상태 검증을 적용합니다.
+*   `multiPlant` 필드는 사용하지 않습니다. 신규 seed와 코드에도 해당 권한 플래그를 추가하지 않습니다.
+*   `SYSTEM` 사용자는 `SystemShell`과 system 전용 Guard/API를 사용하며, 일반 업무 모듈의 scope 판정 규칙을 재사용하지 않습니다.
+*   결재는 일반 모듈 CRUD 권한보다 결재선·현재 결재단계·문서 상태를 기준으로 처리합니다.
+
+## 12. BE 계층 책임
+
+*   Controller는 인증 사용자·tenant context·DTO를 전달하고 Service를 호출하는 역할을 담당합니다. 조회 조건 조합, 상태 검증, 소유권·사업장 범위 검증은 Service에서 처리합니다.
+*   `companyId`는 요청 body나 임의 query 값으로 받지 않고 JWT와 `TenantContext`에서 결정합니다.
+*   Controller에는 `JwtAuthGuard`, `PermissionGuard`, `ModulePermission(module, action)` 등 공통 접근 규칙을 선언합니다. HTTP 메서드에 따른 권한 자동 매핑은 사용하지 않습니다. 문서 상태·작성자·창고·결재단계 같은 업무 규칙은 Service 정책으로 검증합니다.
+*   권한 검증과 데이터 범위 검증을 하나의 ADMIN 예외문으로 우회하지 않습니다. `scope`, activePlantId, 자원 plantId를 함께 확인합니다.
+*   Entity를 Request DTO나 응답으로 직접 노출하지 않습니다. 입력은 class-validator DTO, 출력은 명시적 response type 또는 Service 매핑을 사용합니다.
+*   단, MDM의 단순 기준정보 CRUD는 현재 결정에 따라 `Partial<Entity>` 입력을 예외적으로 유지합니다. 이 경우에도 Service에서 허용 필드와 회사 범위를 검증합니다.
+*   전역 `ValidationPipe`의 `transform`, `whitelist`, `forbidNonWhitelisted` 정책을 유지하고, DTO에 없는 입력 필드는 허용하지 않습니다.
+*   BE는 정상 결과를 반환하고 예외는 적절한 NestJS HTTP 예외로 전달합니다. 전역 예외 필터가 공통 오류 응답과 로그를 담당합니다.
+
+## 13. BE 트랜잭션·동시성 원칙
+
+*   하나의 업무 요청이 두 개 이상의 header/item/status/allocation을 변경하면 하나의 TypeORM transaction으로 처리합니다.
+*   재고 입고·출고·이동·조정은 all-or-nothing으로 처리합니다. `inventory_status` 대상 행은 `pessimistic_write`로 잠근 뒤 잔량·금액·평균단가를 갱신합니다.
+*   재고 원장 `inventory_history`는 실제 처리 결과를 append-only로 기록합니다. 기존 원장 행을 수정·삭제하지 않고, 취소는 반대 방향의 신규 전표로 처리합니다.
+*   재고 처리 전 마감월, 창고·자재 유효성, 출고 가능 수량, 취소 가능 여부를 검증합니다.
+*   구매 allocation과 PO 입고 참조 검증은 관련 PO/item/allocation을 잠그고 수량 검증을 같은 transaction에서 수행합니다. 창고 이동은 구매문서·allocation과 분리합니다.
+*   외부 연계나 파일 저장처럼 DB transaction과 원자적으로 묶을 수 없는 작업은 성공·실패 보상 또는 재시도 가능성을 고려해 처리합니다.
+
+## 14. BE 수치·상태·채번 규칙
+
+*   수량·단가·금액 계산에 JavaScript `number`의 직접 누적을 사용하지 않고 공통 `Decimal` 유틸리티를 사용합니다.
+*   DB numeric 값은 업무 기준 소수점 4자리로 저장·교환하고, FE 표시 단계에서만 수량 소수점 2자리·금액 정수 표시로 변환합니다.
+*   문서 상태를 임의 문자열로 생성하지 않고 공통 status 상수를 사용합니다. 상태 변경은 일반 수정과 분리된 명시적 action Service에서 허용된 전이만 수행합니다.
+*   문서번호·전표번호는 `SequenceService`를 사용합니다. Controller나 Service에서 현재 건수를 세어 번호를 직접 생성하지 않습니다.
+*   업무 item의 순번은 저장 직전에 `itemNo`/`item_no` 기준으로 정규화하고, 부모 문서 범위에서 중복되지 않도록 검증합니다.
+
+## 15. BE 변경·검증 기준
+
+*   BE API, DTO, Entity, Service를 변경하면 대응하는 FE API wrapper와 타입을 함께 확인합니다.
+*   권한·범위·상태·수량·취소 로직은 정상 케이스뿐 아니라 타 회사, 다른 사업장, 중복 요청, 잘못된 상태, 부족 재고를 검증하는 테스트를 우선합니다.
+*   운영 환경에서는 `DB_SYNCHRONIZE=false`를 유지하며 Entity 변경만으로 운영 스키마가 변경된다고 가정하지 않습니다.
+*   공통 규칙을 우회하는 특수 처리가 필요하면 대상 API·상태·권한·transaction 범위와 사유를 changelog 또는 기술 사양서에 기록합니다.

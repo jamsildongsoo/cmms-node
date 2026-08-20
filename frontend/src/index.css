@@ -45,6 +45,14 @@ html.light {
   min-height: 44px;
 }
 
+/* 네이티브 select의 긴 선택값이 레이아웃을 밀어내지 않도록 한 줄 표시한다. */
+.select-one-line {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Tiptap 편집·상세·인쇄 공용 본문 스타일 */
 .rich-text-content {
   color: var(--color-slate-200);

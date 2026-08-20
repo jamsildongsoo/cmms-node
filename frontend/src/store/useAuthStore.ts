@@ -18,7 +18,6 @@ interface User {
   title: string | null;
   homePlantId: string | null;
   moduleAccess: ModuleAccessMap;
-  departmentWarehouseId: string | null;
   mustChangePassword?: boolean;
   passwordExpired?: boolean;
 }
@@ -49,7 +48,6 @@ interface AuthResponse {
   title: string | null;
   homePlantId: string | null;
   moduleAccess: ModuleAccessMap;
-  departmentWarehouseId: string | null;
   mustChangePassword?: boolean;
   passwordExpired?: boolean;
 }
@@ -159,7 +157,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   },
 
   applyAuth: (data) => {
-    const isCompanyWide = data.scope === 'COMPANY';
     const user: User = {
       companyId: data.companyId,
       companyName: data.companyName || data.companyId,
@@ -173,7 +170,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       title: data.title,
       homePlantId: data.homePlantId,
       moduleAccess: data.moduleAccess || {},
-      departmentWarehouseId: data.departmentWarehouseId ?? null,
       mustChangePassword: data.mustChangePassword,
       passwordExpired: data.passwordExpired,
     };
@@ -184,9 +180,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       user,
       token: data.accessToken,
       error: null,
-      activePlantId: isCompanyWide ? null : data.homePlantId,
+      activePlantId: data.homePlantId,
     });
-    if (!isCompanyWide && data.homePlantId) {
+    if (data.homePlantId) {
       axiosInstance.defaults.headers.common['X-Active-Plant-Id'] = data.homePlantId;
     } else {
       delete axiosInstance.defaults.headers.common['X-Active-Plant-Id'];

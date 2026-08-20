@@ -20,7 +20,7 @@ export default function PrintHeader({ approvalNo }: PrintHeaderProps) {
   return (
     <div className="print-header hidden print:flex print:justify-between print:items-center print:mb-2 print:text-[9px] print:text-slate-500 print:border-b print:border-slate-300 print:pb-1">
       <div className="flex gap-4">
-        <span>회사코드: {user?.companyId || 'CMMS'}</span>
+        <span>회사명: {user?.companyName || user?.companyId || 'CMMS'}</span>
         <span>출력일시: {stamp}</span>
         <span>출력자: {user?.name || '-'}</span>
       </div>

@@ -14,6 +14,7 @@ export function getDataSourceOptions(config: ConfigService): DataSourceOptions {
   const password = config.get<string>('DB_PASSWORD');
   const schema = config.get<string>('DB_SCHEMA', 'public');
   const sslEnabled = config.get<string>('DB_SSL', 'false') === 'true';
+  let useSsl = sslEnabled;
 
   const options: any = {
     type: 'postgres',
@@ -26,6 +27,8 @@ export function getDataSourceOptions(config: ConfigService): DataSourceOptions {
       config.get<string>('DB_SYNCHRONIZE', 'false') === 'true',
     logging: config.get('NODE_ENV') === 'development',
     schema,
+    // DB_URL 사용 여부와 관계없이 DB_SSL 설정을 적용한다.
+    ssl: sslEnabled ? { rejectUnauthorized: false } : false,
     extra: {
       // 세션 풀러: 연결당 하나의 PostgreSQL 서버 세션 유지
       // QueryRunner FOR UPDATE + SET LOCAL 모두 정상 동작
@@ -53,15 +56,25 @@ export function getDataSourceOptions(config: ConfigService): DataSourceOptions {
     // ssl 쿼리 매개변수가 있으면 제거하고, 명시적으로 SSL 설정을 주입하여 self-signed cert 검증 에러 우려를 해소
     try {
       const parsedUrl = new URL(dbUrl);
-      if (parsedUrl.searchParams.has('ssl') || parsedUrl.searchParams.has('sslmode')) {
+      const sslParam = parsedUrl.searchParams.get('ssl')?.toLowerCase();
+      const sslMode = parsedUrl.searchParams.get('sslmode')?.toLowerCase();
+
+      // URL에 SSL 설정이 있으면 DB_SSL보다 URL 설정을 우선한다.
+      if (sslParam !== undefined) {
+        useSsl = sslParam === 'true';
+      } else if (sslMode !== undefined) {
+        useSsl = ['require', 'verify-ca', 'verify-full'].includes(sslMode);
+      }
+
+      if (sslParam !== undefined || sslMode !== undefined) {
         parsedUrl.searchParams.delete('ssl');
         parsedUrl.searchParams.delete('sslmode');
         dbUrl = parsedUrl.toString();
       }
-      options.ssl = sslEnabled ? { rejectUnauthorized: false } : false;
+      options.ssl = useSsl ? { rejectUnauthorized: false } : false;
     } catch (e) {
       if (
-        sslEnabled ||
+        useSsl ||
         dbUrl.includes('ssl=true') ||
         dbUrl.includes('sslmode=require')
       ) {

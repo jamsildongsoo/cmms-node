@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { useAuthStore } from '../store/useAuthStore';
 import { Mail, Phone, Briefcase, Lock, Save, Shield, Check, Palette } from 'lucide-react';
@@ -26,22 +26,27 @@ export default function MyPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
 
-  useEffect(() => {
-    if (user) {
-      accountApi.getMyProfile()
-        .then((data) => {
-          setName(data.name || '');
-          setEmail(data.email || '');
-          setPhone(data.phone || '');
-          setPosition(data.position || '');
-          setTitle(data.title || '');
-          setAvatarKey(data.avatarKey || 'user-blue');
-        })
-        .catch(err => {
-          console.error('Failed to load profile', err);
-        });
+  const loadProfile = useCallback(async () => {
+    try {
+      const data = await accountApi.getMyProfile();
+      setName(data.name || '');
+      setEmail(data.email || '');
+      setPhone(data.phone || '');
+      setPosition(data.position || '');
+      setTitle(data.title || '');
+      setAvatarKey(data.avatarKey || 'user-blue');
+    } catch (error: unknown) {
+      console.error('Failed to load profile', error);
     }
-  }, [user]);
+  }, []);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const run = async () => {
+      await loadProfile();
+    };
+    void run();
+  }, [loadProfile, user?.id]);
 
   const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

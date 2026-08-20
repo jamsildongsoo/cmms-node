@@ -18,7 +18,7 @@ import { EquipmentSaveRequestDto, InventoryUpsertDto } from './dto/master.dto';
 import { Equipment } from '../../entities/equipment.entity';
 import { Inventory } from '../../entities/inventory.entity';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { PermissionGuard, ModuleAccess, ModulePermission } from '../../common/guards/permission.guard';
+import { PermissionGuard, ModulePermission } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
@@ -31,17 +31,21 @@ export class MasterController {
   // 1. 설비 마스터 (Equipment)
   // =========================================================================
   @Get('equipments')
-  @ModuleAccess(AppModule.EQP)
+  @ModulePermission(AppModule.EQP, 'R')
 
-  async getEquipments(@Query('plantId') plantId?: string): Promise<Equipment[]> {
+  async getEquipments(
+    @Query('plantId') plantId?: string,
+    @Query('keyword') keyword?: string,
+    @Query('limit') limit?: string,
+  ): Promise<Equipment[]> {
     const { companyId, userId } = getTenantContext();
     return plantId
-      ? this.masterService.getEquipmentsByPlant(companyId, plantId, userId)
-      : this.masterService.getEquipmentsByCompany(companyId, userId);
+      ? this.masterService.getEquipmentsByPlant(companyId, plantId, userId, keyword, limit)
+      : this.masterService.getEquipmentsByCompany(companyId, userId, keyword, limit);
   }
 
   @Get('equipments/plant/:plantId')
-  @ModuleAccess(AppModule.EQP)
+  @ModulePermission(AppModule.EQP, 'R')
 
   async getEquipmentsByPlant(@Param('plantId') plantId: string): Promise<Equipment[]> {
     const { companyId, userId } = getTenantContext();
@@ -49,7 +53,7 @@ export class MasterController {
   }
 
   @Get('equipments/details')
-  @ModuleAccess(AppModule.EQP)
+  @ModulePermission(AppModule.EQP, 'R')
 
   async getEquipmentDetails(
     @Query('plantId') plantId: string,
@@ -60,7 +64,7 @@ export class MasterController {
   }
 
   @Post('equipments')
-  @ModuleAccess(AppModule.EQP)
+  @ModulePermission(AppModule.EQP, 'C')
   async createEquipment(@Body() request: EquipmentSaveRequestDto): Promise<Equipment> {
     const { companyId, userId } = getTenantContext();
     return this.masterService.saveEquipment(companyId, request, userId, 'create');
@@ -68,7 +72,7 @@ export class MasterController {
 
 
   @Put('equipments')
-  @ModuleAccess(AppModule.EQP)
+  @ModulePermission(AppModule.EQP, 'U')
   async updateEquipment(@Body() request: EquipmentSaveRequestDto): Promise<Equipment> {
     const { companyId, userId } = getTenantContext();
     return this.masterService.saveEquipment(companyId, request, userId, 'update');
@@ -76,7 +80,7 @@ export class MasterController {
 
   @Delete('equipments')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ModuleAccess(AppModule.EQP)
+  @ModulePermission(AppModule.EQP, 'D')
 
   async deleteEquipment(
     @Query('plantId') plantId: string,
@@ -87,7 +91,7 @@ export class MasterController {
   }
 
   @Get('equipments/csv')
-  @ModuleAccess(AppModule.EQP)
+  @ModulePermission(AppModule.EQP, 'R')
 
   async downloadEquipmentsCsv(@Res() res: Response): Promise<void> {
     const { companyId, userId } = getTenantContext();
@@ -102,15 +106,18 @@ export class MasterController {
   // 2. 재고 마스터 (Inventory)
   // =========================================================================
   @Get('inventories')
-  @ModuleAccess(AppModule.INV)
-  async getInventories(): Promise<Inventory[]> {
+  @ModulePermission(AppModule.INV, 'R')
+  async getInventories(
+    @Query('keyword') keyword?: string,
+    @Query('limit') limit?: string,
+  ): Promise<Inventory[]> {
     const { companyId } = getTenantContext();
-    return this.masterService.getInventoriesByCompany(companyId);
+    return this.masterService.getInventoriesByCompany(companyId, keyword, limit);
   }
 
 
   @Get('inventories/:id')
-  @ModuleAccess(AppModule.INV)
+  @ModulePermission(AppModule.INV, 'R')
 
   async getInventory(@Param('id') id: string): Promise<Inventory> {
     const { companyId } = getTenantContext();
@@ -118,14 +125,14 @@ export class MasterController {
   }
 
   @Post('inventories')
-  @ModuleAccess(AppModule.INV)
+  @ModulePermission(AppModule.INV, 'C')
   async createInventory(@Body() inventory: InventoryUpsertDto): Promise<Inventory> {
     const { companyId, userId } = getTenantContext();
     return this.masterService.saveInventory(companyId, inventory, userId, 'create');
   }
 
   @Put('inventories/:id')
-  @ModuleAccess(AppModule.INV)
+  @ModulePermission(AppModule.INV, 'U')
   async updateInventory(
     @Param('id') id: string,
     @Body() inventory: InventoryUpsertDto,
@@ -141,7 +148,7 @@ export class MasterController {
 
   @Delete('inventories/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ModuleAccess(AppModule.INV)
+  @ModulePermission(AppModule.INV, 'D')
 
   async deleteInventory(@Param('id') id: string): Promise<void> {
     const { companyId, userId } = getTenantContext();
@@ -149,7 +156,7 @@ export class MasterController {
   }
 
   @Get('inventories/csv')
-  @ModuleAccess(AppModule.INV)
+  @ModulePermission(AppModule.INV, 'R')
 
   async downloadInventoriesCsv(@Res() res: Response): Promise<void> {
     const { companyId } = getTenantContext();
@@ -160,4 +167,3 @@ export class MasterController {
     res.status(HttpStatus.OK).send(csv);
   }
 }
-

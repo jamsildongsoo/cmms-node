@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
 import { useThemeStore } from '../store/useThemeStore';
-import { referenceApi } from '../features/mdm/reference.api';
+import { mdmLookupApi } from '../features/mdm/reference.api';
 import { LogOut, UserCheck, Sun, Moon, Building2 } from 'lucide-react';
 
 interface PlantOption { id: string; name: string }
@@ -9,13 +9,14 @@ interface PlantOption { id: string; name: string }
 export default function Header() {
   const { user, logout, activePlantId, setActivePlantId } = useAuthStore();
   const isLightMode = useThemeStore((s) => s.isLight);
+  const canSelectAllPlants = user?.scope === 'COMPANY';
   const toggleTheme = useThemeStore((s) => s.toggle);
 
   // plant 필터는 권한 등급이 아니라 조회 범위를 선택하는 UI다.
   const [plants, setPlants] = useState<PlantOption[]>([]);
   useEffect(() => {
     if (!user) return;
-    referenceApi.getPlantOptions()
+    mdmLookupApi.getPlantOptions()
       .then(setPlants)
       .catch(() => setPlants([]));
   }, [user]);
@@ -52,7 +53,7 @@ export default function Header() {
             onChange={(e) => setActivePlantId(e.target.value || null)}
             className="bg-transparent text-slate-200 outline-none border-0 font-semibold cursor-pointer"
           >
-            <option value="">전체</option>
+            {canSelectAllPlants && <option value="">전체</option>}
             {plants.map(p => (
               <option key={p.id} value={p.id}>{p.id} — {p.name}</option>
             ))}

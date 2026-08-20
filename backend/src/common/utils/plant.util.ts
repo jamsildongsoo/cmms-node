@@ -21,19 +21,15 @@ export async function resolveActivePlantId(
   if (!module) return requestedPlantId;
 
   const user = await dataSource.getRepository(User).findOne({
-    select: { roleId: true, departmentId: true, lastLoginPlantId: true },
+    select: { scope: true, homePlantId: true },
     where: { companyId, id: operatorId, deleteYn: 'N', useYn: 'Y' },
   });
   if (!user) throw new ForbiddenException('유효한 사용자를 찾을 수 없습니다.');
 
-  const roleId = user.roleId?.toUpperCase();
-  if (companyId === 'SYSTEM' && roleId === 'SYSTEM') return requestedPlantId;
-  if (roleId === 'ADMIN') return requestedPlantId;
-
   if (user.scope === 'COMPANY') return requestedPlantId;
 
   const activePlantId = getTenantContext().activePlantId?.trim()
-    || user.lastLoginPlantId?.trim()
+    || user.homePlantId?.trim()
     || null;
   if (!activePlantId) throw new ForbiddenException('사용자의 현재 Plant가 없습니다.');
   if (requestedPlantId && requestedPlantId !== activePlantId) {

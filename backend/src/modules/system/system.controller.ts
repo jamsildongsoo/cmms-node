@@ -1,5 +1,5 @@
 import { Controller, Get, Post, Put, Body, Query, Param, UseGuards } from '@nestjs/common';
-import { SystemService } from './system.service';
+import { LoginHistoryResponse, SystemService, SystemUserResponse } from './system.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { getTenantContext } from '../../common/context/tenant.context';
 import { SystemGuard } from '../../common/guards/system.guard';
@@ -27,7 +27,7 @@ export class SystemController {
   }
 
   @Get('users')
-  async getUsers(@Query('companyId') companyId?: string) {
+  async getUsers(@Query('companyId') companyId?: string): Promise<SystemUserResponse[]> {
     return this.systemService.getUsers(companyId);
   }
 
@@ -35,7 +35,7 @@ export class SystemController {
   async getLoginHistory(
     @Query('companyId') companyId?: string,
     @Query('userId') userId?: string,
-  ) {
+  ): Promise<LoginHistoryResponse[]> {
     return this.systemService.getLoginHistory(companyId, userId);
   }
 

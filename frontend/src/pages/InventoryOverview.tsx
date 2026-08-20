@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Download, Layers, Printer } from 'lucide-react';
 import { toast } from 'sonner';
@@ -20,8 +20,8 @@ import type {
   StockStatus,
 } from '../features/stock/stock.types';
 import { stockApi } from '../features/stock/stock.api';
-import { referenceApi } from '../features/mdm/reference.api';
-import { masterReferenceApi } from '../features/master/master-reference.api';
+import { mdmLookupApi } from '../features/mdm/reference.api';
+import { masterLookupApi } from '../features/master/master-reference.api';
 import type { InventoryReference } from '../features/master/master-reference.types';
 import type { Department, ReferenceUser, Warehouse } from '../features/mdm/mdm.types';
 
@@ -37,15 +37,15 @@ export default function InventoryOverview() {
   const [searchType, setSearchType] = useState<'id' | 'title' | 'owner'>('id');
   const [searchValue, setSearchValue] = useState('');
 
-  async function loadData() {
+  const loadList = useCallback(async () => {
     try {
       const [loadedStatus, loadedHistory, loadedWarehouses, loadedDepts, loadedInventories, loadedUsers] = await Promise.all([
         stockApi.getStatus(),
         stockApi.getHistory(),
-        referenceApi.getWarehouseOptions(),
-        referenceApi.getDepartmentOptions(),
-        masterReferenceApi.getInventories(),
-        referenceApi.getUserOptions(),
+        mdmLookupApi.getWarehouseOptions(),
+        mdmLookupApi.getDepartmentOptions(),
+        masterLookupApi.getInventories(),
+        mdmLookupApi.getUserOptions(),
       ]);
       setStatusList(loadedStatus);
       setHistoryList(loadedHistory.map((history) => ({
@@ -59,12 +59,14 @@ export default function InventoryOverview() {
     } catch (error: unknown) {
       toastApiError(error, '재고 조회 데이터를 불러오지 못했습니다.');
     }
-  }
+  }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void loadData(); }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
+    const run = async () => {
+      await loadList();
+    };
+    void run();
+  }, [loadList]);
 
   const filteredStatusList = useMemo(() => {
     const keyword = searchValue.trim().toLowerCase();
@@ -135,7 +137,9 @@ export default function InventoryOverview() {
       <PrintWindowLayout printWindow={printWindow} contentClassName="max-w-[180mm]">
         <SlipPrint
           txTypeCode={slip.txTypeCode}
+          txReasonCode={getTxReasonLabel(slip.txReasonCode)}
           docNo={slip.docNo}
+          refNo={slip.refNo}
           txDate={slip.txDate}
           departmentName={departmentName}
           managerName={manager ? `${manager.id} / ${manager.name}` : slip.userId}
@@ -202,7 +206,7 @@ export default function InventoryOverview() {
   function handleListPrint() {
     const now = new Date();
     const common = {
-      companyName: user?.companyId || 'CMMS',
+      companyName: user?.companyName || user?.companyId || 'CMMS',
       printerName: user?.name || '-',
       printedAt: formatDateTimeSeconds(now),
     };

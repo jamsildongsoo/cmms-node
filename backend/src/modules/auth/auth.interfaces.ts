@@ -48,7 +48,6 @@ export interface LoginResponse {
   mustChangePassword: boolean;
   passwordExpired: boolean;
   moduleAccess: Record<string, { permC: 'Y' | 'N'; permR: 'Y' | 'N'; permU: 'Y' | 'N'; permD: 'Y' | 'N'; permA: 'Y' | 'N' }>;
-  departmentWarehouseId: string | null;
 }
 
 /** 사용자 프로필 응답 */

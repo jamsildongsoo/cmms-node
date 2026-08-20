@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
 import FileUpload from '../features/files/components/FileUpload';
@@ -10,9 +10,10 @@ import type {
   YesNo,
 } from '../features/board/board.types';
 import { useAuthStore } from '../store/useAuthStore';
-import { hasModuleManage } from '../utils/moduleAccess';
-import RichTextEditor from '../components/RichTextEditor';
+import { hasModuleCreate, hasModuleUpdate } from '../utils/moduleAccess';
 import RichTextViewer from '../components/RichTextViewer';
+import BoardFormModal from '../features/board/components/BoardFormModal';
+import Modal from '../components/Modal';
 import {
   createEmptyRichTextDocument,
   isRichTextEmpty,
@@ -22,13 +23,13 @@ import { formatDateTime } from '../utils/datetime';
 import { toastApiError } from '../utils/apiError';
 import ListBadge from '../components/ListBadge';
 import {
-  Plus, Trash, X, Megaphone, MessageSquare
+  Plus, Trash, Megaphone, MessageSquare
 } from 'lucide-react';
 
 export default function Board() {
   const user = useAuthStore((state) => state.user);
-  const canCreate = hasModuleManage(user?.moduleAccess, APP_MODULE.BRD);
-  const canManage = hasModuleManage(user?.moduleAccess, APP_MODULE.BRD);
+  const canCreate = hasModuleCreate(user?.moduleAccess, APP_MODULE.BRD);
+  const canManage = hasModuleUpdate(user?.moduleAccess, APP_MODULE.BRD);
 
   const [posts, setPosts] = useState<BoardPost[]>([]);
   
@@ -60,34 +61,23 @@ export default function Board() {
   const canDelete = (createdBy: string) =>
     createdBy === user?.id || canManage;
 
-  const fetchData = async () => {
+  const loadList = useCallback(async () => {
     try {
       setPosts(await boardApi.getPosts());
     } catch (err) {
       console.error(err);
       toastApiError(err, '목록을 불러오지 못했습니다.');
     }
-  };
-
-  useEffect(() => {
-    let active = true;
-
-    boardApi.getPosts()
-      .then((loadedPosts) => {
-        if (active) setPosts(loadedPosts);
-      })
-      .catch((err) => {
-        if (!active) return;
-        console.error(err);
-        toastApiError(err, '목록을 불러오지 못했습니다.');
-      });
-
-    return () => {
-      active = false;
-    };
   }, []);
 
-  const handleOpenDetail = async (post: BoardPost) => {
+  useEffect(() => {
+    const run = async () => {
+      await loadList();
+    };
+    void run();
+  }, [loadList]);
+
+  const loadDetail = async (post: BoardPost) => {
     setIsLoading(true);
     try {
       const detail = await boardApi.getDetail(post.id);
@@ -144,7 +134,7 @@ export default function Board() {
       const saved = await boardApi.savePost(payload);
       toast.success('저장 완료되었습니다.');
       setIsFormOpen(false);
-      await fetchData();
+      await loadList();
       if (formId && selectedPost && selectedPost.id === formId) {
         setSelectedPost(saved);
       }
@@ -161,7 +151,7 @@ export default function Board() {
       await boardApi.deletePost(post.id);
       toast.success('삭제되었습니다.');
       setIsDetailOpen(false);
-      await fetchData();
+      await loadList();
     } catch (err) {
       toastApiError(err, '삭제 오류 발생');
     }
@@ -256,7 +246,7 @@ export default function Board() {
                           <button
                             type="button"
                             className="bg-transparent border-0 p-0 text-slate-100 hover:text-blue-400 cursor-pointer"
-                            onClick={() => handleOpenDetail(post)}
+                  onClick={() => loadDetail(post)}
                             disabled={isLoading}
                           >
                             {post.title}
@@ -276,19 +266,13 @@ export default function Board() {
 
       {/* DETAIL & COMMENT POPUP */}
       {isDetailOpen && selectedPost && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl">
-            {/* Header */}
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0">
-              <h2 className="text-lg font-bold text-slate-200 flex items-center gap-1.5">
-                {selectedPost.noticeYn === 'Y' && <Megaphone size={18} className="text-amber-500" />}
-                게시글 상세 조회
-              </h2>
-              <button onClick={() => setIsDetailOpen(false)} className="text-slate-500 hover:text-slate-300 border-0 cursor-pointer bg-transparent"><X size={20} /></button>
-            </div>
+        <Modal
+          title="게시글 상세 조회"
+          onClose={() => setIsDetailOpen(false)}
+          footer={<button type="button" onClick={() => setIsDetailOpen(false)} className="cursor-pointer rounded-lg border-0 bg-slate-800 px-5 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700">닫기</button>}
+        >
+          <div className="space-y-6 text-xs text-slate-300">
 
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 text-xs text-slate-300">
               <div className="border-b border-slate-850 pb-3 flex justify-between items-end">
                 <div>
                   <h3 className="text-base font-extrabold text-slate-100">{selectedPost.title}</h3>
@@ -373,89 +357,30 @@ export default function Board() {
                 </div>
               </div>
 
-            </div>
 
-            {/* Footer */}
-            <div className="p-6 border-t border-slate-800 flex justify-end shrink-0">
-              <button
-                type="button"
-                onClick={() => setIsDetailOpen(false)}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg py-2 px-5 text-xs font-semibold cursor-pointer border-0"
-              >
-                닫기
-              </button>
-            </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* EDIT / CREATE FORM MODAL */}
       {isFormOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl">
-            <div className="p-6 border-b border-slate-800 flex justify-between items-center shrink-0">
-              <h2 className="text-lg font-bold text-slate-200">
-                {formId ? '게시글 수정' : '새 게시글 작성'}
-              </h2>
-              <button onClick={() => setIsFormOpen(false)} className="text-slate-500 hover:text-slate-300 border-0 cursor-pointer bg-transparent"><X size={20} /></button>
-            </div>
-
-            <div className="p-6 space-y-4 text-xs flex-1 min-h-0 overflow-y-auto">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <label htmlFor="board-title" className="block text-slate-500 mb-1.5">글 제목 *</label>
-                  <div className="flex items-center gap-4">
-                    <input
-                      id="board-title"
-                      type="text"
-                      required
-                      placeholder="제목을 입력하세요."
-                      value={formTitle}
-                      onChange={(e) => setFormTitle(e.target.value)}
-                      className="flex-1 min-w-0 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-200 outline-none"
-                    />
-                    <label className="flex items-center gap-2 text-slate-400 cursor-pointer select-none shrink-0">
-                      <input
-                        type="checkbox"
-                        checked={formNoticeYn === 'Y'}
-                        onChange={(e) => setFormNoticeYn(e.target.checked ? 'Y' : 'N')}
-                        className="h-4 w-4 accent-blue-600 cursor-pointer"
-                      />
-                      공지
-                    </label>
-                  </div>
-                  <input type="hidden" name="boardTypeCode" value={formBoardType} />
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-slate-500 mb-1.5">상세 내용 *</label>
-                  <div className="bg-slate-950 border border-slate-800 rounded-lg overflow-hidden">
-                    <RichTextEditor
-                      key={formId || 'new'}
-                      content={formContent}
-                      onChange={setFormContent}
-                      placeholder="본문 내용을 입력하세요."
-                      minHeight="180px"
-                    />
-                  </div>
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-slate-500 mb-1.5">첨부파일</label>
-                  <FileUpload
-                    groupNo={formFileGroupId}
-                    refModule={APP_MODULE.BRD}
-                    onGroupNoChange={setFormFileGroupId}
-                    onUploadingChange={setFileUploading}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="p-6 border-t border-slate-800 flex justify-end gap-2 shrink-0">
-              <button onClick={() => setIsFormOpen(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg py-2 px-4 border-0 cursor-pointer">취소</button>
-              <button onClick={handleSavePost} disabled={isLoading || fileUploading} className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg py-2 px-4 border-0 cursor-pointer disabled:opacity-50">{fileUploading ? '업로드 중…' : '저장'}</button>
-            </div>
-          </div>
-        </div>
+        <BoardFormModal
+          formId={formId}
+          formTitle={formTitle}
+          setFormTitle={setFormTitle}
+          formContent={formContent}
+          setFormContent={setFormContent}
+          formNoticeYn={formNoticeYn}
+          setFormNoticeYn={setFormNoticeYn}
+          formBoardType={formBoardType}
+          formFileGroupId={formFileGroupId}
+          setFormFileGroupId={setFormFileGroupId}
+          setFileUploading={setFileUploading}
+          fileUploading={fileUploading}
+          isLoading={isLoading}
+          onClose={() => setIsFormOpen(false)}
+          onSave={handleSavePost}
+        />
       )}
 
     </div>

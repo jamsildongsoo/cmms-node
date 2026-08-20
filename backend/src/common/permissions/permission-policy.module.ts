@@ -1,10 +1,10 @@
 import { Global, Module } from '@nestjs/common';
 import { PermissionPolicyService } from './permission-policy.service';
-import { DepartmentAccessService } from './department-access.service';
+import { UserAccessService } from './user-access.service';
 
 @Global()
 @Module({
-  providers: [PermissionPolicyService, DepartmentAccessService],
-  exports: [PermissionPolicyService, DepartmentAccessService],
+  providers: [PermissionPolicyService, UserAccessService],
+  exports: [PermissionPolicyService, UserAccessService],
 })
 export class PermissionPolicyModule {}

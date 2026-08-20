@@ -5,10 +5,7 @@ import { RoleDetail } from '../../entities/role-detail.entity';
 import { AppModule } from '../constants/module.constants';
 import type { PermAction } from '../constants/permission.constants';
 
-export interface DepartmentAccess {
-  departmentId: string;
-  warehouseId: string | null;
-  plantId: string | null;
+export interface UserAccess {
   permC: 'Y' | 'N';
   permR: 'Y' | 'N';
   permU: 'Y' | 'N';
@@ -30,21 +27,8 @@ export type ModuleAccessMap = Record<string, {
 }>;
 
 @Injectable()
-export class DepartmentAccessService {
+export class UserAccessService {
   constructor(private readonly dataSource: DataSource) {}
-
-  async getDepartmentWarehouseId(companyId: string, userId: string): Promise<string | null> {
-    const user = await this.dataSource.getRepository(User).findOne({
-      select: { departmentId: true, roleId: true, scope: true },
-      where: { companyId, id: userId, deleteYn: 'N', useYn: 'Y' },
-    });
-    if (!user?.departmentId) return null;
-    const department = await this.dataSource.getRepository('department').findOne({
-      select: { warehouseId: true },
-      where: { companyId, id: user.departmentId, deleteYn: 'N' },
-    }) as { warehouseId: string | null } | null;
-    return department?.warehouseId ?? null;
-  }
 
   async getAccessMap(companyId: string, userId: string): Promise<ModuleAccessMap> {
     const modules = Object.values(AppModule);
@@ -70,28 +54,18 @@ export class DepartmentAccessService {
     companyId: string,
     userId: string,
     module: AppModule | string,
-  ): Promise<DepartmentAccess | null> {
+  ): Promise<UserAccess | null> {
     const user = await this.dataSource.getRepository(User).findOne({
-      select: { departmentId: true, lastLoginPlantId: true },
+      select: { roleId: true },
       where: { companyId, id: userId, deleteYn: 'N', useYn: 'Y' },
     });
-    if (!user?.departmentId) return null;
-
-    if (!user.roleId) return null;
+    if (!user?.roleId) return null;
     const details = await this.dataSource.getRepository(RoleDetail).findOne({
       where: { companyId, roleId: user.roleId, moduleDetail: module },
     });
     if (!details || ![details.permC, details.permR, details.permU, details.permD, details.permA].includes('Y')) return null;
 
-    const department = await this.dataSource.getRepository('department').findOne({
-      select: { warehouseId: true },
-      where: { companyId, id: user.departmentId, deleteYn: 'N' },
-    }) as { warehouseId: string | null } | null;
-
     return {
-      departmentId: user.departmentId,
-      warehouseId: department?.warehouseId ?? null,
-      plantId: user.lastLoginPlantId ?? null,
       permC: details.permC as 'Y' | 'N',
       permR: details.permR as 'Y' | 'N',
       permU: details.permU as 'Y' | 'N',
@@ -108,7 +82,7 @@ export class DepartmentAccessService {
     target?: ScopeTarget,
   ): Promise<boolean> {
     const user = await this.dataSource.getRepository(User).findOne({
-      select: { roleId: true, scope: true, lastLoginPlantId: true },
+      select: { roleId: true, scope: true, homePlantId: true },
       where: { companyId, id: userId, deleteYn: 'N', useYn: 'Y' },
     });
     if (!user?.roleId) return false;
@@ -116,7 +90,7 @@ export class DepartmentAccessService {
       where: { companyId, roleId: user.roleId, moduleDetail: module },
     });
     if (!detail || detail[`perm${action}` as 'permC' | 'permR' | 'permU' | 'permD' | 'permA'] !== 'Y') return false;
-    return this.hasScope(companyId, user.scope, user.lastLoginPlantId, target);
+    return this.hasScope(companyId, user.scope, user.homePlantId, target);
   }
 
   async assertAction(

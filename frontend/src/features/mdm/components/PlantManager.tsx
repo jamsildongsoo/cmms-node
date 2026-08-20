@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Edit2, Plus, Trash2 } from 'lucide-react';
 import ListIconButton from '../../../components/ListIconButton';
 import { getApiErrorMessage } from '../../../utils/apiError';
@@ -13,23 +13,20 @@ export default function PlantManager({ notify, canCreate, canUpdate, canDelete }
   const [name, setName] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const fetchPlants = async () => {
+  const loadPlants = useCallback(async () => {
     try {
       setPlants(await plantApi.getAll());
     } catch (err) {
       notify('error', getApiErrorMessage(err, '플랜트 목록 조회에 실패했습니다.'));
     }
-  };
+  }, [notify]);
 
   useEffect(() => {
-    let active = true;
-    void plantApi.getAll()
-      .then((loaded) => { if (active) setPlants(loaded); })
-      .catch((err) => {
-        if (active) notify('error', getApiErrorMessage(err, '플랜트 목록 조회에 실패했습니다.'));
-      });
-    return () => { active = false; };
-  }, [notify]);
+    const run = async () => {
+      await loadPlants();
+    };
+    void run();
+  }, [loadPlants]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,7 +40,7 @@ export default function PlantManager({ notify, canCreate, canUpdate, canDelete }
         notify('success', '새 플랜트가 생성되었습니다.');
       }
       setId(''); setName(''); setEditingId(null);
-      fetchPlants();
+      await loadPlants();
     } catch (err) {
       notify('error', getApiErrorMessage(err, '저장에 실패했습니다.'));
     }
@@ -54,7 +51,7 @@ export default function PlantManager({ notify, canCreate, canUpdate, canDelete }
     try {
       await plantApi.delete(plantId);
       notify('success', '플랜트가 삭제되었습니다.');
-      fetchPlants();
+      await loadPlants();
     } catch (err) {
       notify('error', getApiErrorMessage(err, '삭제에 실패했습니다.'));
     }

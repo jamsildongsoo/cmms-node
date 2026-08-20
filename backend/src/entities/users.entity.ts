@@ -57,8 +57,8 @@ export class User extends BaseEntity {
   @Column({ name: 'last_login_at', type: 'timestamptz', nullable: true })
   lastLoginAt!: Date | null;
 
-  @Column({ type: 'varchar', name: 'last_login_plant_id', length: 50, nullable: true })
-  lastLoginPlantId!: string | null;
+  @Column({ type: 'varchar', name: 'home_plant_id', length: 50, nullable: true })
+  homePlantId!: string | null;
 
   @Column({ name: 'password_changed_at', type: 'timestamptz', default: () => 'CURRENT_TIMESTAMP' })
   passwordChangedAt!: Date;

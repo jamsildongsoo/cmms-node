@@ -4,11 +4,12 @@ import {
   NotFoundException,
   Injectable,
 } from '@nestjs/common';
-import { Between, DataSource, LessThan, QueryRunner } from 'typeorm';
+import { Between, DataSource, In, LessThan, MoreThan, QueryRunner } from 'typeorm';
 import Decimal from 'decimal.js';
 import { SequenceService, AppModule } from '../../common/sequence/sequence.service';
 import { getTenantContext } from '../../common/context/tenant.context';
 import {
+  DocStatus,
   TxType,
   MoveTxType,
   TxReason,
@@ -21,7 +22,9 @@ import { User } from '../../entities/users.entity';
 import { Warehouse } from '../../entities/warehouse.entity';
 import { InventoryDocument } from '../../entities/inventory-document.entity';
 import { InventoryDocumentItem } from '../../entities/inventory-document-item.entity';
-import { DepartmentAccessService } from '../../common/permissions/department-access.service';
+import { PurchaseOrder } from '../../entities/purchase-order.entity';
+import { PurchaseOrderItem } from '../../entities/purchase-order-item.entity';
+import { UserAccessService } from '../../common/permissions/user-access.service';
 
 Decimal.set({ precision: 28, rounding: Decimal.ROUND_HALF_UP });
 
@@ -39,7 +42,10 @@ export interface TxItem {
   refModule?: string;
   refLineNo?: string;
 }
-export interface InventoryTxRequest { items: TxItem[] }
+export interface InventoryTxRequest {
+  items: TxItem[];
+  reverseDocumentId?: string;
+}
 export interface InventoryTxContext {
   runner: QueryRunner;
   companyId: string;
@@ -61,24 +67,24 @@ export class InventoryTxService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly sequenceService: SequenceService,
-    private readonly departmentAccessService: DepartmentAccessService,
+    private readonly userAccessService: UserAccessService,
   ) {}
 
   async processTransactions(
     request: InventoryTxRequest,
     context?: InventoryTxContext,
-  ): Promise<void> {
+  ): Promise<string> {
     const tenant = context ?? getTenantContext();
     const { companyId, userId } = tenant;
-    if (!request.items?.length) return;
+    if (!request.items?.length) return '';
     for (const item of request.items) {
-      await this.departmentAccessService.assertAction(
-        companyId, userId, AppModule.STK, 'U',
+      await this.userAccessService.assertAction(
+        companyId, userId, AppModule.STK, 'C',
         { warehouseId: item.warehouseId },
       );
       if (item.targetWarehouseId) {
-        await this.departmentAccessService.assertAction(
-          companyId, userId, AppModule.STK, 'U',
+        await this.userAccessService.assertAction(
+          companyId, userId, AppModule.STK, 'C',
           { warehouseId: item.targetWarehouseId },
         );
       }
@@ -98,6 +104,7 @@ export class InventoryTxService {
       await runner.startTransaction('READ COMMITTED');
     }
     try {
+      await this.validatePurchaseReferences(runner, companyId, request.items);
       for (const closingYm of [...transactionMonths].sort()) {
         // 월마감과 같은 키를 잠가 마감 집계 중 수불이 끼어들지 못하게 한다.
         await runner.query(
@@ -145,8 +152,9 @@ export class InventoryTxService {
           await this.executeAdj(runner, companyId, item, statuses, txDate, userId);
         }
       }
-      await this.saveInventoryDocument(runner, companyId, request.items, generated, userId);
+      await this.saveInventoryDocument(runner, companyId, request.items, generated, userId, request.reverseDocumentId);
       if (ownsTransaction) await runner.commitTransaction();
+      return generated;
     } catch (error: unknown) {
       if (ownsTransaction) await runner.rollbackTransaction();
       const lockError = error as { code?: string; message?: string };
@@ -165,6 +173,7 @@ export class InventoryTxService {
     items: TxItem[],
     docNo: string,
     operator: string,
+    reverseDocumentId?: string,
   ): Promise<void> {
     const documentRepository = runner.manager.getRepository(InventoryDocument);
     const itemRepository = runner.manager.getRepository(InventoryDocumentItem);
@@ -177,6 +186,7 @@ export class InventoryTxService {
       txDate: first.txDate ?? new Date(),
       refModule: first.refModule ?? null,
       refNo: first.refNo ?? null,
+      reverseDocumentId: reverseDocumentId ?? null,
       remarks: null,
       createdBy: operator,
       updatedBy: operator,
@@ -188,10 +198,10 @@ export class InventoryTxService {
         companyId,
         documentId: docNo,
         inventoryId: item.inventoryId,
+        refLineNo: item.refLineNo ?? null,
         txReasonCode: item.txReasonCode ?? TxReason.GENERAL,
         qty: new Decimal(item.qty).abs().toFixed(4),
         unitPrice: new Decimal(item.unitPrice ?? '0').toFixed(4),
-        refLineNo: item.refLineNo ?? null,
       };
       if (txType !== TxType.MOVE) {
         return [{
@@ -308,11 +318,6 @@ export class InventoryTxService {
     const source = warehouses.find((warehouse) => warehouse.id === item.warehouseId);
     const target = warehouses.find((warehouse) => warehouse.id === item.targetWarehouseId);
     if (!source || !target) throw new BadRequestException('유효한 이동 창고를 찾을 수 없습니다.');
-    if (source.plantId !== target.plantId && source.plantId !== null && target.plantId !== null) {
-      throw new BadRequestException(
-        '다른 플랜트 간 이동은 보내는 플랜트에서 출고/플랜트이동, 받는 플랜트에서 입고/플랜트이동으로 각각 처리하세요.',
-      );
-    }
     await this.executeOut(
       runner, companyId, item, statuses, txDate, operator, MoveTxType.MOVE_OUT,
     );
@@ -564,6 +569,54 @@ export class InventoryTxService {
     return { ...document, items: allowedItems };
   }
 
+  async cancelDocument(companyId: string, userId: string, originalDocumentId: string): Promise<string> {
+    const document = await this.dataSource.getRepository(InventoryDocument).findOne({
+      where: { companyId, id: originalDocumentId, deleteYn: 'N' },
+    });
+    if (!document) throw new NotFoundException(`재고 전표를 찾을 수 없습니다: ${originalDocumentId}`);
+    const alreadyReversed = await this.dataSource.getRepository(InventoryDocument).findOne({
+      where: { companyId, reverseDocumentId: originalDocumentId, deleteYn: 'N' },
+    });
+    if (alreadyReversed) throw new BadRequestException('이미 취소된 재고 전표입니다.');
+    const histories = await this.dataSource.getRepository(InventoryHistory).find({
+      where: { companyId, docNo: originalDocumentId, deleteYn: 'N' },
+      order: { historyNo: 'ASC' },
+    });
+    if (!histories.length) throw new BadRequestException('원본 수불 이력이 없는 전표는 취소할 수 없습니다.');
+    for (const history of histories) {
+      const subsequent = await this.dataSource.getRepository(InventoryHistory).exists({
+        where: {
+          companyId,
+          warehouseId: history.warehouseId,
+          inventoryId: history.inventoryId,
+          historyNo: MoreThan(history.historyNo),
+          deleteYn: 'N',
+        },
+      });
+      if (subsequent) throw new BadRequestException(`후속 거래가 있어 취소할 수 없습니다: ${history.inventoryId}`);
+    }
+    const items: TxItem[] = histories.map((history) => {
+      const type = history.txTypeCode === MoveTxType.MOVE_IN || history.txTypeCode === TxType.IN
+        ? TxType.OUT
+        : history.txTypeCode === MoveTxType.MOVE_OUT || history.txTypeCode === TxType.OUT
+          ? TxType.IN
+          : TxType.ADJ;
+      return {
+        txTypeCode: type,
+        txReasonCode: TxReason.CANCEL,
+        warehouseId: history.warehouseId,
+        inventoryId: history.inventoryId,
+        qty: type === TxType.ADJ ? new Decimal(history.qty).negated().toString() : new Decimal(history.qty).abs().toString(),
+        unitPrice: new Decimal(history.unitPrice).abs().toString(),
+        txDate: document.txDate,
+        refNo: originalDocumentId,
+        refModule: AppModule.STK,
+        refLineNo: history.refLineNo ?? undefined,
+      };
+    });
+    return this.processTransactions({ items, reverseDocumentId: originalDocumentId });
+  }
+
   private async filterByWarehouseScope<T extends { warehouseId: string }>(
     companyId: string,
     userId: string,
@@ -571,7 +624,7 @@ export class InventoryTxService {
   ): Promise<T[]> {
     const checks = await Promise.all(rows.map(async (row) => ({
       row,
-      allowed: await this.departmentAccessService.hasAction(
+      allowed: await this.userAccessService.hasAction(
         companyId, userId, AppModule.STK, 'R',
         { warehouseId: row.warehouseId },
       ),
@@ -585,6 +638,13 @@ export class InventoryTxService {
       throw new BadRequestException(`유효하지 않은 수불 유형입니다: ${item.txTypeCode}`);
     }
     if (!item.warehouseId || !item.inventoryId) throw new BadRequestException('창고와 자재는 필수입니다.');
+    const refModule = item.refModule?.toUpperCase();
+    if (refModule === AppModule.PUR) {
+      throw new BadRequestException('PUR 기반 재고 이동·처리는 지원하지 않습니다.');
+    }
+    if (refModule === AppModule.POR && type !== TxType.IN) {
+      throw new BadRequestException('POR 참조는 구매오더 입고에만 사용할 수 있습니다.');
+    }
     let qty: Decimal;
     try { qty = new Decimal(item.qty); } catch { throw new BadRequestException('수량 형식이 올바르지 않습니다.'); }
     if (!qty.isFinite() || qty.isZero()) throw new BadRequestException('수량은 0이 아닌 숫자여야 합니다.');
@@ -593,10 +653,10 @@ export class InventoryTxService {
     }
     const reason = this.resolveReason(item);
     const allowed: Record<TxType, TxReason[]> = {
-      [TxType.IN]: [TxReason.GENERAL, TxReason.PURCHASE, TxReason.RETURN, TxReason.PLANT_TRANSFER],
-      [TxType.OUT]: [TxReason.GENERAL, TxReason.WORK_ORDER, TxReason.DISPOSAL, TxReason.PLANT_TRANSFER],
-      [TxType.MOVE]: [TxReason.TRANSFER, TxReason.PLANT_TRANSFER],
-      [TxType.ADJ]: [TxReason.STOCKTAKING],
+      [TxType.IN]: [TxReason.GENERAL, TxReason.PURCHASE, TxReason.RETURN, TxReason.CANCEL],
+      [TxType.OUT]: [TxReason.GENERAL, TxReason.WORK_ORDER, TxReason.DISPOSAL, TxReason.CANCEL],
+      [TxType.MOVE]: [TxReason.TRANSFER, TxReason.CANCEL],
+      [TxType.ADJ]: [TxReason.STOCKTAKING, TxReason.CANCEL],
     };
     if (!allowed[type as TxType].includes(reason)) {
       throw new BadRequestException(`수불 유형 ${type}에 사용할 수 없는 거래 사유입니다: ${reason}`);
@@ -605,10 +665,87 @@ export class InventoryTxService {
 
   private resolveReason(item: TxItem): TxReason {
     const type = item.txTypeCode.toUpperCase();
-    if (type === TxType.MOVE) return TxReason.TRANSFER;
+    if (type === TxType.MOVE) return item.txReasonCode ?? TxReason.TRANSFER;
     if (type === TxType.ADJ) return TxReason.STOCKTAKING;
-    if (item.refModule === AppModule.PUR && type === TxType.IN) return TxReason.PURCHASE;
+    if (item.refModule?.toUpperCase() === AppModule.POR && type === TxType.IN) return TxReason.PURCHASE;
     return item.txReasonCode ?? TxReason.GENERAL;
+  }
+
+  private async validatePurchaseReferences(
+    runner: QueryRunner,
+    companyId: string,
+    items: TxItem[],
+  ): Promise<void> {
+    const purchaseItems = items.filter((item) =>
+      item.txTypeCode.toUpperCase() === TxType.IN
+      && item.refModule?.toUpperCase() === AppModule.POR,
+    );
+    if (!purchaseItems.length) return;
+
+    const requestedByLine = new Map<string, { orderId: string; lineNo: string; inventoryId: string; qty: Decimal }>();
+    purchaseItems.forEach((item) => {
+      const orderId = item.refNo?.trim();
+      const lineNo = item.refLineNo?.trim();
+      if (!orderId || !lineNo) throw new BadRequestException('구매오더 입고는 오더번호와 라인번호가 필요합니다.');
+      const key = `${orderId}:${lineNo}`;
+      const current = requestedByLine.get(key);
+      const qty = new Decimal(item.qty);
+      requestedByLine.set(key, {
+        orderId,
+        lineNo,
+        inventoryId: item.inventoryId,
+        qty: (current?.qty ?? new Decimal(0)).add(qty),
+      });
+    });
+
+    const orderIds = [...new Set([...requestedByLine.values()].map((item) => item.orderId))];
+    const orderRepository = runner.manager.getRepository(PurchaseOrder);
+    const itemRepository = runner.manager.getRepository(PurchaseOrderItem);
+    const documentRepository = runner.manager.getRepository(InventoryDocument);
+    const documentItemRepository = runner.manager.getRepository(InventoryDocumentItem);
+    for (const orderId of orderIds) {
+      const order = await orderRepository.createQueryBuilder('order')
+        .setLock('pessimistic_write')
+        .where('order.companyId = :companyId', { companyId })
+        .andWhere('order.id = :orderId', { orderId })
+        .andWhere('order.deleteYn = :deleteYn', { deleteYn: 'N' })
+        .getOne();
+      if (!order || ![DocStatus.CONFIRMED, DocStatus.SELF_CONFIRMED].includes(order.status as DocStatus) || order.closedAt) {
+        throw new BadRequestException(`입고 가능한 구매오더가 아닙니다: ${orderId}`);
+      }
+      const orderItems = await itemRepository.find({ where: { companyId, orderId } });
+      const documents = await documentRepository.find({
+        where: { companyId, refModule: AppModule.POR, refNo: orderId, deleteYn: 'N' },
+      });
+      const receivedByLine = new Map<string, Decimal>();
+      if (documents.length) {
+        const receivedItems = await documentItemRepository.find({
+          where: {
+            companyId,
+            documentId: In(documents.map((document) => document.id)),
+            txTypeCode: TxType.IN,
+          },
+        });
+        receivedItems.forEach((item) => {
+          if (!item.refLineNo) return;
+          receivedByLine.set(item.refLineNo, (receivedByLine.get(item.refLineNo) ?? new Decimal(0)).add(item.qty));
+        });
+      }
+      const orderItemByNo = new Map(orderItems.map((item) => [String(item.itemNo), item]));
+      [...requestedByLine.values()]
+        .filter((item) => item.orderId === orderId)
+        .forEach((requested) => {
+          const orderItem = orderItemByNo.get(requested.lineNo);
+          if (!orderItem || orderItem.inventoryId !== requested.inventoryId) {
+            throw new BadRequestException(`구매오더 자재 또는 라인이 일치하지 않습니다: ${orderId}/${requested.lineNo}`);
+          }
+          const remaining = new Decimal(orderItem.orderedQty)
+            .sub(receivedByLine.get(requested.lineNo) ?? new Decimal(0));
+          if (requested.qty.gt(remaining)) {
+            throw new BadRequestException(`구매오더 잔량을 초과했습니다: ${orderId}/${requested.lineNo}`);
+          }
+        });
+    }
   }
 
   private extractSortedKeys(items: TxItem[]): { warehouseId: string; inventoryId: string }[] {

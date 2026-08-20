@@ -19,6 +19,9 @@ export class InventoryDocument extends BaseEntity {
   @Column({ name: 'ref_no', type: 'varchar', length: 50, nullable: true })
   refNo!: string | null;
 
+  @Column({ name: 'reverse_document_id', type: 'varchar', length: 50, nullable: true })
+  reverseDocumentId!: string | null;
+
   @Column({ name: 'remarks', type: 'text', nullable: true })
   remarks!: string | null;
 

@@ -43,6 +43,7 @@ export interface StockDocument {
   refModule: string | null;
   refNo: string | null;
   remarks: string | null;
+  reverseDocumentId?: string | null;
   items: StockDocumentItem[];
 }
 
@@ -52,6 +53,10 @@ export interface StockProcessingItem {
   qty: number;
   unitPrice: number;
   targetWarehouseId: string;
+  docNo?: string;
+  refNo?: string;
+  refModule?: string;
+  refLineNo?: string;
 }
 
 export interface ProcessStockRequest {
@@ -59,5 +64,25 @@ export interface ProcessStockRequest {
     txTypeCode: string;
     txReasonCode: string;
     txDate: string;
+  }>;
+}
+
+export interface ReceivablePurchaseOrder {
+  id: string;
+  plantId: string;
+  warehouseId: string;
+  title?: string;
+  status: string;
+  orderDate?: string | null;
+  remainingQty?: number;
+}
+
+export interface ReceivablePurchaseOrderDetail {
+  header: ReceivablePurchaseOrder;
+  items: Array<{
+    itemNo?: number;
+    inventoryId: string;
+    qty: number;
+    unit?: string;
   }>;
 }

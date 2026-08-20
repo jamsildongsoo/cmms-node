@@ -58,9 +58,6 @@ export class PurchaseRequest extends BaseEntity {
   @Column({ type: 'varchar', name: 'approval_id', length: 50, nullable: true })
   approvalId!: string | null;
 
-  @Column({ type: 'varchar',  name: 'proc_status', length: 1, nullable: true })
-  procStatus!: string | null;
-
   @Column({ name: 'remarks', type: 'text', nullable: true })
   remarks!: string | null;
 

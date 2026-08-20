@@ -18,6 +18,9 @@ export class InventoryDocumentItem {
   @Column({ name: 'inventory_id', length: 50 })
   inventoryId!: string;
 
+  @Column({ name: 'ref_line_no', type: 'varchar', length: 20, nullable: true })
+  refLineNo!: string | null;
+
   @Column({ name: 'tx_type_code', length: 50 })
   txTypeCode!: string;
 
@@ -29,9 +32,6 @@ export class InventoryDocumentItem {
 
   @Column({ name: 'unit_price', type: 'numeric', precision: 19, scale: 4, default: '0' })
   unitPrice!: string;
-
-  @Column({ name: 'ref_line_no', type: 'varchar', length: 20, nullable: true })
-  refLineNo!: string | null;
 
   @ManyToOne(() => InventoryDocument, (document) => document.items, {
     createForeignKeyConstraints: false,

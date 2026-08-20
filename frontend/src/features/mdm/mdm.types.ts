@@ -9,8 +9,6 @@ export interface Department {
   id: string;
   name: string;
   parentId: string | null;
-  roleId?: string | null;
-  scope: 'COMPANY' | 'PLANT';
 }
 
 export interface Role {

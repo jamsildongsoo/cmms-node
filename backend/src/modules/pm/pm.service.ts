@@ -1,11 +1,10 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
-import { EquipmentCheckCycle } from '../../entities/equipment-check-cycle.entity';
 import { PmRecordItem } from '../../entities/pm-record-item.entity';
 import { PmRecord } from '../../entities/pm-record.entity';
 import { DocStatus } from '../../common/constants/status.constants';
 import { SequenceService, AppModule } from '../../common/sequence/sequence.service';
-import { addDateOnly, toDateOnly } from '../../common/utils/date-only.util';
+import { toDateOnly } from '../../common/utils/date-only.util';
 import { resolveActivePlantId } from '../../common/utils/plant.util';
 import {
   PmCheckTemplateResponseDto,
@@ -138,21 +137,9 @@ export class PmService {
       const refNo = pmRecord.refNo?.trim() || null;
       this.validateStage(stage, refModule, refNo);
 
-      // 관리용 호환 경로: FE에서는 직접확정을 제공하지 않는다. 다만 별도 관리
-      // 호출이 status='S'를 저장할 수 있으므로 기존 검증과 후속 처리 로직은 유지한다.
-    if (pmRecord.status === DocStatus.SELF_CONFIRMED) {
-        await this.permissionPolicyService.assertActionPermission({
-          companyId,
-          roleId: roleId ?? '',
-          userId: operator,
-          module: AppModule.PM,
-          action: 'A',
-          resourceLabel: '예방점검 직접 확정',
-      });
-    }
-    if (![DocStatus.TEMP, DocStatus.SELF_CONFIRMED].includes(pmRecord.status as DocStatus)) {
-      throw new BadRequestException('예방점검 저장 상태는 임시저장 또는 직접확정만 허용됩니다.');
-    }
+      if (pmRecord.status !== DocStatus.TEMP) {
+        throw new BadRequestException('예방점검은 임시저장 상태로만 저장할 수 있습니다.');
+      }
 
       if (stage === 'R' && refNo) {
         await this.requireConfirmedPlan(
@@ -163,7 +150,6 @@ export class PmService {
         );
       }
 
-      let previousStatus: string | null = null;
       let record: PmRecord;
       if (isNew) {
         pmId = await this.sequenceService.generateNextNo(
@@ -186,7 +172,6 @@ export class PmService {
           plantId,
           pmId,
         );
-        previousStatus = record.status;
         await this.permissionPolicyService.assertCanUpdateOwnTempOrPermission({
           companyId,
           roleId: roleId ?? '',
@@ -225,32 +210,6 @@ export class PmService {
           checkItems.map((item, index) =>
             itemRepository.create(this.toItemEntity(companyId, plantId, pmId, item, index, stage)),
           ),
-        );
-      }
-
-      const firstSelfConfirmation =
-        stage === 'R' &&
-        pmRecord.status === DocStatus.SELF_CONFIRMED &&
-        previousStatus !== DocStatus.SELF_CONFIRMED &&
-        previousStatus !== DocStatus.CONFIRMED;
-      if (firstSelfConfirmation) {
-        if (refNo) {
-          await this.ensureNoConfirmedResult(
-            queryRunner.manager,
-            companyId,
-            plantId,
-            refNo,
-            pmId,
-          );
-        }
-        await this.updateEquipmentCycle(
-          queryRunner.manager,
-          companyId,
-          plantId,
-          pmRecord.equipmentId,
-          pmRecord.checkTypeCode,
-          values.workDate!,
-          operator,
         );
       }
 
@@ -431,7 +390,7 @@ export class PmService {
       .andWhere('pm.id = :id', { id })
       .andWhere('pm.stepStage = :stage', { stage: 'P' })
       .andWhere('pm.status IN (:...statuses)', {
-        statuses: [DocStatus.SELF_CONFIRMED, DocStatus.CONFIRMED],
+        statuses: [DocStatus.CONFIRMED],
       })
       .andWhere('pm.deleteYn = :notDeleted', { notDeleted: 'N' })
       .getOne();
@@ -456,32 +415,12 @@ export class PmService {
       .andWhere('pm.refModule = :module', { module: AppModule.PM })
       .andWhere('pm.refNo = :refNo', { refNo })
       .andWhere('pm.status IN (:...statuses)', {
-        statuses: [DocStatus.SELF_CONFIRMED, DocStatus.CONFIRMED],
+        statuses: [DocStatus.CONFIRMED],
       })
       .andWhere('pm.id <> :currentId', { currentId })
       .andWhere('pm.deleteYn = :notDeleted', { notDeleted: 'N' })
       .getCount();
     if (count > 0) throw new BadRequestException('이미 확정된 예방점검 실적이 있는 계획입니다.');
-  }
-
-  private async updateEquipmentCycle(
-    manager: EntityManager,
-    companyId: string,
-    plantId: string,
-    equipmentId: string,
-    checkTypeCode: string,
-    workDate: string,
-    operator: string,
-  ): Promise<void> {
-    const repository = manager.getRepository(EquipmentCheckCycle);
-    const cycle = await repository.findOne({
-      where: { companyId, plantId, equipmentId, checkTypeCode, deleteYn: 'N' },
-    });
-    if (!cycle) return;
-    cycle.lastCheckDate = workDate;
-    cycle.nextCheckDate = addDateOnly(workDate, cycle.cycleVal, cycle.cycleUnit);
-    cycle.updatedBy = operator;
-    await repository.save(cycle);
   }
 
   private toItemEntity(

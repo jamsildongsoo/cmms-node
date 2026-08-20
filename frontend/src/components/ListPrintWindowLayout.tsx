@@ -38,7 +38,7 @@ export default function ListPrintWindowLayout({
       `}</style>
       <div className="list-print-content">
         <div className="print-header mb-2 flex justify-between border-b border-slate-300 pb-1 text-[8pt] text-slate-500">
-          <span>회사코드: {companyName} | 출력일시: {printedAt} | 출력자: {printerName}</span>
+          <span>회사명: {companyName} | 출력일시: {printedAt} | 출력자: {printerName}</span>
           <span className="print-page-number" />
         </div>
         <h1 className="mb-3 border-b-2 border-black pb-2 text-center text-[16pt] font-bold">

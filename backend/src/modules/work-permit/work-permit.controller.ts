@@ -17,7 +17,7 @@ import {
   WorkPermitResponseDto,
 } from './dto/work-permit.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { PermissionGuard, ModuleAccess, ModulePermission } from '../../common/guards/permission.guard';
+import { PermissionGuard, ModulePermission } from '../../common/guards/permission.guard';
 import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
@@ -27,7 +27,7 @@ export class WorkPermitController {
   constructor(private readonly workPermitService: WorkPermitService) {}
 
   @Get()
-  @ModuleAccess(AppModule.WP)
+  @ModulePermission(AppModule.WP, 'R')
   async getWorkPermits(
     @Query('searchType') searchType?: string,
     @Query('searchValue') searchValue?: string,
@@ -39,7 +39,7 @@ export class WorkPermitController {
   }
 
   @Get(':id')
-  @ModuleAccess(AppModule.WP)
+  @ModulePermission(AppModule.WP, 'R')
   async getWorkPermitDetails(
     @Param('id') id: string,
     @Query('plantId') plantId: string,
@@ -49,7 +49,7 @@ export class WorkPermitController {
   }
 
   @Post()
-  @ModuleAccess(AppModule.WP)
+  @ModulePermission(AppModule.WP, 'C')
   async saveWorkPermit(
     @Body() permit: SaveWorkPermitDto,
   ): Promise<WorkPermitResponseDto> {
@@ -79,4 +79,3 @@ export class WorkPermitController {
     await this.workPermitService.deleteWorkPermit(companyId, plantId, id, userId, roleId);
   }
 }
-

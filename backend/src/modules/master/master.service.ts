@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, ILike } from 'typeorm';
 import { Equipment } from '../../entities/equipment.entity';
 import { EquipmentCheckCycle } from '../../entities/equipment-check-cycle.entity';
 import { Inventory } from '../../entities/inventory.entity';
@@ -28,24 +28,46 @@ export class MasterService {
   // =========================================================================
   // 1. 설비 마스터 (Equipment)
   // =========================================================================
-  async getEquipmentsByCompany(companyId: string, operator: string): Promise<Equipment[]> {
+  async getEquipmentsByCompany(companyId: string, operator: string, keyword?: string, limitValue?: string): Promise<Equipment[]> {
     const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, null, AppModule.EQP);
+    const limit = this.parseReferenceLimit(limitValue);
+    const nameOrId = keyword?.trim();
     let list: Equipment[];
     if (activePlantId) {
-      list = await this.eqRepo.find({ where: { companyId, plantId: activePlantId, deleteYn: 'N' } });
+      const where = nameOrId
+        ? [
+          { companyId, plantId: activePlantId, deleteYn: 'N' as const, id: ILike(`%${nameOrId}%`) },
+          { companyId, plantId: activePlantId, deleteYn: 'N' as const, name: ILike(`%${nameOrId}%`) },
+        ]
+        : { companyId, plantId: activePlantId, deleteYn: 'N' as const };
+      list = await this.eqRepo.find({ where, take: limit, order: { id: 'ASC' } });
     } else {
-      list = await this.eqRepo.find({ where: { companyId, deleteYn: 'N' } });
+      const where = nameOrId
+        ? [
+          { companyId, deleteYn: 'N' as const, id: ILike(`%${nameOrId}%`) },
+          { companyId, deleteYn: 'N' as const, name: ILike(`%${nameOrId}%`) },
+        ]
+        : { companyId, deleteYn: 'N' as const };
+      list = await this.eqRepo.find({ where, take: limit, order: { id: 'ASC' } });
     }
     await this.fillCheckDates(companyId, list);
     return list;
   }
 
-  async getEquipmentsByPlant(companyId: string, plantId: string, operator: string): Promise<Equipment[]> {
+  async getEquipmentsByPlant(companyId: string, plantId: string, operator: string, keyword?: string, limitValue?: string): Promise<Equipment[]> {
     const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, plantId, AppModule.EQP);
     if (!activePlantId) {
       return [];
     }
-    const list = await this.eqRepo.find({ where: { companyId, plantId: activePlantId, deleteYn: 'N' } });
+    const limit = this.parseReferenceLimit(limitValue);
+    const keywordValue = keyword?.trim();
+    const where = keywordValue
+      ? [
+        { companyId, plantId: activePlantId, deleteYn: 'N' as const, id: ILike(`%${keywordValue}%`) },
+        { companyId, plantId: activePlantId, deleteYn: 'N' as const, name: ILike(`%${keywordValue}%`) },
+      ]
+      : { companyId, plantId: activePlantId, deleteYn: 'N' as const };
+    const list = await this.eqRepo.find({ where, take: limit, order: { id: 'ASC' } });
     await this.fillCheckDates(companyId, list);
     return list;
   }
@@ -186,8 +208,21 @@ export class MasterService {
   // =========================================================================
   // 2. 재고 마스터 (Inventory)
   // =========================================================================
-  async getInventoriesByCompany(companyId: string): Promise<Inventory[]> {
-    return this.invRepo.find({ where: { companyId, deleteYn: 'N' } });
+  async getInventoriesByCompany(companyId: string, keyword?: string, limitValue?: string): Promise<Inventory[]> {
+    const limit = this.parseReferenceLimit(limitValue);
+    const keywordValue = keyword?.trim();
+    const where = keywordValue
+      ? [
+        { companyId, deleteYn: 'N' as const, id: ILike(`%${keywordValue}%`) },
+        { companyId, deleteYn: 'N' as const, name: ILike(`%${keywordValue}%`) },
+      ]
+      : { companyId, deleteYn: 'N' as const };
+    return this.invRepo.find({ where, take: limit, order: { id: 'ASC' } });
+  }
+
+  private parseReferenceLimit(value?: string): number | undefined {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.min(Math.floor(parsed), 100) : undefined;
   }
 
   async getInventoryById(companyId: string, id: string): Promise<Inventory> {

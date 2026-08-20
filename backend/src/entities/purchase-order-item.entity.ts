@@ -25,9 +25,6 @@ export class PurchaseOrderItem {
   @Column({ name: 'ordered_qty', type: 'numeric', precision: 15, scale: 4 })
   orderedQty!: string;
 
-  @Column({ name: 'received_qty', type: 'numeric', precision: 15, scale: 4, default: '0' })
-  receivedQty!: string;
-
   @Column({ type: 'varchar', name: 'unit', length: 20, nullable: true })
   unit!: string | null;
 

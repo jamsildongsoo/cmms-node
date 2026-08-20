@@ -21,6 +21,7 @@ export interface PmRecord {
   certExpireDate: string | null;
   certAgency: string | null;
   approvalId: string | null;
+  fileGroupId: number | null;
   refNo: string | null;
   refModule: string | null;
   status: string;

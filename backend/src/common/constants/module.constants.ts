@@ -21,7 +21,7 @@ export enum AppModule {
 export const AppModuleLabel: Record<AppModule, string> = {
   [AppModule.MDM]: '기준정보 설정',
   [AppModule.EQP]: '설비 마스터',
-  [AppModule.INV]: '재고 마스터',
+  [AppModule.INV]: '자재 마스터',
   [AppModule.STK]: '재고처리',
   [AppModule.POR]: '구매관리',
   [AppModule.PM]: '예방점검',

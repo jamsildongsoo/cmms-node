@@ -11,7 +11,7 @@ import { WorkPermit } from '../../entities/work-permit.entity';
 import { AppModule } from '../constants/module.constants';
 import type { PermAction } from '../constants/permission.constants';
 import { DocStatus } from '../constants/status.constants';
-import { DepartmentAccessService } from './department-access.service';
+import { UserAccessService } from './user-access.service';
 
 interface ModulePermissionParams {
   companyId: string;
@@ -98,12 +98,13 @@ const ACTION_LABEL: Record<PermAction, string> = {
 export class PermissionPolicyService {
   constructor(
     private readonly dataSource: DataSource,
-    private readonly departmentAccessService: DepartmentAccessService,
+    private readonly userAccessService: UserAccessService,
   ) {}
 
   async hasActionPermission(params: ModulePermissionParams): Promise<boolean> {
+    // userId로 실제 사용자의 role_detail 권한과 데이터 범위를 확인한다.
     if (!params.userId) return false;
-    return this.departmentAccessService.hasAction(
+    return this.userAccessService.hasAction(
       params.companyId,
       params.userId,
       params.module,
@@ -112,7 +113,7 @@ export class PermissionPolicyService {
   }
 
   async assertActionPermission(params: AssertModulePermissionParams): Promise<void> {
-    // 일반 모듈 권한 검사 진입점이다.
+    // 일반 모듈 CRUD 권한을 확인한다. 문서 상태와 소유권은 업무 Service가 판단한다.
     const allowed = await this.hasActionPermission(params);
     if (!allowed) {
       if (!params.resourceLabel) {
@@ -125,7 +126,7 @@ export class PermissionPolicyService {
   }
 
   async assertAnyActionPermission(params: AnyModulePermissionParams): Promise<void> {
-    // 여러 행위 중 하나라도 허용되면 통과시키는 any-of 규칙이다.
+    // 전달된 행위 중 하나라도 허용되면 통과시키는 OR 정책이다.
     const allowed = await Promise.all(
       params.actions.map((action) => this.hasActionPermission({
         companyId: params.companyId,
@@ -141,7 +142,7 @@ export class PermissionPolicyService {
   }
 
   async assertSystemAdmin(params: SystemAdminParams): Promise<void> {
-    // SYSTEM 예외는 roleId 문자열만 보지 않고, SYSTEM 회사 소속 실사용자인지 DB로 재확인한다.
+    // JWT의 roleId만 신뢰하지 않고 SYSTEM 사용자 여부를 DB에서 재확인한다.
     if (params.companyId !== 'SYSTEM' || params.roleId?.toUpperCase() !== 'SYSTEM') {
       throw new ForbiddenException('SYSTEM 권한이 필요합니다.');
     }
@@ -159,14 +160,14 @@ export class PermissionPolicyService {
   }
 
   async assertCanMutateBoard(params: BoardMutationParams): Promise<void> {
-    // 컨트롤러에서 BRD U/D 권한을 확인한 뒤, 게시글은 작성자 본인만 수정·삭제할 수 있다.
+    // BRD U/D 권한 확인 후에도 게시글 작성자 본인만 수정·삭제할 수 있다.
     if (params.ownerId === params.operatorId) return;
     throw new ForbiddenException('본인이 작성한 게시글만 수정·삭제할 수 있습니다.');
   }
 
   assertCanReadApproval(params: ApprovalReadParams): void {
     const { approval, userId } = params;
-    // 결재 상세는 기안자 또는 결재선 참여자만 조회할 수 있고, 임시저장 문서는 비공개다.
+    // 결재 상세는 기안자 또는 결재선 참여자만 조회하며 T 문서는 존재를 노출하지 않는다.
     if (approval.drafterId === userId) return;
     if (approval.status === DocStatus.TEMP) {
       throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
@@ -180,16 +181,19 @@ export class PermissionPolicyService {
   async assertCanUpdateOwnTempOrPermission(
     params: OwnTempOrPermissionParams,
   ): Promise<boolean> {
+    // 모듈 U 권한은 Guard에서 확인하고, Service에서는 본인 T 문서 여부를 확인한다.
     return this.assertCanMutateOwnTempOrPermission({ ...params, action: 'U' });
   }
 
   async assertCanDeleteOwnTempOrPermission(
     params: OwnTempOrPermissionParams,
   ): Promise<boolean> {
+    // 모듈 D 권한은 Guard에서 확인하고, Service에서는 본인 T 문서 여부를 확인한다.
     return this.assertCanMutateOwnTempOrPermission({ ...params, action: 'D' });
   }
 
   async assertCanReadAttachmentGroup(params: AttachmentPermissionParams): Promise<void> {
+    // 첨부파일 권한은 파일이 아니라 연결된 원문서의 상태·소유권·R 권한으로 판단한다.
     const access = await this.resolveAttachmentDocumentAccess(params.group);
 
     // refNo 없는 임시 첨부는 생성자 본인만 접근할 수 있다.
@@ -217,6 +221,7 @@ export class PermissionPolicyService {
   }
 
   async assertCanMutateAttachmentGroup(params: AttachmentMutationParams): Promise<void> {
+    // 원문서가 편집 가능할 때만 첨부파일을 변경할 수 있다.
     const access = await this.resolveAttachmentDocumentAccess(params.group);
 
     // 임시 첨부는 생성자 본인만 수정/삭제할 수 있다.
@@ -251,8 +256,7 @@ export class PermissionPolicyService {
   private async assertCanMutateOwnTempOrPermission(
     params: OwnTempOrPermissionParams & { action: 'U' | 'D' },
   ): Promise<boolean> {
-    // 모듈 U/D는 PermissionGuard에서 먼저 확인한다.
-    // 여기서는 문서 상태와 소유권만 확인하며, 반려문서는 기존 문서를 직접 수정하지 않는다.
+    // 모듈 U/D는 Guard에서 확인한다. R 문서는 원본을 수정하지 않고 신규 T 문서로 편집한다.
     if (params.status === DocStatus.TEMP && params.ownerId === params.operatorId) return true;
     throw new ForbiddenException('본인이 작성한 임시저장 문서만 수정·삭제할 수 있습니다.');
   }
@@ -260,6 +264,7 @@ export class PermissionPolicyService {
   private async resolveAttachmentDocumentAccess(
     group: FileAttachment,
   ): Promise<AttachmentDocumentAccess> {
+    // 참조 모듈별 원문서의 작성자와 편집 가능 상태를 공통 형식으로 변환한다.
     const module = this.parseModule(group.refModule);
     const refNo = group.refNo?.trim();
     if (!refNo) {
@@ -355,10 +360,12 @@ export class PermissionPolicyService {
   }
 
   private isEditableStatus(status: string | null | undefined): boolean {
+    // 원문서 직접 수정이 가능한 공통 상태는 T와 R이다. R 편집은 신규 문서 생성으로 처리한다.
     return [DocStatus.TEMP, DocStatus.REJECTED].includes(status as DocStatus);
   }
 
   private parseModule(value: string | null | undefined): AppModule {
+    // 등록된 AppModule만 참조 모듈로 허용한다.
     const module = value?.trim().toUpperCase();
     if (!module || !Object.values(AppModule).includes(module as AppModule)) {
       throw new BadRequestException('유효하지 않은 파일 참조 모듈입니다.');
