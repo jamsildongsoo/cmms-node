@@ -13,17 +13,18 @@ import { downloadBlob } from '../utils/downloadBlob';
 import { openListPrint } from '../utils/listPrint';
 import EquipmentFormModal from '../features/equipment/components/EquipmentFormModal';
 import ListIconButton from '../components/ListIconButton';
+import ListBadge from '../components/ListBadge';
 import {
   Wrench, Plus, Edit2, Trash2, Printer, FileSpreadsheet
 } from 'lucide-react';
-import { hasModuleCreate } from '../utils/moduleAccess';
+import { hasModuleCreate, hasModuleDelete, hasModuleUpdate } from '../utils/moduleAccess';
 
 export default function Equipment() {
   const user = useAuthStore((state) => state.user);
   const activePlantId = useAuthStore((state) => state.activePlantId);
   const canCreate = hasModuleCreate(user?.moduleAccess, APP_MODULE.EQP);
-  const canUpdate = canCreate;
-  const canDelete = canCreate;
+  const canUpdate = hasModuleUpdate(user?.moduleAccess, APP_MODULE.EQP);
+  const canDelete = hasModuleDelete(user?.moduleAccess, APP_MODULE.EQP);
   const [equipments, setEquipments] = useState<EquipmentModel[]>([]);
   const [plants, setPlants] = useState<Plant[]>([]);
   const [equipmentTypes, setEquipmentTypes] = useState<CodeItem[]>([]);
@@ -80,6 +81,7 @@ export default function Equipment() {
       eqTypeCode: equipmentTypes[0]?.id || '',
       installDate: '',
       workPermitYn: 'N',
+      pmTargetYn: 'N',
       makerName: '',
       spec: '',
       model: '',
@@ -106,6 +108,7 @@ export default function Equipment() {
         eqTypeCode: targetEq.eqTypeCode || '',
         installDate: formatDateOnly(targetEq.installDate),
         workPermitYn: targetEq.workPermitYn || 'N',
+        pmTargetYn: targetEq.pmTargetYn || 'N',
         makerName: targetEq.makerName || '',
         spec: targetEq.spec || '',
         model: targetEq.model || '',
@@ -146,6 +149,10 @@ export default function Equipment() {
 
   const handleFormSubmit = async (values: EquipmentFormValues) => {
     if (!values.id || !values.name || !values.plantId) return;
+    if (values.pmTargetYn === 'Y' && values.checkCycles.length === 0) {
+      toast.error('PM 대상 설비는 하나 이상의 점검주기가 필요합니다.');
+      return;
+    }
 
     setIsLoading(true);
     try {
@@ -154,6 +161,7 @@ export default function Equipment() {
           id: values.id, plantId: values.plantId, name: values.name,
           location: values.location || null, eqTypeCode: values.eqTypeCode || null,
           installDate: values.installDate || null, workPermitYn: values.workPermitYn,
+          pmTargetYn: values.pmTargetYn,
           makerName: values.makerName || null, spec: values.spec || null,
           model: values.model || null, serialNumber: values.serialNumber || null,
           remarks: values.remarks || null,
@@ -208,6 +216,7 @@ export default function Equipment() {
         { header: '사업장명', render: (equipment) => plantNames.get(equipment.plantId) || equipment.plantId },
         { header: '설치위치', render: (equipment) => equipment.location || '-' },
         { header: '설치일자', render: (equipment) => formatDateOnly(equipment.installDate) || '-' },
+        { header: 'PM 대상', render: (equipment) => equipment.pmTargetYn === 'Y' ? '대상' : '미대상' },
         { header: '제조사', render: (equipment) => equipment.makerName || '-' },
         { header: '모델', render: (equipment) => equipment.model || '-' },
         { header: '스펙', render: (equipment) => equipment.spec || '-' },
@@ -290,6 +299,7 @@ export default function Equipment() {
                 <th className="p-3 font-semibold">사업장명</th>
                 <th className="p-3 font-semibold">설치위치</th>
                 <th className="p-3 font-semibold">설치일자</th>
+                <th className="p-3 font-semibold">PM 대상</th>
                 <th className="p-3 font-semibold">제조사</th>
                 <th className="p-3 font-semibold">모델</th>
                 <th className="p-3 font-semibold">스펙</th>
@@ -300,7 +310,7 @@ export default function Equipment() {
             </thead>
             <tbody>
               {filteredEquipments.length === 0 ? (
-                <tr><td colSpan={12} className="p-8 text-center text-slate-600 print:text-slate-400">등록된 설비 내역이 없습니다.</td></tr>
+                <tr><td colSpan={13} className="p-8 text-center text-slate-600 print:text-slate-400">등록된 설비 내역이 없습니다.</td></tr>
               ) : (
                 filteredEquipments.map((eq) => (
                   <tr key={eq.id} className="border-b border-slate-900 hover:bg-slate-900/30 text-slate-300 print:border-slate-200 print:text-slate-800 print:hover:bg-transparent">
@@ -310,6 +320,7 @@ export default function Equipment() {
                     <td className="p-3">{plantNames.get(eq.plantId) || eq.plantId}</td>
                     <td className="p-3 text-slate-400 print:text-slate-600">{eq.location || '-'}</td>
                     <td className="p-3 text-slate-400 print:text-slate-600">{formatDateOnly(eq.installDate) || '-'}</td>
+                    <td className="p-3">{eq.pmTargetYn === 'Y' ? <ListBadge>대상</ListBadge> : '-'}</td>
                     <td className="p-3 text-slate-400 print:text-slate-600">{eq.makerName || '-'}</td>
                     <td className="p-3 text-slate-400 print:text-slate-600">{eq.model || '-'}</td>
                     <td className="p-3 text-slate-400 print:text-slate-600">{eq.spec || '-'}</td>

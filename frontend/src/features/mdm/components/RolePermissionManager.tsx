@@ -22,7 +22,10 @@ export default function RolePermissionManager({ notify, canUpdate }: MdmManagerP
     if (!selectedRoleId) return;
     try {
       const rows = await roleApi.getDetails(selectedRoleId);
-      setDetails(Object.fromEntries(rows.map((row) => [row.moduleDetail, row])));
+      setDetails(Object.fromEntries(rows.map((row) => [
+        row.moduleDetail,
+        row.moduleDetail === 'POR' ? row : { ...row, permA: 'N' },
+      ])));
     } catch (error) {
       notify('error', error instanceof Error ? error.message : 'Role 권한 조회에 실패했습니다.');
     }
@@ -53,6 +56,7 @@ export default function RolePermissionManager({ notify, canUpdate }: MdmManagerP
 
   const orderedModules = useMemo(() => modules.filter((module) => module.code !== 'APR'), [modules]);
   const update = (moduleDetail: string, action: Action, value: YesNo) => {
+    if (action === 'A' && moduleDetail !== 'POR') return;
     const property = `perm${action}` as keyof Pick<RoleDetail, 'permC' | 'permR' | 'permU' | 'permD' | 'permA'>;
     setDetails((current) => ({
       ...current,
@@ -63,7 +67,9 @@ export default function RolePermissionManager({ notify, canUpdate }: MdmManagerP
   const save = async () => {
     if (!roleId || !canUpdate) return;
     try {
-      await roleApi.saveDetails(roleId, Object.values(details));
+      await roleApi.saveDetails(roleId, Object.values(details).map((detail) => (
+        detail.moduleDetail === 'POR' ? detail : { ...detail, permA: 'N' }
+      )));
       notify('success', 'Role 권한이 저장되었습니다.');
     } catch (error) {
       notify('error', error instanceof Error ? error.message : 'Role 권한 저장에 실패했습니다.');
@@ -72,7 +78,7 @@ export default function RolePermissionManager({ notify, canUpdate }: MdmManagerP
 
   return <div className="space-y-4">
     <div className="flex items-center justify-between gap-3">
-      <div><h3 className="text-sm font-bold text-slate-200">Role 권한</h3><p className="mt-1 text-xs text-slate-500">Role별 모듈 C/R/U/D 권한을 설정합니다.</p></div>
+      <div><h3 className="text-sm font-bold text-slate-200">Role 권한</h3><p className="mt-1 text-xs text-slate-500">Role별 모듈 C/R/U/D 권한과 PO 직접확정 A 권한을 설정합니다.</p></div>
       <div className="flex items-center gap-2">
         <BoundedSelect
           value={roleId}
@@ -93,7 +99,7 @@ export default function RolePermissionManager({ notify, canUpdate }: MdmManagerP
             return <td key={action} className="px-3 py-2 text-center">
               <input
                 type="checkbox"
-                disabled={!canUpdate}
+                disabled={!canUpdate || (action === 'A' && module.code !== 'POR')}
                 checked={detail[property] === 'Y'}
                 onChange={(event) => update(module.code, action, event.target.checked ? 'Y' : 'N')}
               />

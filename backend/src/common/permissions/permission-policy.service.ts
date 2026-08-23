@@ -40,10 +40,7 @@ interface SystemAdminParams {
   userId: string;
 }
 
-interface BoardMutationParams {
-  companyId: string;
-  roleId: string;
-  action: 'U' | 'D';
+interface OwnResourceParams {
   ownerId: string;
   operatorId: string;
 }
@@ -55,17 +52,6 @@ interface ApprovalReadParams {
     steps?: Array<{ approverId: string }>;
   };
   userId: string;
-}
-
-interface OwnTempOrPermissionParams {
-  companyId: string;
-  roleId: string;
-  userId?: string;
-  module: AppModule;
-  status: string | null | undefined;
-  ownerId: string | null | undefined;
-  operatorId: string;
-  resourceLabel: string;
 }
 
 interface AttachmentPermissionParams {
@@ -159,10 +145,10 @@ export class PermissionPolicyService {
     }
   }
 
-  async assertCanMutateBoard(params: BoardMutationParams): Promise<void> {
-    // BRD U/D 권한 확인 후에도 게시글 작성자 본인만 수정·삭제할 수 있다.
+  assertOwner(params: OwnResourceParams): void {
+    // 권한과 무관하게 업무 리소스의 수정·삭제는 소유자 본인만 허용한다.
     if (params.ownerId === params.operatorId) return;
-    throw new ForbiddenException('본인이 작성한 게시글만 수정·삭제할 수 있습니다.');
+    throw new ForbiddenException('본인이 작성한 글만 수정·삭제할 수 있습니다.');
   }
 
   assertCanReadApproval(params: ApprovalReadParams): void {
@@ -178,18 +164,14 @@ export class PermissionPolicyService {
     }
   }
 
-  async assertCanUpdateOwnTempOrPermission(
-    params: OwnTempOrPermissionParams,
-  ): Promise<boolean> {
-    // 모듈 U 권한은 Guard에서 확인하고, Service에서는 본인 T 문서 여부를 확인한다.
-    return this.assertCanMutateOwnTempOrPermission({ ...params, action: 'U' });
-  }
-
-  async assertCanDeleteOwnTempOrPermission(
-    params: OwnTempOrPermissionParams,
-  ): Promise<boolean> {
-    // 모듈 D 권한은 Guard에서 확인하고, Service에서는 본인 T 문서 여부를 확인한다.
-    return this.assertCanMutateOwnTempOrPermission({ ...params, action: 'D' });
+  /** 업무문서의 수정·삭제 공통 정책: 본인이 작성한 임시문서인지 확인한다. */
+  assertOwnDraft(params: {
+    status: string | null | undefined;
+    ownerId: string | null | undefined;
+    operatorId: string;
+  }): void {
+    if (params.status === DocStatus.TEMP && params.ownerId === params.operatorId) return;
+    throw new ForbiddenException('본인이 작성한 임시저장 문서만 수정·삭제할 수 있습니다.');
   }
 
   async assertCanReadAttachmentGroup(params: AttachmentPermissionParams): Promise<void> {
@@ -251,14 +233,6 @@ export class PermissionPolicyService {
       actions: [params.action],
       message: '첨부파일 수정 권한이 없습니다.',
     });
-  }
-
-  private async assertCanMutateOwnTempOrPermission(
-    params: OwnTempOrPermissionParams & { action: 'U' | 'D' },
-  ): Promise<boolean> {
-    // 모듈 U/D는 Guard에서 확인한다. R 문서는 원본을 수정하지 않고 신규 T 문서로 편집한다.
-    if (params.status === DocStatus.TEMP && params.ownerId === params.operatorId) return true;
-    throw new ForbiddenException('본인이 작성한 임시저장 문서만 수정·삭제할 수 있습니다.');
   }
 
   private async resolveAttachmentDocumentAccess(

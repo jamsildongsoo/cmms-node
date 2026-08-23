@@ -2,12 +2,12 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { DataSource, EntityManager, MoreThan } from 'typeorm';
 import { Approval } from '../../entities/approval.entity';
 import { ApprovalStep } from '../../entities/approval-step.entity';
-import { EquipmentCheckCycle } from '../../entities/equipment-check-cycle.entity';
 import { PmRecord } from '../../entities/pm-record.entity';
 import { User } from '../../entities/users.entity';
 import { WorkOrder } from '../../entities/work-order.entity';
 import { WorkPermit } from '../../entities/work-permit.entity';
 import { PurchaseRequest } from '../../entities/purchase-request.entity';
+import { EquipmentCheckCycle } from '../../entities/equipment-check-cycle.entity';
 import {
   ApprovalAction,
   ApprovalResult,
@@ -15,7 +15,6 @@ import {
 } from '../../common/constants/approval.constants';
 import { DocStatus } from '../../common/constants/status.constants';
 import { SequenceService, AppModule } from '../../common/sequence/sequence.service';
-import { addDateOnly } from '../../common/utils/date-only.util';
 import { ApprovalActionDto } from './dto/approval-action.dto';
 import {
   ApprovalDetailResponseDto,
@@ -50,9 +49,8 @@ export class ApprovalService {
     id: string,
     request: ApprovalSubmitDto,
     operator: string,
-    roleId: string,
   ): Promise<ApprovalResponseDto> {
-    return this.saveApproval(companyId, request, operator, id.trim(), roleId);
+    return this.saveApproval(companyId, request, operator, id.trim());
   }
 
   private async saveApproval(
@@ -60,7 +58,6 @@ export class ApprovalService {
     request: ApprovalSubmitDto,
     operator: string,
     existingId: string | null,
-    roleId?: string,
   ): Promise<ApprovalResponseDto> {
     const { approval: input, steps, refNo, refModule } = request;
     this.validateReference(refModule ?? null, refNo ?? null);
@@ -69,6 +66,13 @@ export class ApprovalService {
         step.approvalType as ApprovalStepType,
       ),
     );
+    const approverIds = (steps ?? []).map((step) => step.approverId.trim());
+    if (new Set(approverIds).size !== approverIds.length) {
+      throw new BadRequestException('같은 사용자를 결재선에 중복 지정할 수 없습니다.');
+    }
+    if (input.status !== DocStatus.TEMP && !hasApprover) {
+      throw new BadRequestException('상신하려면 결재선에 결재자 또는 합의자가 1명 이상 필요합니다.');
+    }
     const status =
       input.status === DocStatus.TEMP
         ? DocStatus.TEMP
@@ -110,20 +114,14 @@ export class ApprovalService {
           companyId,
           approvalId,
         );
-        const canEditOwnTemp = await this.permissionPolicyService.assertCanUpdateOwnTempOrPermission({
-          companyId,
-          roleId: roleId ?? '',
-          userId: operator,
-          module: AppModule.APR,
+        this.permissionPolicyService.assertOwnDraft({
           status: entity.status,
           ownerId: entity.drafterId,
           operatorId: operator,
-          resourceLabel: '전자결재',
         });
         if (entity.status !== DocStatus.TEMP) {
           throw new BadRequestException('임시저장 상태에서만 재상신할 수 있습니다.');
         }
-        if (canEditOwnTemp) this.assertDraftOwner(entity, operator);
         if (steps) {
           await stepRepository.delete({
             companyId,
@@ -264,7 +262,6 @@ export class ApprovalService {
     companyId: string,
     id: string,
     operator: string,
-    roleId: string,
   ): Promise<void> {
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();
@@ -273,20 +270,14 @@ export class ApprovalService {
     try {
       const approval = await this.findLockedApproval(runner.manager, companyId, id);
       fileGroupId = approval.fileGroupId;
-      const canDeleteOwnTemp = await this.permissionPolicyService.assertCanDeleteOwnTempOrPermission({
-        companyId,
-        roleId,
-        userId: operator,
-        module: AppModule.APR,
+      this.permissionPolicyService.assertOwnDraft({
         status: approval.status,
         ownerId: approval.drafterId,
         operatorId: operator,
-        resourceLabel: '전자결재',
       });
       if (approval.status !== DocStatus.TEMP) {
         throw new BadRequestException('임시저장 문서만 삭제할 수 있습니다.');
       }
-      if (canDeleteOwnTemp) this.assertDraftOwner(approval, operator);
       approval.deleteYn = 'Y';
       approval.updatedBy = operator;
       await runner.manager.getRepository(Approval).save(approval);
@@ -396,12 +387,6 @@ export class ApprovalService {
     return approval;
   }
 
-  private assertDraftOwner(approval: Approval, userId: string): void {
-    if (approval.drafterId !== userId) {
-      throw new NotFoundException('결재 문서를 찾을 수 없습니다.');
-    }
-  }
-
   private async updateLinkedDocument(
     manager: EntityManager,
     approval: Approval,
@@ -423,10 +408,10 @@ export class ApprovalService {
       if (record) {
         Object.assign(record, values);
         await repository.save(record);
-        affected = 1;
-        if (status === DocStatus.CONFIRMED && record.stepStage === 'R') {
-          await this.updateCheckCycle(manager, record, operator);
+        if (status === DocStatus.CONFIRMED) {
+          await this.updatePmCheckCycle(manager, record);
         }
+        affected = 1;
       }
     } else if (approval.refModule === AppModule.WO) {
       const result = await manager.getRepository(WorkOrder).update(
@@ -452,29 +437,12 @@ export class ApprovalService {
     }
   }
 
-  private async updateCheckCycle(
+  private async updatePmCheckCycle(
     manager: EntityManager,
     record: PmRecord,
-    operator: string,
   ): Promise<void> {
-    if (record.refNo) {
-      const duplicate = await manager.getRepository(PmRecord).count({
-        where: {
-          companyId: record.companyId,
-          plantId: record.plantId,
-          stepStage: 'R',
-          refModule: AppModule.PM,
-          refNo: record.refNo,
-          status: DocStatus.CONFIRMED,
-          deleteYn: 'N',
-        },
-      });
-      if (duplicate > 1) {
-        throw new BadRequestException('이미 확정된 예방점검 실적이 있는 계획입니다.');
-      }
-    }
-    const repository = manager.getRepository(EquipmentCheckCycle);
-    const cycle = await repository.findOne({
+    if (!record.equipmentId || !record.checkTypeCode || !record.workDate) return;
+    const cycle = await manager.getRepository(EquipmentCheckCycle).findOne({
       where: {
         companyId: record.companyId,
         plantId: record.plantId,
@@ -483,12 +451,34 @@ export class ApprovalService {
         deleteYn: 'N',
       },
     });
-    if (!cycle || !record.workDate) return;
-    cycle.lastCheckDate = record.workDate;
-    cycle.nextCheckDate = addDateOnly(record.workDate, cycle.cycleVal, cycle.cycleUnit);
-    cycle.updatedBy = operator;
-    await repository.save(cycle);
+    if (!cycle) return;
+
+    const lastCheckDate = String(record.workDate).slice(0, 10);
+    const nextCheckDate = new Date(`${lastCheckDate}T00:00:00Z`);
+    const cycleValue = Number(cycle.cycleVal);
+    if (!Number.isInteger(cycleValue) || cycleValue < 1) return;
+    switch (cycle.cycleUnit.toUpperCase()) {
+      case 'D':
+        nextCheckDate.setUTCDate(nextCheckDate.getUTCDate() + cycleValue);
+        break;
+      case 'W':
+        nextCheckDate.setUTCDate(nextCheckDate.getUTCDate() + cycleValue * 7);
+        break;
+      case 'M':
+        nextCheckDate.setUTCMonth(nextCheckDate.getUTCMonth() + cycleValue);
+        break;
+      case 'Y':
+        nextCheckDate.setUTCFullYear(nextCheckDate.getUTCFullYear() + cycleValue);
+        break;
+      default:
+        throw new BadRequestException(`지원하지 않는 점검주기 단위입니다: ${cycle.cycleUnit}`);
+    }
+    cycle.lastCheckDate = lastCheckDate;
+    cycle.nextCheckDate = nextCheckDate.toISOString().slice(0, 10);
+    cycle.updatedBy = record.updatedBy;
+    await manager.getRepository(EquipmentCheckCycle).save(cycle);
   }
+
 
   private validateReference(refModule: string | null, refNo: string | null): void {
     if (!!refModule !== !!refNo) {

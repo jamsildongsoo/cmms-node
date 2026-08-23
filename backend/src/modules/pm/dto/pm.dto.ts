@@ -2,7 +2,6 @@ import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsDateString,
-  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -10,7 +9,6 @@ import {
   IsString,
   ValidateNested,
 } from 'class-validator';
-import { DocStatus } from '../../../common/constants/status.constants';
 
 export class PmRecordHeaderDto {
   @IsOptional() @IsString() id?: string | null;
@@ -19,25 +17,17 @@ export class PmRecordHeaderDto {
   @IsString() equipmentId!: string;
   @IsString() departmentId!: string;
   @IsString() checkTypeCode!: string;
-  @IsOptional() @IsIn(['P', 'R']) stepStage?: string | null;
-  @IsOptional() @IsDateString() cycleFrom?: string | null;
-  @IsOptional() @IsDateString() cycleEnd?: string | null;
   @IsOptional() @IsDateString() workDate?: string | null;
   @IsString() workerId!: string;
   @IsString() judgeCode!: string;
   @IsOptional() @IsString() remarks?: string | null;
-  @IsOptional() @IsString() certNumber?: string | null;
-  @IsOptional() @IsDateString() certExpireDate?: string | null;
-  @IsOptional() @IsString() certAgency?: string | null;
   @IsOptional() @IsString() approvalId?: string | null;
   @IsOptional()
   @Transform(({ value }) => value === null || value === undefined || value === '' ? value : Number(value))
   @IsInt()
   @Min(1)
   fileGroupId?: number | null;
-  @IsOptional() @IsString() refNo?: string | null;
-  @IsOptional() @IsString() refModule?: string | null;
-  @IsIn(Object.values(DocStatus)) status!: string;
+  @IsOptional() @IsString() status?: string;
 }
 
 export class PmRecordItemDto {
@@ -71,21 +61,12 @@ export class PmRecordResponseDto {
   equipmentName!: string | null;
   departmentId!: string;
   checkTypeCode!: string;
-  stepStage!: string;
-  cycleFrom!: string | null;
-  cycleEnd!: string | null;
-  closeYn!: string | null;
   workDate!: string | null;
   workerId!: string;
   judgeCode!: string;
   remarks!: string | null;
-  certNumber!: string | null;
-  certExpireDate!: string | null;
-  certAgency!: string | null;
   approvalId!: string | null;
   fileGroupId!: number | null;
-  refNo!: string | null;
-  refModule!: string | null;
   status!: string;
   createdAt!: string;
   createdBy!: string;
@@ -115,15 +96,4 @@ export class PmCheckTemplateResponseDto {
   maxValue!: string | null;
   baseValue!: string | null;
   unit!: string | null;
-}
-
-export class PmScheduleResponseDto {
-  equipmentId!: string;
-  equipmentName!: string;
-  plantId!: string;
-  checkTypeCode!: string;
-  cycleVal!: number;
-  cycleUnit!: string;
-  lastCheckDate!: string | null;
-  nextCheckDate!: string | null;
 }

@@ -1,5 +1,4 @@
-export type PmStage = 'P' | 'R';
-export type PmTab = 'plans' | 'results';
+export type PmTab = 'results';
 
 export interface PmRecord {
   id: string;
@@ -9,21 +8,12 @@ export interface PmRecord {
   equipmentName?: string | null;
   departmentId: string;
   checkTypeCode: string;
-  stepStage: PmStage;
-  cycleFrom: string | null;
-  cycleEnd: string | null;
-  closeYn: string;
   workDate: string | null;
   workerId: string;
   judgeCode: string;
   remarks: string | null;
-  certNumber: string | null;
-  certExpireDate: string | null;
-  certAgency: string | null;
   approvalId: string | null;
   fileGroupId: number | null;
-  refNo: string | null;
-  refModule: string | null;
   status: string;
   createdAt?: string | null;
   createdBy?: string | null;

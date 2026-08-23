@@ -7,7 +7,6 @@ import type { WorkPermitCheckItem } from '../work-permit.types';
 
 interface WorkPermitFormProps {
   wpNo: string;
-  stepStage: string;
   createdAt: string;
   departmentId: string;
   depts: Array<{ id: string; name: string }>;
@@ -24,11 +23,13 @@ interface WorkPermitFormProps {
   setEquipmentId: Dispatch<SetStateAction<string>>;
   setEquipmentName: Dispatch<SetStateAction<string>>;
   setPlantId: Dispatch<SetStateAction<string>>;
+  refNo: string;
+  refModule: string;
+  setRefNo: Dispatch<SetStateAction<string>>;
+  setRefModule: Dispatch<SetStateAction<string>>;
+  workOrders: Array<{ id: string; title: string }>;
   supervisorId: string;
   setSupervisorId: Dispatch<SetStateAction<string>>;
-  workOrderId: string;
-  setWorkOrderId: Dispatch<SetStateAction<string>>;
-  workOrders: Array<{ id: string; title: string }>;
   startAt: string;
   setStartAt: Dispatch<SetStateAction<string>>;
   endAt: string;
@@ -53,11 +54,12 @@ interface WorkPermitFormProps {
 
 export default function WorkPermitFormModal({ title: modalTitle, onClose, form }: { title: string; onClose: () => void; form: WorkPermitFormProps }) {
   const {
-    wpNo, stepStage, createdAt, departmentId, depts, createdBy, user, usersList,
+    wpNo, createdAt, departmentId, depts, createdBy, user, usersList,
     title, setTitle, equipmentId, plantId, activePlantId, canEditCurrent,
     canDeleteCurrent,
-    setEquipmentId, setEquipmentName, setPlantId, supervisorId, setSupervisorId,
-    workOrderId, setWorkOrderId, workOrders, startAt, setStartAt, endAt, setEndAt,
+    setEquipmentId, setEquipmentName, setPlantId, refNo, refModule, setRefNo, setRefModule, workOrders,
+    supervisorId, setSupervisorId,
+    startAt, setStartAt, endAt, setEndAt,
     selectedTypes, handleTypeToggle, getWpTypeLabel, workSummary, setWorkSummary,
     riskFactors, setRiskFactors, safetyMeasures, setSafetyMeasures, checksheets,
     accordionOpen, toggleAccordion, handleCheckChange, isLoading, handleSave,
@@ -71,7 +73,7 @@ export default function WorkPermitFormModal({ title: modalTitle, onClose, form }
             <div className="flex-1 overflow-y-auto p-6 space-y-6 print:hidden">
 
               {/* PAGE 1: GENERAL PERMIT COVER */}
-              <div className="space-y-6">
+                  <div className="space-y-6">
 
                 {/* Status Header Area */}
                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-5 gap-4 text-xs">
@@ -90,10 +92,6 @@ export default function WorkPermitFormModal({ title: modalTitle, onClose, form }
                   <div>
                     <span className="text-slate-500 block mb-0.5">작성자</span>
                     <span className="text-slate-300">{createdBy || user?.id || '-'} / {usersList.find((item) => item.id === (createdBy || user?.id))?.name || user?.name || '-'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-500 block mb-0.5">단계</span>
-                    <span className="text-slate-300">{stepStage === 'P' ? '계획(P)' : '실적(R)'}</span>
                   </div>
                 </div>
 
@@ -131,6 +129,23 @@ export default function WorkPermitFormModal({ title: modalTitle, onClose, form }
                             }}
                           />
                         </div>
+                        <div className="sm:col-span-2 md:col-span-3">
+                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">연계 작업지시서(WO, 선택)</label>
+                          <select
+                            value={refModule === 'WO' ? refNo : ''}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setRefModule(value ? 'WO' : '');
+                              setRefNo(value);
+                            }}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2 px-3 text-slate-300"
+                          >
+                            <option value="">(미연계 / 외부 유지보수)</option>
+                            {workOrders.map((order) => (
+                              <option key={order.id} value={order.id}>{order.title} [{order.id}]</option>
+                            ))}
+                          </select>
+                        </div>
                         <div>
                           <label className="block text-slate-400 mb-1.5 print:text-slate-600">담당자</label>
                           <input
@@ -150,19 +165,6 @@ export default function WorkPermitFormModal({ title: modalTitle, onClose, form }
                             <option value="">-- 감독자 선택 --</option>
                             {usersList.map((candidate) => (
                               <option key={candidate.id} value={candidate.id}>{candidate.name} [{candidate.id}]</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="sm:col-span-2 md:col-span-3">
-                          <label className="block text-slate-400 mb-1.5 print:text-slate-600">연계 작업지시서(WO)</label>
-                          <select
-                            value={workOrderId}
-                            onChange={(e) => setWorkOrderId(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-lg py-2 px-3 text-slate-300 outline-none print:bg-white print:border-slate-300 print:text-slate-800"
-                          >
-                            <option value="">(미연계)</option>
-                            {workOrders.map(wo => (
-                              <option key={wo.id} value={wo.id}>{wo.title} [{wo.id}]</option>
                             ))}
                           </select>
                         </div>

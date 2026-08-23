@@ -27,6 +27,9 @@ export class Equipment extends BaseEntity {
   @Column({ name: 'work_permit_yn', type: 'char', length: 1, default: 'N' })
   workPermitYn!: string;
 
+  @Column({ name: 'pm_target_yn', type: 'char', length: 1, default: 'N' })
+  pmTargetYn!: string;
+
   @Column({ type: 'varchar',  name: 'maker_name', length: 100, nullable: true })
   makerName!: string | null;
 

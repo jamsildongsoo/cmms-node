@@ -51,17 +51,16 @@ import {
 export default function WorkPermit() {
   const user = useAuthStore((s) => s.user);
   const activePlantId = useAuthStore((s) => s.activePlantId);
-  const [activeTab, setActiveTab] = useState<'plans' | 'results'>('plans');
   const [searchType, setSearchType] = useState<'id' | 'title' | 'supervisor'>('id');
   const [searchValue, setSearchValue] = useState('');
   const [tempOnly, setTempOnly] = useState(false);
 
 
   const [permits, setPermits] = useState<WorkPermitModel[]>([]);
+  const [workOrders, setWorkOrders] = useState<{ id: string; title: string }[]>([]);
   const [equipments, setEquipments] = useState<{ id: string; name: string; plantId: string }[]>([]);
   const [depts, setDepts] = useState<{ id: string; name: string }[]>([]);
   const [usersList, setUsersList] = useState<{ id: string; name: string; title?: string | null; position?: string | null }[]>([]);
-  const [workOrders, setWorkOrders] = useState<{ id: string; title: string }[]>([]);
 
   // Form states
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -71,9 +70,7 @@ export default function WorkPermit() {
   const [plantId, setPlantId] = useState('');
   const [equipmentId, setEquipmentId] = useState('');
   const [equipmentName, setEquipmentName] = useState('');
-  const [workOrderId, setWorkOrderId] = useState('');
   const [title, setTitle] = useState('');
-  const [stepStage, setStepStage] = useState('P');
   const [selectedTypes, setSelectedTypes] = useState<string[]>(['GENERAL']); // GENERAL is always selected
   const [startAt, setStartAt] = useState('');
   const [endAt, setEndAt] = useState('');
@@ -119,42 +116,33 @@ export default function WorkPermit() {
   } | null>(null);
 
   const canCreate = hasModuleCreate(user?.moduleAccess, APP_MODULE.WP);
-  const canUpdate = canCreate;
-  const canDelete = canCreate;
-  const canEditCurrent = !wpNo
-    ? canCreate
-    : canUpdate || (recordStatus === 'T' && createdBy === user?.id);
-  const canDeleteCurrent = !!wpNo
-    && recordStatus === 'T'
-    && (canDelete || createdBy === user?.id);
-  const currentPermits = permits.filter((permit) =>
-    activeTab === 'plans' ? permit.stepStage === 'P' : permit.stepStage === 'R',
-  );
+  const isNew = !wpNo;
+  const isOwnDraft = recordStatus === 'T' && createdBy === user?.id;
+  const canEditCurrent = isNew ? canCreate : isOwnDraft;
+  const canDeleteCurrent = !isNew && isOwnDraft;
+  const currentPermits = permits;
 
   const loadList = useCallback(async () => {
     try {
-      const params = new URLSearchParams();
-      if (searchValue) {
-        params.set('searchType', searchType);
-        params.set('searchValue', searchValue);
-      }
-      if (tempOnly) params.set('tempOnly', 'Y');
+      const params = {
+        plantId: activePlantId,
+        searchType: searchValue ? searchType : undefined,
+        searchValue: searchValue || undefined,
+        tempOnly,
+      };
       // 폼 선택값 구성을 위한 시스템 참조값 조회다. 작업허가서 목록 R 권한을 대체하지 않는다.
       const [loadedPermits, loadedEquipments, loadedDepartments, loadedUsers, loadedWorkOrders] = await Promise.all([
-        workPermitApi.getAll(params, activePlantId),
+        workPermitApi.getAll(params),
         masterLookupApi.getEquipments(),
         mdmLookupApi.getDepartmentOptions(),
         mdmLookupApi.getUserOptions(),
-        workOrderApi.getAll(undefined, activePlantId),
+        workOrderApi.getAll({ plantId: activePlantId }),
       ]);
-      setPermits((loadedPermits || []).map((permit: WorkPermitModel & { step_stage?: string }) => ({
-        ...permit,
-        stepStage: permit.stepStage || permit.step_stage || 'P',
-      })));
+      setPermits(loadedPermits || []);
       setEquipments(loadedEquipments);
       setDepts(loadedDepartments);
       setUsersList(loadedUsers);
-      setWorkOrders(loadedWorkOrders);
+      setWorkOrders(loadedWorkOrders.map((order) => ({ id: order.id, title: order.title })));
     } catch (err) {
       toastApiError(err, '목록을 불러오지 못했습니다.');
     }
@@ -166,7 +154,7 @@ export default function WorkPermit() {
       await loadList();
     };
     void run();
-  }, [activeTab, loadList]);
+  }, [loadList]);
 
   const toggleAccordion = (type: string) => {
     setAccordionOpen(prev => ({ ...prev, [type]: !prev[type] }));
@@ -209,9 +197,7 @@ export default function WorkPermit() {
     setPlantId(equipments.length > 0 ? equipments[0].plantId : '');
     setEquipmentId(equipments.length > 0 ? equipments[0].id : '');
     setEquipmentName(equipments.length > 0 ? equipments[0].name : '');
-    setWorkOrderId('');
     setTitle('');
-    setStepStage(activeTab === 'plans' ? 'P' : 'R');
     setSelectedTypes(['GENERAL']);
     setStartAt(nowLocalInput());
     setEndAt(utcToInput(new Date(Date.now() + 8 * 3600 * 1000).toISOString()));
@@ -257,9 +243,7 @@ export default function WorkPermit() {
       setWpNo(isRejected ? '' : w.id);
       setPlantId(w.plantId);
       setEquipmentId(w.equipmentId);
-      setWorkOrderId(w.workOrderId || '');
       setTitle(w.title);
-      setStepStage(w.stepStage);
       setSelectedTypes(w.permitTypeCodes.split(','));
       setStartAt(utcToInput(w.startAt));
       setEndAt(utcToInput(w.endAt));
@@ -331,9 +315,7 @@ export default function WorkPermit() {
         id: wpNo || null,
         plantId,
         equipmentId,
-        workOrderId: workOrderId || null,
         title,
-        stepStage,
         permitTypeCodes: selectedTypes.join(','),
         startAt: inputToUtc(startAt),
         endAt: inputToUtc(endAt),
@@ -358,7 +340,7 @@ export default function WorkPermit() {
       };
 
       const saved = wpNo
-        ? await workPermitApi.update(payload)
+        ? await workPermitApi.update(wpNo, payload)
         : await workPermitApi.create(payload);
       if (submitStatus === 'P') {
         const savedId = saved.id;
@@ -391,7 +373,6 @@ export default function WorkPermit() {
             endAt: formatDateTime(inputToUtc(endAt)),
             supervisorName:
               usersList.find((candidate) => candidate.id === supervisorId)?.name || supervisorId,
-            workOrderId,
             workSummary,
             riskFactors,
             safetyMeasures,
@@ -461,7 +442,6 @@ export default function WorkPermit() {
             endAt={detail.endAt || ''}
             equipmentId={detail.equipmentId}
             equipmentName={equipments.find((item) => item.id === detail.equipmentId)?.name || detail.equipmentId}
-            workOrderId={detail.workOrderId || '-'}
             permitTypeLabel={types.map(getWpTypeLabel).join(', ')}
             workSummary={detail.workSummary || undefined}
             riskFactors={detail.riskFactors || undefined}
@@ -541,24 +521,6 @@ export default function WorkPermit() {
             <Plus size={14} />
             입력
           </button>}
-          <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg">
-            <button
-              onClick={() => setActiveTab('plans')}
-              className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer border-0 outline-none ${
-                activeTab === 'plans' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              계획
-            </button>
-            <button
-              onClick={() => setActiveTab('results')}
-              className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer border-0 outline-none ${
-                activeTab === 'results' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              실적
-            </button>
-          </div>
         </div>
       </div>
 
@@ -634,7 +596,7 @@ export default function WorkPermit() {
                     <td className="p-3 font-mono text-slate-400">{formatDateTime(wp.startAt)}</td>
                     <td className="p-3 font-mono text-slate-400">{formatDateTime(wp.endAt)}</td>
                     <td className="p-3 text-right space-x-2 print:hidden">
-                      {(canUpdate || (wp.status === 'T' && wp.createdBy === user?.id)) && ['T', 'R'].includes(wp.status) && (
+                      {wp.status === 'T' && wp.createdBy === user?.id && (
                         <ListIconButton
                           onClick={() => loadDetail(wp)}
                           label="상세/수정"
@@ -654,11 +616,10 @@ export default function WorkPermit() {
       {/* Input / View Detail Modal */}
       {isFormOpen && (
         <WorkPermitFormModal
-          title={wpNo ? `작업허가 ${stepStage === 'P' ? '계획' : '실적'} 수정/상세 [${wpNo}] ${equipmentName}` : `신규 작업허가 ${stepStage === 'P' ? '계획' : '실적'} 작성`}
+          title={wpNo ? `작업허가 수정/상세 [${wpNo}] ${equipmentName}` : '신규 작업허가 작성'}
           onClose={() => setIsFormOpen(false)}
           form={{
             wpNo,
-            stepStage,
             createdAt,
             departmentId,
             depts,
@@ -675,11 +636,13 @@ export default function WorkPermit() {
             setEquipmentId,
             setEquipmentName,
             setPlantId,
+            refNo,
+            refModule,
+            setRefNo,
+            setRefModule,
+            workOrders,
             supervisorId,
             setSupervisorId,
-            workOrderId,
-            setWorkOrderId,
-            workOrders,
             startAt,
             setStartAt,
             endAt,

@@ -105,6 +105,17 @@ export default function EquipmentFormModal({
                     <option value="Y">대상 (안전허가 요구)</option>
                   </select>
                 </label>
+                <label className="text-slate-400">
+                  PM 대상
+                  <select
+                    value={values.pmTargetYn}
+                    onChange={(event) => update('pmTargetYn', event.target.value as YesNo)}
+                    className={`${inputClass} mt-1.5 text-slate-300`}
+                  >
+                    <option value="N">미대상</option>
+                    <option value="Y">대상 (정기점검 관리)</option>
+                  </select>
+                </label>
               </div>
             </div>
           </section>
@@ -130,7 +141,7 @@ export default function EquipmentFormModal({
             <div className="mb-4 flex items-center justify-between border-l-2 border-emerald-500 pl-2">
               <div>
                 <h3 className="font-bold uppercase tracking-wider text-emerald-400">설비 정기 점검 주기</h3>
-                <p className="mt-0.5 text-[10px] text-slate-500">점검유형별 주기를 등록하면 예방점검 스케줄에 반영됩니다.</p>
+                <p className="mt-0.5 text-[10px] text-slate-500">PM 대상 설비의 점검유형별 주기와 기준일을 등록합니다.</p>
               </div>
               <button type="button" onClick={() => update('checkCycles', [...values.checkCycles, { checkTypeCode: '', cycleVal: null, cycleUnit: 'M', lastCheckDate: null, nextCheckDate: null }])} className="flex cursor-pointer items-center gap-1 rounded-lg border-0 bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-emerald-400 hover:bg-slate-700">
                 <RefreshCw size={13} />주기 추가

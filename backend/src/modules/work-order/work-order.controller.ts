@@ -23,11 +23,12 @@ import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
 @Controller('api/work-order')
-@UseGuards(JwtAuthGuard, PermissionGuard)
+@UseGuards(JwtAuthGuard)
 export class WorkOrderController {
   constructor(private readonly workOrderService: WorkOrderService) {}
 
   @Get()
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.WO, 'R')
   async getWorkOrders(
     @Query('searchType') searchType?: string,
@@ -40,6 +41,7 @@ export class WorkOrderController {
   }
 
   @Get(':id')
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.WO, 'R')
   async getWorkOrderDetails(
     @Param('id') id: string,
@@ -50,33 +52,31 @@ export class WorkOrderController {
   }
 
   @Post()
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.WO, 'C')
-  async saveWorkOrder(
+  async createWorkOrder(
     @Body() request: SaveWorkOrderDto,
   ): Promise<WorkOrderResponseDto> {
-    const { companyId, userId, roleId } = getTenantContext();
-    return this.workOrderService.saveWorkOrder(companyId, request, userId, 'create', roleId);
+    const { companyId, userId } = getTenantContext();
+    return this.workOrderService.createWorkOrder(companyId, request, userId);
   }
 
   @Put(':id')
-  @ModulePermission(AppModule.WO, 'U')
   async updateWorkOrder(
     @Param('id') id: string,
     @Body() request: SaveWorkOrderDto,
   ): Promise<WorkOrderResponseDto> {
-    const { companyId, userId, roleId } = getTenantContext();
-    request.workOrder.id = id;
-    return this.workOrderService.saveWorkOrder(companyId, request, userId, 'update', roleId);
+    const { companyId, userId } = getTenantContext();
+    return this.workOrderService.updateWorkOrder(companyId, id, request, userId);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ModulePermission(AppModule.WO, 'D')
   async deleteWorkOrder(
     @Param('id') id: string,
     @Query('plantId') plantId: string,
   ): Promise<void> {
-    const { companyId, userId, roleId } = getTenantContext();
-    await this.workOrderService.deleteWorkOrder(companyId, plantId, id, userId, roleId);
+    const { companyId, userId } = getTenantContext();
+    await this.workOrderService.deleteWorkOrder(companyId, plantId, id, userId);
   }
 }

@@ -2,7 +2,7 @@ import { useCallback, useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { requestConfirmation } from '../utils/userActionDialog';
 import { useAuthStore } from '../store/useAuthStore';
-import { hasModuleCreate } from '../utils/moduleAccess';
+import { hasModuleCreate, hasModuleDelete, hasModuleUpdate } from '../utils/moduleAccess';
 import { toastApiError } from '../utils/apiError';
 import ListIconButton from '../components/ListIconButton';
 import { APP_MODULE } from '../constants/module';
@@ -21,8 +21,8 @@ import {
 export default function Inventory() {
   const user = useAuthStore((state) => state.user);
   const canCreate = hasModuleCreate(user?.moduleAccess, APP_MODULE.INV);
-  const canUpdate = canCreate;
-  const canDelete = canCreate;
+  const canUpdate = hasModuleUpdate(user?.moduleAccess, APP_MODULE.INV);
+  const canDelete = hasModuleDelete(user?.moduleAccess, APP_MODULE.INV);
   const [inventories, setInventories] = useState<InventoryModel[]>([]);
   const [inventoryTypes, setInventoryTypes] = useState<CodeItem[]>([]);
 

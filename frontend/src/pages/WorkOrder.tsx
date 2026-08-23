@@ -76,33 +76,29 @@ export default function WorkOrder() {
   } | null>(null);
 
   const canCreate = hasModuleCreate(user?.moduleAccess, APP_MODULE.WO);
-  const canUpdate = canCreate;
-  const canDelete = canCreate;
-  const canEditCurrent = !woNo
-    ? canCreate
-    : canUpdate || (recordStatus === 'T' && createdBy === user?.id);
-  const canDeleteCurrent = !!woNo
-    && recordStatus === 'T'
-    && (canDelete || createdBy === user?.id);
+  const isNew = !woNo;
+  const isOwnDraft = recordStatus === 'T' && createdBy === user?.id;
+  const canEditCurrent = isNew ? canCreate : isOwnDraft;
+  const canDeleteCurrent = !isNew && isOwnDraft;
 
   const loadList = useCallback(async () => {
     try {
-      const params = new URLSearchParams();
-      if (searchValue) {
-        params.set('searchType', searchType);
-        params.set('searchValue', searchValue);
-      }
-      if (tempOnly) params.set('tempOnly', 'Y');
+      const params = {
+        plantId: activePlantId,
+        searchType: searchValue ? searchType : undefined,
+        searchValue: searchValue || undefined,
+        tempOnly,
+      };
       // 폼 선택값 구성을 위한 시스템 참조값 조회다. 작업지시 목록 R 권한을 대체하지 않는다.
       const [loadedWorkOrders, loadedEquipments, loadedDepartments, loadedUsers] = await Promise.all([
-        workOrderApi.getAll(params, activePlantId),
+        workOrderApi.getAll(params),
         masterLookupApi.getEquipments(),
         mdmLookupApi.getDepartmentOptions(),
         mdmLookupApi.getUserOptions(),
       ]);
-      setWorkOrders((loadedWorkOrders || []).map((workOrder: WorkOrderModel & { step_stage?: string }) => ({
+      setWorkOrders((loadedWorkOrders || []).map((workOrder: WorkOrderModel) => ({
         ...workOrder,
-        stepStage: workOrder.stepStage || workOrder.step_stage || 'P',
+        stepStage: workOrder.stepStage || 'P',
         workDate: formatDateOnly(workOrder.workDate) || null,
       })));
       setEquipments(loadedEquipments);
@@ -255,7 +251,7 @@ export default function WorkOrder() {
       };
 
       const saved = woNo
-        ? await workOrderApi.update(payload)
+        ? await workOrderApi.update(woNo, payload)
         : await workOrderApi.create(payload);
       if (submitStatus === 'P') {
         const savedId = saved.id;
@@ -558,7 +554,7 @@ export default function WorkOrder() {
                           tone="success"
                         />
                       )}
-                      {(canUpdate || (wo.status === 'T' && wo.createdBy === user?.id)) && ['T', 'R'].includes(wo.status) && (
+                      {wo.status === 'T' && wo.createdBy === user?.id && (
                         <ListIconButton
                           onClick={() => loadDetail(wo)}
                           label="상세/수정"

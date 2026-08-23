@@ -21,6 +21,13 @@ export interface PurchaseRequest {
   approvalId?: string | null;
   fileGroupId?: number | null;
   createdAt?: string | null;
+  createdBy?: string | null;
+}
+
+export interface PurchaseOrder extends PurchaseRequest {
+  purchaseOrderId: string;
+  purchaseRequestId?: string;
+  allocationBased: boolean;
 }
 
 export interface PurchaseRequestItem {
@@ -32,7 +39,7 @@ export interface PurchaseRequestItem {
 }
 
 export interface PurchaseRequestDetail {
-  header: PurchaseRequest;
+  header: PurchaseRequest | PurchaseOrder;
   items: PurchaseRequestItem[];
 }
 

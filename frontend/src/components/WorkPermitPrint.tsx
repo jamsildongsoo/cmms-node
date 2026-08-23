@@ -28,7 +28,6 @@ interface WorkPermitPrintProps {
   endAt: string;
   equipmentName: string;
   equipmentId: string;
-  workOrderId: string;
   permitTypeLabel: string;
   workSummary?: string;
   riskFactors?: string;
@@ -78,7 +77,6 @@ export default function WorkPermitPrint(p: WorkPermitPrintProps) {
           </div>
         </div>
         <div className="mt-2 space-y-1">
-          <PrintField label="연계 작업지시" value={p.workOrderId} />
           <PrintField label="작업개요" value={p.workSummary} />
           <PrintField label="위험요인" value={p.riskFactors} />
           <PrintField label="안전대책" value={p.safetyMeasures} />

@@ -21,7 +21,7 @@ interface PurchaseOrderFormModalProps {
   formEditable: boolean;
   allocations: PurchaseOrderAllocation[];
   setAllocations: Dispatch<SetStateAction<PurchaseOrderAllocation[]>>;
-  canUpdateOrder: boolean;
+  canEditOrder: boolean;
   canConfirmOrder: boolean;
   canCloseRequest: boolean;
   canSaveOrder: boolean;
@@ -47,7 +47,7 @@ export default function PurchaseOrderFormModal({
   formEditable,
   allocations,
   setAllocations,
-  canUpdateOrder,
+  canEditOrder,
   canConfirmOrder,
   canCloseRequest,
   canSaveOrder,
@@ -107,13 +107,13 @@ export default function PurchaseOrderFormModal({
       <div className="mt-6">
         <div className="mb-3 flex items-center justify-between">
           <span className="text-xs font-bold text-slate-400">PR 배부</span>
-          {canUpdateOrder && formHeader.status === 'T' && allocations.length > 0 && <button type="button" onClick={saveAllocations} className="rounded-lg border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-xs font-semibold text-blue-200 hover:bg-blue-800/60">배부 저장</button>}
+          {canEditOrder && formHeader.status === 'T' && allocations.length > 0 && <button type="button" onClick={saveAllocations} className="rounded-lg border border-blue-700 bg-blue-900/40 px-3 py-1.5 text-xs font-semibold text-blue-200 hover:bg-blue-800/60">배부 저장</button>}
         </div>
         {allocations.length === 0 ? <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-4 text-xs text-slate-500">등록된 배부 정보가 없습니다.</div> : (
           <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950/40">
             <table className="w-full border-collapse text-xs">
               <thead><tr className="border-b border-slate-800 bg-slate-900 text-slate-400"><th className="p-3 text-left">PO 라인</th><th className="p-3 text-left">PR / 라인</th><th className="p-3 text-left">자재</th><th className="p-3 text-right">배부수량</th></tr></thead>
-              <tbody>{allocations.map((line, index) => <tr key={`${line.docItemNo}-${line.prId}-${line.prItemNo}`} className="border-b border-slate-900 text-slate-300"><td className="p-3">{line.docItemNo}</td><td className="p-3 font-mono">{line.prId} / {line.prItemNo}</td><td className="p-3 font-mono">{line.inventoryId}</td><td className="p-1"><input type="number" min="0.0001" step="0.0001" value={line.allocatedQty} disabled={!canUpdateOrder || formHeader.status !== 'T'} onChange={(event) => setAllocations(allocations.map((item, itemIndex) => itemIndex === index ? { ...item, allocatedQty: Number(event.target.value) } : item))} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-right text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></td></tr>)}</tbody>
+              <tbody>{allocations.map((line, index) => <tr key={`${line.docItemNo}-${line.prId}-${line.prItemNo}`} className="border-b border-slate-900 text-slate-300"><td className="p-3">{line.docItemNo}</td><td className="p-3 font-mono">{line.prId} / {line.prItemNo}</td><td className="p-3 font-mono">{line.inventoryId}</td><td className="p-1"><input type="number" min="0.0001" step="0.0001" value={line.allocatedQty} disabled={!canEditOrder || formHeader.status !== 'T'} onChange={(event) => setAllocations(allocations.map((item, itemIndex) => itemIndex === index ? { ...item, allocatedQty: Number(event.target.value) } : item))} className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-right text-xs text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50" /></td></tr>)}</tbody>
             </table>
           </div>
         )}

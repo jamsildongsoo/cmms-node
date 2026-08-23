@@ -8,6 +8,7 @@ export interface Equipment {
   eqTypeCode: string | null;
   installDate: string | null;
   workPermitYn: YesNo;
+  pmTargetYn: YesNo;
   makerName: string | null;
   spec: string | null;
   model: string | null;
@@ -43,6 +44,7 @@ export interface EquipmentFormValues {
   eqTypeCode: string;
   installDate: string;
   workPermitYn: YesNo;
+  pmTargetYn: YesNo;
   makerName: string;
   spec: string;
   model: string;

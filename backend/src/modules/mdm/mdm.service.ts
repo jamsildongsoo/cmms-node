@@ -7,7 +7,6 @@ import { Department } from '../../entities/department.entity';
 import { Role } from '../../entities/role.entity';
 import { User } from '../../entities/users.entity';
 import { Warehouse } from '../../entities/warehouse.entity';
-import { InventoryStatus } from '../../entities/inventory-status.entity';
 import { CodeGroup } from '../../entities/code-group.entity';
 import { CodeItem } from '../../entities/code-item.entity';
 import { Company } from '../../entities/company.entity';
@@ -120,8 +119,6 @@ export class MdmService {
     @InjectRepository(CodeGroup) private readonly codeGroupRepo: Repository<CodeGroup>,
     @InjectRepository(CodeItem) private readonly codeItemRepo: Repository<CodeItem>,
     @InjectRepository(Company) private readonly companyRepo: Repository<Company>,
-    @InjectRepository(InventoryStatus)
-    private readonly inventoryStatusRepo: Repository<InventoryStatus>,
     @InjectRepository(RoleDetail)
     private readonly roleDetailRepo: Repository<RoleDetail>,
   ) {}
@@ -658,7 +655,6 @@ export class MdmService {
         exists.deleteYn = 'N';
         exists.updatedBy = operator;
         const restored = await this.warehouseRepo.save(exists);
-        await this.seedStatusesForWarehouse(companyId, restored.id, operator);
         return restored;
       }
     }
@@ -672,7 +668,6 @@ export class MdmService {
       updatedBy: operator,
     });
     const saved = await this.warehouseRepo.save(warehouse);
-    await this.seedStatusesForWarehouse(companyId, saved.id, operator);
     return saved;
   }
 
@@ -693,35 +688,6 @@ export class MdmService {
     warehouse.deleteYn = 'Y';
     warehouse.updatedBy = operator;
     await this.warehouseRepo.save(warehouse);
-  }
-
-  /** 신규 창고는 자재 마스터를 기준으로 모든 자재의 0 재고 상태를 준비한다. */
-  private async seedStatusesForWarehouse(
-    companyId: string,
-    warehouseId: string,
-    operator: string,
-  ): Promise<void> {
-    const inventories = await this.dataSource.getRepository('inventory').find({
-      select: { id: true },
-      where: { companyId, deleteYn: 'N' },
-    }) as Array<{ id: string }>;
-    if (!inventories.length) return;
-    await this.inventoryStatusRepo
-      .createQueryBuilder()
-      .insert()
-      .into(InventoryStatus)
-      .values(inventories.map((inventory) => ({
-        companyId,
-        warehouseId,
-        inventoryId: inventory.id,
-        qty: '0.0000',
-        amount: '0.0000',
-        createdBy: operator,
-        updatedBy: operator,
-        deleteYn: 'N',
-      })))
-      .orIgnore()
-      .execute();
   }
 
   // =========================================================================
@@ -966,7 +932,7 @@ export class MdmService {
             permR: isAdmin || isCrud || isRead ? 'Y' : 'N',
             permU: isAdmin || isCrud ? 'Y' : 'N',
             permD: isAdmin || isCrud ? 'Y' : 'N',
-            permA: isAdmin ? 'Y' : 'N',
+            permA: isAdmin && moduleDetail === AppModule.POR ? 'Y' : 'N',
             createdBy: operator,
             updatedBy: operator,
           });

@@ -46,6 +46,7 @@ export class EquipmentInputDto {
   @IsOptional() @IsString() eqTypeCode?: string | null;
   @IsOptional() @IsDateString() installDate?: string | null;
   @IsOptional() @IsIn(['Y', 'N']) workPermitYn?: string;
+  @IsOptional() @IsIn(['Y', 'N']) pmTargetYn?: string;
   @IsOptional() @IsString() makerName?: string | null;
   @IsOptional() @IsString() spec?: string | null;
   @IsOptional() @IsString() model?: string | null;

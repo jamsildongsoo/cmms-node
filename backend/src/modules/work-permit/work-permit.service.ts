@@ -73,12 +73,28 @@ export class WorkPermitService {
     return this.toResponse(entity);
   }
 
-  async saveWorkPermit(
+  async createWorkPermit(
+    companyId: string,
+    input: SaveWorkPermitDto,
+    operator: string,
+  ): Promise<WorkPermitResponseDto> {
+    return this.saveDraft(companyId, input, operator, 'create');
+  }
+
+  async updateWorkPermit(
+    companyId: string,
+    id: string,
+    input: SaveWorkPermitDto,
+    operator: string,
+  ): Promise<WorkPermitResponseDto> {
+    return this.saveDraft(companyId, { ...input, id }, operator, 'update');
+  }
+
+  private async saveDraft(
     companyId: string,
     input: SaveWorkPermitDto,
     operator: string,
     mode: 'create' | 'update',
-    roleId?: string,
   ): Promise<WorkPermitResponseDto> {
     const plantId = await resolveActivePlantId(
       this.dataSource,
@@ -124,15 +140,10 @@ export class WorkPermitService {
           plantId,
           id,
         );
-        await this.permissionPolicyService.assertCanUpdateOwnTempOrPermission({
-          companyId,
-          roleId: roleId ?? '',
-          userId: operator,
-          module: AppModule.WP,
+        this.permissionPolicyService.assertOwnDraft({
           status: entity.status,
           ownerId: entity.createdBy,
           operatorId: operator,
-          resourceLabel: '작업허가',
         });
         if (entity.status !== DocStatus.TEMP) {
           throw new BadRequestException('임시저장 상태의 작업허가서만 수정할 수 있습니다.');
@@ -140,9 +151,7 @@ export class WorkPermitService {
       }
       Object.assign(entity, {
         equipmentId: input.equipmentId,
-        workOrderId: input.workOrderId ?? null,
         title: input.title,
-        stepStage: input.stepStage,
         permitTypeCodes: input.permitTypeCodes,
         startAt: input.startAt ? new Date(input.startAt) : null,
         endAt: input.endAt ? new Date(input.endAt) : null,
@@ -194,7 +203,6 @@ export class WorkPermitService {
     plantId: string,
     id: string,
     operator: string,
-    roleId: string,
   ): Promise<void> {
     const activePlantId = await resolveActivePlantId(
       this.dataSource,
@@ -209,15 +217,10 @@ export class WorkPermitService {
       where: { companyId, plantId: activePlantId, id, deleteYn: 'N' },
     });
     if (!entity) throw new NotFoundException('작업허가서를 찾을 수 없습니다.');
-    await this.permissionPolicyService.assertCanDeleteOwnTempOrPermission({
-      companyId,
-      roleId,
-      userId: operator,
-      module: AppModule.WP,
+    this.permissionPolicyService.assertOwnDraft({
       status: entity.status,
       ownerId: entity.createdBy,
       operatorId: operator,
-      resourceLabel: '작업허가',
     });
     if (entity.status !== DocStatus.TEMP) {
       throw new BadRequestException('임시저장 상태의 작업허가서만 삭제할 수 있습니다.');
@@ -272,9 +275,7 @@ export class WorkPermitService {
       id: entity.id,
       equipmentId: entity.equipmentId,
       equipmentName: entity.equipment?.name ?? null,
-      workOrderId: entity.workOrderId,
       title: entity.title,
-      stepStage: entity.stepStage,
       permitTypeCodes: entity.permitTypeCodes,
       startAt: entity.startAt?.toISOString() ?? null,
       endAt: entity.endAt?.toISOString() ?? null,

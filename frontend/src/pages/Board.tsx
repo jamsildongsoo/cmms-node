@@ -10,7 +10,6 @@ import type {
   YesNo,
 } from '../features/board/board.types';
 import { useAuthStore } from '../store/useAuthStore';
-import { hasModuleCreate, hasModuleUpdate } from '../utils/moduleAccess';
 import RichTextViewer from '../components/RichTextViewer';
 import BoardFormModal from '../features/board/components/BoardFormModal';
 import Modal from '../components/Modal';
@@ -28,8 +27,6 @@ import {
 
 export default function Board() {
   const user = useAuthStore((state) => state.user);
-  const canCreate = hasModuleCreate(user?.moduleAccess, APP_MODULE.BRD);
-  const canManage = hasModuleUpdate(user?.moduleAccess, APP_MODULE.BRD);
 
   const [posts, setPosts] = useState<BoardPost[]>([]);
   
@@ -56,10 +53,8 @@ export default function Board() {
   const formatAuthor = (post: BoardPost) =>
     post.createdByName ? `${post.createdBy} / ${post.createdByName}` : post.createdBy;
 
-  const canUpdate = (post: BoardPost) =>
-    post.createdBy === user?.id || canManage;
-  const canDelete = (createdBy: string) =>
-    createdBy === user?.id || canManage;
+  const isOwnPost = (post: BoardPost) => post.createdBy === user?.id;
+  const isOwnComment = (authorId: string) => authorId === user?.id;
 
   const loadList = useCallback(async () => {
     try {
@@ -196,7 +191,7 @@ export default function Board() {
           <p className="text-slate-400 text-sm mt-1">공지사항 및 자유로운 전사 업무 소통 게시글을 공유하고 소통합니다.</p>
         </div>
 
-        {canCreate && <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3">
           <button
             onClick={handleOpenCreate}
             className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors border-0 cursor-pointer shadow-lg shadow-blue-900/20"
@@ -204,7 +199,7 @@ export default function Board() {
             <Plus size={14} />
             새 글 작성
           </button>
-        </div>}
+        </div>
       </div>
 
       {/* Post List View */}
@@ -283,13 +278,13 @@ export default function Board() {
                 </div>
 
                 <div className="flex gap-1.5">
-                  {canUpdate(selectedPost) && <button
+                  {isOwnPost(selectedPost) && <button
                     onClick={() => handleOpenEdit(selectedPost)}
                     className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg text-[10px] font-semibold cursor-pointer"
                   >
                     수정
                   </button>}
-                  {canDelete(selectedPost.createdBy) && <button
+                  {isOwnPost(selectedPost) && <button
                     onClick={() => handleDeletePost(selectedPost)}
                     className="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg text-[10px] font-semibold cursor-pointer"
                   >
@@ -314,7 +309,7 @@ export default function Board() {
                   댓글 피드백 ({comments.length}개)
                 </span>
 
-                {canCreate && <div className="flex gap-2">
+                <div className="flex gap-2">
                   <input
                     type="text"
                     placeholder="업무 피드백 또는 댓글을 한 줄로 입력하세요."
@@ -329,7 +324,7 @@ export default function Board() {
                   >
                     등록
                   </button>
-                </div>}
+                </div>
 
                 {/* Comment list */}
                 <div className="space-y-2 max-h-48 overflow-y-auto">
@@ -345,7 +340,7 @@ export default function Board() {
                           </div>
                           <p className="text-slate-400 font-sans">{comment.content}</p>
                         </div>
-                        {canDelete(comment.authorId) && <button
+                        {isOwnComment(comment.authorId) && <button
                           onClick={() => handleDeleteComment(comment)}
                           className="text-slate-600 hover:text-rose-400 bg-transparent border-0 cursor-pointer"
                         >

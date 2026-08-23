@@ -24,14 +24,8 @@ export class WorkPermit extends BaseEntity {
   @Column({ name: 'equipment_id', length: 50 })
   equipmentId!: string;
 
-  @Column({ type: 'varchar',  name: 'work_order_id', length: 50, nullable: true })
-  workOrderId!: string | null;
-
   @Column({ name: 'title', length: 150 })
   title!: string;
-
-  @Column({ name: 'step_stage', length: 1 })
-  stepStage!: string; // P: 계획, R: 실적
 
   @Column({ name: 'permit_type_codes', type: 'text' })
   permitTypeCodes!: string;

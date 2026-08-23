@@ -49,22 +49,31 @@ export interface SaveRequest {
   };
   items?: ItemLine[];
 }
-export interface RequestDetail { header: PurchaseRequestResponse; items: ItemLine[] }
-export interface PurchaseRequestResponse {
+export interface RequestDetail { header: PurchaseRequestResponse | PurchaseOrderResponse; items: ItemLine[] }
+interface ProcurementResponseBase {
   companyId: string; id: string; plantId: string; warehouseId: string;
-  requesterId: string; departmentId: string | null; requestDate: string; requestType: string | null;
+  requesterId: string; departmentId: string | null; requestDate: string;
   fileGroupId: number | null;
-  title: string; approvalId: string | null;
+  title: string;
   orderDate: string | null; etaDate: string | null;
-  shipStartDate: string | null;
-  purchaseManager: string | null; purchaseManagerContact: string | null;
-  purchaseManagerRemarks: string | null;
   status: string;
   remarks: string | null; createdAt: string; createdBy: string;
-  purchaseRequestId?: string;
-  purchaseOrderId?: string;
   closedAt?: string | null;
   remainingQty?: string;
+}
+export interface PurchaseRequestResponse extends ProcurementResponseBase {
+  requestType: string | null;
+  approvalId: string | null;
+  shipStartDate: string | null;
+  purchaseManager: string | null;
+  purchaseManagerContact: string | null;
+  purchaseManagerRemarks: string | null;
+  purchaseOrderId?: string;
+}
+export interface PurchaseOrderResponse extends ProcurementResponseBase {
+  purchaseOrderId: string;
+  purchaseRequestId?: string;
+  allocationBased: boolean;
 }
 export interface PurchaseOrderAllocationResponse {
   docId: string;
@@ -184,7 +193,7 @@ export class ProcurementService {
     receivableOnly = false,
     accessModule: AppModule = AppModule.POR,
     tempOnly = false,
-  ): Promise<PurchaseRequestResponse[]> {
+  ): Promise<PurchaseOrderResponse[]> {
     const activePlantId = await resolveActivePlantId(
       this.dataSource, companyId, operator, requestedPlantId, accessModule,
     );
@@ -217,7 +226,7 @@ export class ProcurementService {
       current.push(item);
       orderItemsByOrder.set(item.orderId, current);
     });
-    const result: PurchaseRequestResponse[] = [];
+    const result: PurchaseOrderResponse[] = [];
     for (const order of orders) {
       const seedAllocation = await allocationRepository.findOne({
         where: { companyId, allocationType: 'PO', docId: order.id },
@@ -240,16 +249,7 @@ export class ProcurementService {
       if (!request || request.status !== DocStatus.CONFIRMED) continue;
       if (activePlantId && request.plantId !== activePlantId) continue;
       if (receivableOnly && order.closedAt) continue;
-      const response = this.toResponse(request);
-      response.id = order.id;
-      response.purchaseRequestId = order.purchaseRequestId ?? undefined;
-      response.purchaseOrderId = order.id;
-      response.warehouseId = order.warehouseId ?? '';
-      response.orderDate = order.orderDate;
-      response.etaDate = order.etaDate;
-      response.shipStartDate = order.shipStartDate;
-      response.status = order.status;
-      response.closedAt = order.closedAt?.toISOString() ?? null;
+      const response = this.toOrderResponse(order, request);
       response.remainingQty = this.getRemainingOrderQty(order.id, orderItemsByOrder, receivedByOrderLine);
       if (receivableOnly && response.remainingQty === '0.0000') continue;
       result.push(response);
@@ -261,7 +261,7 @@ export class ProcurementService {
     companyId: string,
     input: IntegratedOrderInput,
     operator: string,
-  ): Promise<PurchaseRequestResponse> {
+  ): Promise<PurchaseOrderResponse> {
     if (!input.lines.length) throw new BadRequestException('발주할 PR item이 없습니다.');
     const duplicateKeys = new Set<string>();
     for (const line of input.lines) {
@@ -371,16 +371,7 @@ export class ProcurementService {
       await runner.manager.getRepository(PurchaseOrderItem).save(orderItems);
       await runner.manager.getRepository(Allocation).save(allocations);
       await runner.commitTransaction();
-      const response = this.toResponse(first);
-      response.id = orderId;
-      response.purchaseRequestId = undefined;
-      response.purchaseOrderId = orderId;
-      response.warehouseId = '';
-      response.orderDate = order.orderDate;
-      response.etaDate = order.etaDate;
-      response.status = order.status;
-      response.closedAt = order.closedAt?.toISOString() ?? null;
-      return response;
+      return this.toOrderResponse(order, first);
     } catch (error) {
       await runner.rollbackTransaction();
       throw error;
@@ -393,7 +384,7 @@ export class ProcurementService {
     companyId: string,
     input: StandaloneOrderInput,
     operator: string,
-  ): Promise<PurchaseRequestResponse> {
+  ): Promise<PurchaseOrderResponse> {
     if (!input.items.length) throw new BadRequestException('구매오더 품목이 없습니다.');
     const warehouse = input.warehouseId
       ? await this.dataSource.getRepository(Warehouse).findOne({
@@ -453,21 +444,16 @@ export class ProcurementService {
       requesterId: operator,
       departmentId: null,
       requestDate: order.orderDate,
-      requestType: null,
       fileGroupId: null,
       title: '독립 구매오더',
-      approvalId: null,
       orderDate: order.orderDate,
       etaDate: order.etaDate,
-      shipStartDate: null,
-      purchaseManager: null,
-      purchaseManagerContact: null,
-      purchaseManagerRemarks: null,
       status: order.status,
       remarks: null,
       createdAt: order.createdAt.toISOString(),
       createdBy: operator,
       purchaseOrderId: orderId,
+      allocationBased: false,
       closedAt: null,
     };
   }
@@ -685,14 +671,11 @@ export class ProcurementService {
       throw new NotFoundException('구매관리 대상 문서를 찾을 수 없습니다.');
     }
     if (order) {
-      detail.header.id = order.id;
-      detail.header.purchaseRequestId = order.purchaseRequestId ?? undefined;
-      detail.header.purchaseOrderId = order.id;
-      detail.header.orderDate = order.orderDate;
-      detail.header.etaDate = order.etaDate;
-      detail.header.shipStartDate = order.shipStartDate;
-      detail.header.status = order.status;
-      detail.header.closedAt = order.closedAt?.toISOString() ?? null;
+      const request = await this.dataSource.getRepository(PurchaseRequest).findOne({
+        where: { companyId, id: requestId, deleteYn: 'N' },
+      });
+      if (!request) throw new NotFoundException('연결된 구매요청을 찾을 수 없습니다.');
+      detail.header = this.toOrderResponse(order, request);
       if (!order.purchaseRequestId) {
         const orderItems = await this.dataSource.getRepository(PurchaseOrderItem).find({
           where: { companyId, orderId: order.id },
@@ -757,12 +740,31 @@ export class ProcurementService {
       .toFixed(4);
   }
 
-  async createOrUpdate(
+  async createRequest(
+    companyId: string,
+    request: SaveRequest,
+    operator: string,
+  ): Promise<PurchaseRequestResponse> {
+    return this.createOrUpdate(companyId, request, operator, 'create');
+  }
+
+  async updateRequest(
+    companyId: string,
+    id: string,
+    request: SaveRequest,
+    operator: string,
+  ): Promise<PurchaseRequestResponse> {
+    return this.createOrUpdate(companyId, {
+      ...request,
+      header: { ...request.header, id },
+    }, operator, 'update');
+  }
+
+  private async createOrUpdate(
     companyId: string,
     req: SaveRequest,
     operator: string,
     mode: 'create' | 'update',
-    roleId?: string,
   ): Promise<PurchaseRequestResponse> {
     const { header, items = [] } = req;
     const user = await this.dataSource.getRepository(User).findOne({
@@ -809,14 +811,10 @@ export class ProcurementService {
         entity = await this.findLocked(runner.manager, companyId, id);
         // 수정은 요청값이 아닌 기존 문서의 plant를 기준으로 처리한다.
         plantId = entity.plantId;
-        await this.permissionPolicyService.assertCanUpdateOwnTempOrPermission({
-          companyId,
-          roleId: roleId ?? '',
-          module: AppModule.PUR,
+        this.permissionPolicyService.assertOwnDraft({
           status: entity.status,
           ownerId: entity.requesterId,
           operatorId: operator,
-          resourceLabel: '구매',
         });
         if (entity.status !== DocStatus.TEMP) {
           throw new BadRequestException('임시저장 상태의 구매요청만 수정할 수 있습니다.');
@@ -895,6 +893,9 @@ export class ProcurementService {
     if (!order) throw new NotFoundException('구매오더를 찾을 수 없습니다.');
     if (order.status !== DocStatus.TEMP) {
       throw new BadRequestException('임시저장 상태의 POR만 삭제할 수 있습니다.');
+    }
+    if (order.createdBy !== operator) {
+      throw new ForbiddenException('본인이 임시저장한 POR만 삭제할 수 있습니다.');
     }
     order.deleteYn = 'Y';
     order.updatedBy = operator;
@@ -1042,17 +1043,13 @@ export class ProcurementService {
   }
 
   async deleteRequest(
-    companyId: string, requestId: string, operator: string, roleId: string,
+    companyId: string, requestId: string, operator: string,
   ): Promise<void> {
     const entity = await this.mustGetActive(companyId, requestId);
-    await this.permissionPolicyService.assertCanDeleteOwnTempOrPermission({
-      companyId,
-      roleId,
-      module: AppModule.PUR,
+    this.permissionPolicyService.assertOwnDraft({
       status: entity.status,
       ownerId: entity.requesterId,
       operatorId: operator,
-      resourceLabel: '구매',
     });
     if (entity.status !== DocStatus.TEMP) {
       throw new BadRequestException(
@@ -1137,7 +1134,31 @@ export class ProcurementService {
     };
   }
 
-  private toStandaloneOrderResponse(order: PurchaseOrder): PurchaseRequestResponse {
+  private toOrderResponse(order: PurchaseOrder, request: PurchaseRequest): PurchaseOrderResponse {
+    return {
+      companyId: order.companyId,
+      id: order.id,
+      plantId: order.plantId,
+      warehouseId: order.warehouseId ?? request.warehouseId,
+      requesterId: request.requesterId,
+      departmentId: request.departmentId,
+      requestDate: order.orderDate,
+      fileGroupId: null,
+      title: request.title,
+      orderDate: order.orderDate,
+      etaDate: order.etaDate,
+      status: order.status,
+      remarks: request.remarks,
+      createdAt: order.createdAt.toISOString(),
+      createdBy: order.createdBy,
+      purchaseOrderId: order.id,
+      purchaseRequestId: order.purchaseRequestId ?? undefined,
+      allocationBased: true,
+      closedAt: order.closedAt?.toISOString() ?? null,
+    };
+  }
+
+  private toStandaloneOrderResponse(order: PurchaseOrder): PurchaseOrderResponse {
     return {
       companyId: order.companyId,
       id: order.id,
@@ -1146,21 +1167,16 @@ export class ProcurementService {
       requesterId: order.requesterId,
       departmentId: order.departmentId,
       requestDate: order.orderDate,
-      requestType: null,
       fileGroupId: null,
       title: '독립 구매오더',
-      approvalId: null,
       orderDate: order.orderDate,
       etaDate: order.etaDate,
-      shipStartDate: null,
-      purchaseManager: null,
-      purchaseManagerContact: null,
-      purchaseManagerRemarks: null,
       status: order.status,
       remarks: null,
       createdAt: order.createdAt.toISOString(),
       createdBy: order.createdBy,
       purchaseOrderId: order.id,
+      allocationBased: false,
       closedAt: order.closedAt?.toISOString() ?? null,
     };
   }

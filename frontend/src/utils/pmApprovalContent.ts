@@ -12,7 +12,6 @@ interface PmApprovalItem {
 }
 
 interface PmApprovalContentInput {
-  stepStage: 'P' | 'R';
   pmNo: string;
   statusLabel: string;
   createdAt?: string | null;
@@ -21,12 +20,7 @@ interface PmApprovalContentInput {
   equipmentName: string;
   checkTypeName: string;
   workDate?: string | null;
-  cycleFrom?: string | null;
-  cycleEnd?: string | null;
   judgeName: string;
-  certNumber?: string | null;
-  certAgency?: string | null;
-  certExpireDate?: string | null;
   remarks?: string | null;
   checkItems: PmApprovalItem[];
 }
@@ -71,7 +65,6 @@ const range = (item: PmApprovalItem): string =>
 export const createPmApprovalContent = (
   input: PmApprovalContentInput,
 ): RichTextDocument => {
-  const isPlan = input.stepStage === 'P';
   const content: RichTextNode[] = [
     heading('문서 정보', 3),
     table([
@@ -85,25 +78,13 @@ export const createPmApprovalContent = (
       ['상태', input.statusLabel, '점검유형', input.checkTypeName],
       ['대상설비 번호/이름', input.equipmentName, '', ''],
       [
-        isPlan ? '계획일' : '점검일',
+        '점검일',
         input.workDate || '-',
-        isPlan ? '시작일' : '종합판정',
-        isPlan ? input.cycleFrom || '-' : input.judgeName,
+        '종합판정',
+        input.judgeName,
       ],
-      ...(isPlan ? [['종료일', input.cycleEnd || '-', '', '']] : []),
     ]),
   ];
-
-  if (!isPlan && (input.certNumber || input.certAgency || input.certExpireDate)) {
-    content.push(
-      heading('법정 인증 정보', 3),
-      table([
-        ['인증번호', input.certNumber || '-'],
-        ['인증기관', input.certAgency || '-'],
-        ['유효만료일', input.certExpireDate || '-'],
-      ]),
-    );
-  }
 
   if (input.remarks) {
     content.push(heading('비고', 3), paragraph(input.remarks));
@@ -113,26 +94,9 @@ export const createPmApprovalContent = (
     heading('점검 세부 항목', 3),
     table(
       [
-        isPlan
-          ? ['번호', '점검항목', '점검방법', '기준범위', '단위']
-          : ['번호', '점검항목', '점검방법', '기준범위', '측정값', '단위'],
+        ['번호', '점검항목', '점검방법', '기준범위', '측정값', '단위'],
         ...input.checkItems.map((item, index) =>
-          isPlan
-            ? [
-              index + 1,
-              item.checkName,
-              item.checkMethod || '-',
-              range(item),
-              item.unit || '-',
-            ]
-            : [
-              index + 1,
-              item.checkName,
-              item.checkMethod || '-',
-              range(item),
-              item.checkValue ?? '-',
-              item.unit || '-',
-            ]),
+          [index + 1, item.checkName, item.checkMethod || '-', range(item), item.checkValue ?? '-', item.unit || '-']),
       ],
       true,
     ),

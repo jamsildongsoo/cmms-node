@@ -32,8 +32,6 @@ import ListBadge from '../components/ListBadge';
 import ListIconButton from '../components/ListIconButton';
 import { requestConfirmation } from '../utils/userActionDialog';
 import { mdmLookupApi } from '../features/mdm/reference.api';
-import { APP_MODULE } from '../constants/module';
-import { hasModuleCreate, hasModuleDelete, hasModuleRead, hasModuleUpdate } from '../utils/moduleAccess';
 
 const loadApprovalPageData = (inbox: ApprovalInbox) =>
   Promise.all([
@@ -44,10 +42,6 @@ const loadApprovalPageData = (inbox: ApprovalInbox) =>
 
 export default function Approval() {
   const user = useAuthStore((s) => s.user);
-  const canRead = hasModuleRead(user?.moduleAccess, APP_MODULE.APR);
-  const canCreate = hasModuleCreate(user?.moduleAccess, APP_MODULE.APR);
-  const canUpdate = hasModuleUpdate(user?.moduleAccess, APP_MODULE.APR);
-  const canDelete = hasModuleDelete(user?.moduleAccess, APP_MODULE.APR);
   const [activeTab, setActiveTab] = useState<ApprovalInbox>('pending');
 
   const [approvals, setApprovals] = useState<ApprovalDocument[]>([]);
@@ -81,7 +75,6 @@ export default function Approval() {
   const [editingApprovalId, setEditingApprovalId] = useState<string | null>(null);
 
   const loadList = useCallback(async () => {
-    if (!canRead) return;
     try {
       const [appRes, userRes] = await loadApprovalPageData(activeTab);
       setApprovals(appRes);
@@ -90,7 +83,7 @@ export default function Approval() {
       console.error(err);
       toastApiError(err, '목록을 불러오지 못했습니다.');
     }
-  }, [activeTab, canRead]);
+  }, [activeTab]);
 
   useEffect(() => {
     const run = async () => {
@@ -236,15 +229,13 @@ export default function Approval() {
         </div>
 
         <div className="flex items-center gap-3">
-          {canCreate && (
-            <button
+          <button
               onClick={handleOpenDraftModal}
               className="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-xs font-semibold flex items-center gap-1.5 transition-colors border-0 cursor-pointer shadow-lg shadow-blue-900/20"
             >
               <Plus size={14} />
               기안문
-            </button>
-          )}
+          </button>
 
           {/* Subtab control */}
           <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg">
@@ -331,7 +322,7 @@ export default function Approval() {
                     <td className="p-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         {app.status === DOC_STATUS.TEMP
-                          && (app.drafterId === user?.id || canUpdate) && (
+                          && app.drafterId === user?.id && (
                           <ListIconButton
                             onClick={() => handleEditDraft(app)}
                             label={`${app.id} 수정`}
@@ -340,7 +331,7 @@ export default function Approval() {
                           />
                         )}
                         {app.status === DOC_STATUS.TEMP
-                          && (app.drafterId === user?.id || canDelete) && (
+                          && app.drafterId === user?.id && (
                           <ListIconButton
                             onClick={() => void handleDeleteDraft(app)}
                             label={`${app.id} 삭제`}
@@ -430,7 +421,7 @@ export default function Approval() {
             {/* Footer */}
             <div className="p-6 border-t border-slate-800 flex justify-end gap-2 shrink-0 print:hidden">
               {selectedApproval.status === DOC_STATUS.TEMP
-                && (selectedApproval.drafterId === user?.id || canUpdate) && (
+                && selectedApproval.drafterId === user?.id && (
                 <button
                   type="button"
                   onClick={() => {

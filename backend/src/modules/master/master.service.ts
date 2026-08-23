@@ -4,7 +4,6 @@ import { Repository, DataSource, ILike } from 'typeorm';
 import { Equipment } from '../../entities/equipment.entity';
 import { EquipmentCheckCycle } from '../../entities/equipment-check-cycle.entity';
 import { Inventory } from '../../entities/inventory.entity';
-import { InventoryStatus } from '../../entities/inventory-status.entity';
 import { resolveActivePlantId } from '../../common/utils/plant.util';
 import { toDateOnly } from '../../common/utils/date-only.util';
 import { AppModule } from '../../common/constants/module.constants';
@@ -22,13 +21,12 @@ export class MasterService {
     @InjectRepository(Equipment) private readonly eqRepo: Repository<Equipment>,
     @InjectRepository(EquipmentCheckCycle) private readonly checkCycleRepo: Repository<EquipmentCheckCycle>,
     @InjectRepository(Inventory) private readonly invRepo: Repository<Inventory>,
-    @InjectRepository(InventoryStatus) private readonly inventoryStatusRepo: Repository<InventoryStatus>,
   ) {}
 
   // =========================================================================
   // 1. 설비 마스터 (Equipment)
   // =========================================================================
-  async getEquipmentsByCompany(companyId: string, operator: string, keyword?: string, limitValue?: string): Promise<Equipment[]> {
+  async getEquipmentsByCompany(companyId: string, operator: string, keyword?: string, limitValue?: string, pmTargetOnly = false): Promise<Equipment[]> {
     const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, null, AppModule.EQP);
     const limit = this.parseReferenceLimit(limitValue);
     const nameOrId = keyword?.trim();
@@ -36,25 +34,25 @@ export class MasterService {
     if (activePlantId) {
       const where = nameOrId
         ? [
-          { companyId, plantId: activePlantId, deleteYn: 'N' as const, id: ILike(`%${nameOrId}%`) },
-          { companyId, plantId: activePlantId, deleteYn: 'N' as const, name: ILike(`%${nameOrId}%`) },
+          { companyId, plantId: activePlantId, deleteYn: 'N' as const, ...(pmTargetOnly ? { pmTargetYn: 'Y' as const } : {}), id: ILike(`%${nameOrId}%`) },
+          { companyId, plantId: activePlantId, deleteYn: 'N' as const, ...(pmTargetOnly ? { pmTargetYn: 'Y' as const } : {}), name: ILike(`%${nameOrId}%`) },
         ]
-        : { companyId, plantId: activePlantId, deleteYn: 'N' as const };
+        : { companyId, plantId: activePlantId, deleteYn: 'N' as const, ...(pmTargetOnly ? { pmTargetYn: 'Y' as const } : {}) };
       list = await this.eqRepo.find({ where, take: limit, order: { id: 'ASC' } });
     } else {
       const where = nameOrId
         ? [
-          { companyId, deleteYn: 'N' as const, id: ILike(`%${nameOrId}%`) },
-          { companyId, deleteYn: 'N' as const, name: ILike(`%${nameOrId}%`) },
+          { companyId, deleteYn: 'N' as const, ...(pmTargetOnly ? { pmTargetYn: 'Y' as const } : {}), id: ILike(`%${nameOrId}%`) },
+          { companyId, deleteYn: 'N' as const, ...(pmTargetOnly ? { pmTargetYn: 'Y' as const } : {}), name: ILike(`%${nameOrId}%`) },
         ]
-        : { companyId, deleteYn: 'N' as const };
+        : { companyId, deleteYn: 'N' as const, ...(pmTargetOnly ? { pmTargetYn: 'Y' as const } : {}) };
       list = await this.eqRepo.find({ where, take: limit, order: { id: 'ASC' } });
     }
     await this.fillCheckDates(companyId, list);
     return list;
   }
 
-  async getEquipmentsByPlant(companyId: string, plantId: string, operator: string, keyword?: string, limitValue?: string): Promise<Equipment[]> {
+  async getEquipmentsByPlant(companyId: string, plantId: string, operator: string, keyword?: string, limitValue?: string, pmTargetOnly = false): Promise<Equipment[]> {
     const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, plantId, AppModule.EQP);
     if (!activePlantId) {
       return [];
@@ -63,10 +61,10 @@ export class MasterService {
     const keywordValue = keyword?.trim();
     const where = keywordValue
       ? [
-        { companyId, plantId: activePlantId, deleteYn: 'N' as const, id: ILike(`%${keywordValue}%`) },
-        { companyId, plantId: activePlantId, deleteYn: 'N' as const, name: ILike(`%${keywordValue}%`) },
+        { companyId, plantId: activePlantId, deleteYn: 'N' as const, ...(pmTargetOnly ? { pmTargetYn: 'Y' as const } : {}), id: ILike(`%${keywordValue}%`) },
+        { companyId, plantId: activePlantId, deleteYn: 'N' as const, ...(pmTargetOnly ? { pmTargetYn: 'Y' as const } : {}), name: ILike(`%${keywordValue}%`) },
       ]
-      : { companyId, plantId: activePlantId, deleteYn: 'N' as const };
+      : { companyId, plantId: activePlantId, deleteYn: 'N' as const, ...(pmTargetOnly ? { pmTargetYn: 'Y' as const } : {}) };
     const list = await this.eqRepo.find({ where, take: limit, order: { id: 'ASC' } });
     await this.fillCheckDates(companyId, list);
     return list;
@@ -116,7 +114,28 @@ export class MasterService {
     };
   }
 
-  async saveEquipment(
+  async createEquipment(
+    companyId: string,
+    request: EquipmentSaveRequestDto,
+    operator: string,
+  ): Promise<Equipment> {
+    return this.saveEquipment(companyId, request, operator, 'create');
+  }
+
+  async updateEquipment(
+    companyId: string,
+    plantId: string,
+    id: string,
+    request: EquipmentSaveRequestDto,
+    operator: string,
+  ): Promise<Equipment> {
+    return this.saveEquipment(companyId, {
+      ...request,
+      equipment: { ...request.equipment, plantId, id },
+    }, operator, 'update');
+  }
+
+  private async saveEquipment(
     companyId: string,
     request: EquipmentSaveRequestDto,
     operator: string,
@@ -125,6 +144,9 @@ export class MasterService {
     const reqEq = request.equipment;
     if (!reqEq.plantId || !reqEq.id) {
       throw new BadRequestException('플랜트 ID와 설비 ID는 필수입니다.');
+    }
+    if (reqEq.pmTargetYn === 'Y' && !request.checkCycles?.length) {
+      throw new BadRequestException('PM 대상 설비는 하나 이상의 점검주기가 필요합니다.');
     }
 
     const activePlantId = await resolveActivePlantId(this.dataSource, companyId, operator, reqEq.plantId, AppModule.EQP);
@@ -259,7 +281,6 @@ export class MasterService {
         updatedBy: operator,
       });
       const restored = await this.invRepo.save(exists);
-      await this.seedStatusesForInventory(companyId, restored.id, operator);
       return restored;
     } else {
       const inv = this.invRepo.create({
@@ -273,38 +294,8 @@ export class MasterService {
         updatedBy: operator,
       });
       const saved = await this.invRepo.save(inv);
-      await this.seedStatusesForInventory(companyId, saved.id, operator);
       return saved;
     }
-  }
-
-  /** 신규 자재는 모든 활성 창고에 0 재고 상태를 준비한다. */
-  private async seedStatusesForInventory(
-    companyId: string,
-    inventoryId: string,
-    operator: string,
-  ): Promise<void> {
-    const warehouses = await this.dataSource.getRepository('warehouse').find({
-      select: { id: true },
-      where: { companyId, deleteYn: 'N' },
-    }) as Array<{ id: string }>;
-    if (!warehouses.length) return;
-    await this.inventoryStatusRepo
-      .createQueryBuilder()
-      .insert()
-      .into(InventoryStatus)
-      .values(warehouses.map((warehouse) => ({
-        companyId,
-        warehouseId: warehouse.id,
-        inventoryId,
-        qty: '0.0000',
-        amount: '0.0000',
-        createdBy: operator,
-        updatedBy: operator,
-        deleteYn: 'N',
-      })))
-      .orIgnore()
-      .execute();
   }
 
   async deleteInventory(companyId: string, id: string, operator: string): Promise<void> {
@@ -322,10 +313,10 @@ export class MasterService {
   async exportEquipmentsToCsv(companyId: string, operator: string): Promise<string> {
     const list = await this.getEquipmentsByCompany(companyId, operator);
     let csv = '\ufeff'; // Excel UTF-8 깨짐 방지 BOM 추가
-    csv += '설비코드,설비명,플랜트,설치위치,설비타입,설치일자,작업허가대상,제조사,모델,일련번호,비고,지난점검일,다음점검일\n';
+    csv += '설비코드,설비명,플랜트,설치위치,설비타입,설치일자,작업허가대상,PM대상,제조사,모델,일련번호,비고,지난점검일,다음점검일\n';
 
     for (const eq of list) {
-      csv += `${this.escapeCsv(eq.id)},${this.escapeCsv(eq.name)},${this.escapeCsv(eq.plantId)},${this.escapeCsv(eq.location)},${this.escapeCsv(eq.eqTypeCode)},${eq.installDate ? this.formatDate(eq.installDate) : ''},${this.escapeCsv(eq.workPermitYn)},${this.escapeCsv(eq.makerName)},${this.escapeCsv(eq.model)},${this.escapeCsv(eq.serialNumber)},${this.escapeCsv(eq.remarks)},${eq.lastCheckDate ? this.formatDate(eq.lastCheckDate) : ''},${eq.nextCheckDate ? this.formatDate(eq.nextCheckDate) : ''}\n`;
+      csv += `${this.escapeCsv(eq.id)},${this.escapeCsv(eq.name)},${this.escapeCsv(eq.plantId)},${this.escapeCsv(eq.location)},${this.escapeCsv(eq.eqTypeCode)},${eq.installDate ? this.formatDate(eq.installDate) : ''},${this.escapeCsv(eq.workPermitYn)},${this.escapeCsv(eq.pmTargetYn)},${this.escapeCsv(eq.makerName)},${this.escapeCsv(eq.model)},${this.escapeCsv(eq.serialNumber)},${this.escapeCsv(eq.remarks)},${eq.lastCheckDate ? this.formatDate(eq.lastCheckDate) : ''},${eq.nextCheckDate ? this.formatDate(eq.nextCheckDate) : ''}\n`;
     }
     return csv;
   }

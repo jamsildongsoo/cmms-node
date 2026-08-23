@@ -22,11 +22,12 @@ import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
 @Controller('api/work-permit')
-@UseGuards(JwtAuthGuard, PermissionGuard)
+@UseGuards(JwtAuthGuard)
 export class WorkPermitController {
   constructor(private readonly workPermitService: WorkPermitService) {}
 
   @Get()
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.WP, 'R')
   async getWorkPermits(
     @Query('searchType') searchType?: string,
@@ -39,6 +40,7 @@ export class WorkPermitController {
   }
 
   @Get(':id')
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.WP, 'R')
   async getWorkPermitDetails(
     @Param('id') id: string,
@@ -49,33 +51,31 @@ export class WorkPermitController {
   }
 
   @Post()
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.WP, 'C')
-  async saveWorkPermit(
+  async createWorkPermit(
     @Body() permit: SaveWorkPermitDto,
   ): Promise<WorkPermitResponseDto> {
-    const { companyId, userId, roleId } = getTenantContext();
-    return this.workPermitService.saveWorkPermit(companyId, permit, userId, 'create', roleId);
+    const { companyId, userId } = getTenantContext();
+    return this.workPermitService.createWorkPermit(companyId, permit, userId);
   }
 
   @Put(':id')
-  @ModulePermission(AppModule.WP, 'U')
   async updateWorkPermit(
     @Param('id') id: string,
     @Body() permit: SaveWorkPermitDto,
   ): Promise<WorkPermitResponseDto> {
-    const { companyId, userId, roleId } = getTenantContext();
-    permit.id = id;
-    return this.workPermitService.saveWorkPermit(companyId, permit, userId, 'update', roleId);
+    const { companyId, userId } = getTenantContext();
+    return this.workPermitService.updateWorkPermit(companyId, id, permit, userId);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ModulePermission(AppModule.WP, 'D')
   async deleteWorkPermit(
     @Param('id') id: string,
     @Query('plantId') plantId: string,
   ): Promise<void> {
-    const { companyId, userId, roleId } = getTenantContext();
-    await this.workPermitService.deleteWorkPermit(companyId, plantId, id, userId, roleId);
+    const { companyId, userId } = getTenantContext();
+    await this.workPermitService.deleteWorkPermit(companyId, plantId, id, userId);
   }
 }

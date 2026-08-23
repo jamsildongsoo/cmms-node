@@ -37,11 +37,12 @@ export class MasterController {
     @Query('plantId') plantId?: string,
     @Query('keyword') keyword?: string,
     @Query('limit') limit?: string,
+    @Query('pmTargetOnly') pmTargetOnly?: string,
   ): Promise<Equipment[]> {
     const { companyId, userId } = getTenantContext();
     return plantId
-      ? this.masterService.getEquipmentsByPlant(companyId, plantId, userId, keyword, limit)
-      : this.masterService.getEquipmentsByCompany(companyId, userId, keyword, limit);
+      ? this.masterService.getEquipmentsByPlant(companyId, plantId, userId, keyword, limit, pmTargetOnly === 'true')
+      : this.masterService.getEquipmentsByCompany(companyId, userId, keyword, limit, pmTargetOnly === 'true');
   }
 
   @Get('equipments/plant/:plantId')
@@ -52,12 +53,12 @@ export class MasterController {
     return this.masterService.getEquipmentsByPlant(companyId, plantId, userId);
   }
 
-  @Get('equipments/details')
+  @Get('plants/:plantId/equipments/:id')
   @ModulePermission(AppModule.EQP, 'R')
 
   async getEquipmentDetails(
-    @Query('plantId') plantId: string,
-    @Query('id') id: string,
+    @Param('plantId') plantId: string,
+    @Param('id') id: string,
   ): Promise<EquipmentSaveRequest> {
     const { companyId, userId } = getTenantContext();
     return this.masterService.getEquipmentWithDetails(companyId, plantId, id, userId);
@@ -67,24 +68,28 @@ export class MasterController {
   @ModulePermission(AppModule.EQP, 'C')
   async createEquipment(@Body() request: EquipmentSaveRequestDto): Promise<Equipment> {
     const { companyId, userId } = getTenantContext();
-    return this.masterService.saveEquipment(companyId, request, userId, 'create');
+    return this.masterService.createEquipment(companyId, request, userId);
   }
 
 
-  @Put('equipments')
+  @Put('plants/:plantId/equipments/:id')
   @ModulePermission(AppModule.EQP, 'U')
-  async updateEquipment(@Body() request: EquipmentSaveRequestDto): Promise<Equipment> {
+  async updateEquipment(
+    @Param('plantId') plantId: string,
+    @Param('id') id: string,
+    @Body() request: EquipmentSaveRequestDto,
+  ): Promise<Equipment> {
     const { companyId, userId } = getTenantContext();
-    return this.masterService.saveEquipment(companyId, request, userId, 'update');
+    return this.masterService.updateEquipment(companyId, plantId, id, request, userId);
   }
 
-  @Delete('equipments')
+  @Delete('plants/:plantId/equipments/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ModulePermission(AppModule.EQP, 'D')
 
   async deleteEquipment(
-    @Query('plantId') plantId: string,
-    @Query('id') id: string,
+    @Param('plantId') plantId: string,
+    @Param('id') id: string,
   ): Promise<void> {
     const { companyId, userId } = getTenantContext();
     await this.masterService.deleteEquipment(companyId, plantId, id, userId);

@@ -28,18 +28,6 @@ export class PmRecord extends BaseEntity {
   @Column({ name: 'check_type_code', length: 50 })
   checkTypeCode!: string;
 
-  @Column({ name: 'step_stage', length: 1, default: 'R' })
-  stepStage!: string; // P: 계획, R: 실적
-
-  @Column({ name: 'cycle_from', type: 'date', nullable: true })
-  cycleFrom!: string | null;
-
-  @Column({ name: 'cycle_end', type: 'date', nullable: true })
-  cycleEnd!: string | null;
-
-  @Column({ name: 'close_yn', type: 'char', length: 1, default: 'N', nullable: true })
-  closeYn!: string | null;
-
   @Column({ name: 'work_date', type: 'date', nullable: true })
   workDate!: string | null;
 
@@ -52,26 +40,11 @@ export class PmRecord extends BaseEntity {
   @Column({ name: 'remarks', type: 'text', nullable: true })
   remarks!: string | null;
 
-  @Column({ type: 'varchar',  name: 'cert_number', length: 100, nullable: true })
-  certNumber!: string | null;
-
-  @Column({ name: 'cert_expire_date', type: 'date', nullable: true })
-  certExpireDate!: string | null;
-
-  @Column({ type: 'varchar',  name: 'cert_agency', length: 100, nullable: true })
-  certAgency!: string | null;
-
   @Column({ type: 'varchar',  name: 'approval_id', length: 50, nullable: true })
   approvalId!: string | null;
 
   @Column({ name: 'file_group_id', type: 'bigint', nullable: true })
   fileGroupId!: string | number | null;
-
-  @Column({ type: 'varchar',  name: 'ref_no', length: 50, nullable: true })
-  refNo!: string | null;
-
-  @Column({ type: 'varchar',  name: 'ref_module', length: 50, nullable: true })
-  refModule!: string | null;
 
   @Column({ name: 'status', length: 1, default: 'T' })
   status!: string;

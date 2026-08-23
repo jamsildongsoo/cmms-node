@@ -5,12 +5,13 @@ import type { EquipmentReference } from '../master-reference.types';
 
 type EquipmentSelectorProps = Omit<SearchSelectProps<EquipmentReference>, 'search' | 'getKey' | 'renderOption'> & {
   plantId?: string | null;
+  pmTargetOnly?: boolean;
 };
 
-export default function EquipmentSelector({ plantId, ...props }: EquipmentSelectorProps) {
+export default function EquipmentSelector({ plantId, pmTargetOnly = false, ...props }: EquipmentSelectorProps) {
   const search = useCallback(
-    (keyword: string) => masterLookupApi.getEquipments(plantId, keyword),
-    [plantId],
+    (keyword: string) => masterLookupApi.getEquipments(plantId, keyword, pmTargetOnly),
+    [plantId, pmTargetOnly],
   );
   return (
     <SearchSelect

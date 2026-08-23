@@ -1,6 +1,7 @@
 import axiosInstance from '../../api/axios';
 import type {
   PurchaseRequest,
+  PurchaseOrder,
   PurchaseRequestDetail,
   PurchaseRequestItem,
   PurchaseOrderAllocation,
@@ -30,8 +31,8 @@ export const procurementApi = {
     );
     return response.data;
   },
-  async getOrders(receivable = false, plantId?: string | null, tempOnly = false): Promise<PurchaseRequest[]> {
-    const response = await axiosInstance.get<PurchaseRequest[]>('/procurement/orders', {
+  async getOrders(receivable = false, plantId?: string | null, tempOnly = false): Promise<PurchaseOrder[]> {
+    const response = await axiosInstance.get<PurchaseOrder[]>('/procurement/orders', {
       params: {
         plantId: plantId || undefined,
         receivable: receivable ? 'Y' : undefined,
@@ -44,8 +45,8 @@ export const procurementApi = {
     orderDate?: string;
     etaDate?: string;
     lines: Array<{ prId: string; prItemNo: number; qty: number }>;
-  }): Promise<PurchaseRequest> {
-    const response = await axiosInstance.post<PurchaseRequest>('/procurement/orders', request);
+  }): Promise<PurchaseOrder> {
+    const response = await axiosInstance.post<PurchaseOrder>('/procurement/orders', request);
     return response.data;
   },
   async createStandaloneOrder(request: {
@@ -54,8 +55,8 @@ export const procurementApi = {
     orderDate?: string;
     etaDate?: string;
     items: PurchaseRequestItem[];
-  }): Promise<PurchaseRequest> {
-    const response = await axiosInstance.post<PurchaseRequest>('/procurement/orders/standalone', request);
+  }): Promise<PurchaseOrder> {
+    const response = await axiosInstance.post<PurchaseOrder>('/procurement/orders/standalone', request);
     return response.data;
   },
   async updateOrder(id: string, request: {
@@ -97,12 +98,14 @@ export const procurementApi = {
     );
     return response.data;
   },
-  async create(header: Partial<PurchaseRequest>, items: PurchaseRequestItem[]): Promise<PurchaseRequest> {
+  async createRequest(header: Partial<PurchaseRequest>, items: PurchaseRequestItem[]): Promise<PurchaseRequest> {
     const response = await axiosInstance.post<PurchaseRequest>('/procurement/requests', { header, items });
     return response.data;
   },
-  async update(id: string, header: Partial<PurchaseRequest>, items: PurchaseRequestItem[]): Promise<PurchaseRequest> {
-    const response = await axiosInstance.put<PurchaseRequest>(`/procurement/requests/${id}`, { header, items });
+  async updateRequest(id: string, header: Partial<PurchaseRequest>, items: PurchaseRequestItem[]): Promise<PurchaseRequest> {
+    const body = { header: { ...header }, items };
+    delete body.header.id;
+    const response = await axiosInstance.put<PurchaseRequest>(`/procurement/requests/${id}`, body);
     return response.data;
   },
   async confirmOrder(id: string): Promise<void> {

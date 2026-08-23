@@ -106,11 +106,6 @@ export class InventoryTxService {
     try {
       await this.validatePurchaseReferences(runner, companyId, request.items);
       for (const closingYm of [...transactionMonths].sort()) {
-        // 월마감과 같은 키를 잠가 마감 집계 중 수불이 끼어들지 못하게 한다.
-        await runner.query(
-          'SELECT pg_advisory_xact_lock(hashtext($1))',
-          [`inventory-closing:${companyId}:${closingYm}`],
-        );
         const [closed, legacyClosed] = await Promise.all([
           runner.manager.getRepository(InventoryClosing).count({
             where: { companyId, closingYm, status: 'CLOSED', deleteYn: 'N' },
@@ -414,11 +409,6 @@ export class InventoryTxService {
     await runner.connect();
     await runner.startTransaction('SERIALIZABLE');
     try {
-      // 동일 회사·월의 중복 마감을 직렬화한다.
-      await runner.query(
-        'SELECT pg_advisory_xact_lock(hashtext($1))',
-        [`inventory-closing:${companyId}:${closingYm}`],
-      );
       const headerRepository = runner.manager.getRepository(InventoryClosing);
       const existingHeader = await headerRepository.findOne({
         where: { companyId, closingYm, status: 'CLOSED', deleteYn: 'N' },

@@ -28,9 +28,10 @@ export class PermissionGuard implements CanActivate {
       module: AppModule;
       action: PermAction;
     }>(MODULE_PERMISSION_KEY, [ctx.getHandler(), ctx.getClass()]);
-    // 기본은 deny-all이다. 모든 업무 API는 module과 C/R/U/D를 명시해야 한다.
+    // 권한 정책이 없는 API는 PermissionGuard가 인증만 통과시키고,
+    // 권한이 필요한 API는 ModulePermission을 명시해 검사한다.
     if (!moduleAccess) {
-      throw new ForbiddenException('권한 정책이 지정되지 않은 API입니다.');
+      return true;
     }
 
     const req = ctx.switchToHttp().getRequest();

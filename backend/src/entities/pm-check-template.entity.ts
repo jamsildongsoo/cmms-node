@@ -1,8 +1,7 @@
 import { Entity, PrimaryColumn, Column } from 'typeorm';
 
 /**
- * 예방점검 점검 항목 템플릿 — 점검유형(check_type_code)별 기본 항목 정의.
- * 계획(PM record) 생성 시 이 템플릿에서 항목을 불러와 pm_record_item에 복사한다.
+ * 예방점검 점검 항목 템플릿 — 설비(equipment_id)·점검유형별 편의 항목 정의.
  */
 @Entity('pm_check_template')
 export class PmCheckTemplate {
@@ -11,6 +10,9 @@ export class PmCheckTemplate {
 
   @PrimaryColumn({ name: 'plant_id', length: 50 })
   plantId!: string;
+
+  @PrimaryColumn({ name: 'equipment_id', length: 50 })
+  equipmentId!: string;
 
   @PrimaryColumn({ name: 'check_type_code', length: 50 })
   checkTypeCode!: string;

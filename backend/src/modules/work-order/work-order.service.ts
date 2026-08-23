@@ -83,12 +83,28 @@ export class WorkOrderService {
     };
   }
 
-  async saveWorkOrder(
+  async createWorkOrder(
+    companyId: string,
+    request: SaveWorkOrderDto,
+    operator: string,
+  ): Promise<WorkOrderResponseDto> {
+    return this.saveDraft(companyId, request, operator, 'create');
+  }
+
+  async updateWorkOrder(
+    companyId: string,
+    id: string,
+    request: SaveWorkOrderDto,
+    operator: string,
+  ): Promise<WorkOrderResponseDto> {
+    return this.saveDraft(companyId, { ...request, workOrder: { ...request.workOrder, id } }, operator, 'update');
+  }
+
+  private async saveDraft(
     companyId: string,
     request: SaveWorkOrderDto,
     operator: string,
     mode: 'create' | 'update',
-    roleId?: string,
   ): Promise<WorkOrderResponseDto> {
     const { workOrder: input, workItems } = request;
     const plantId = await resolveActivePlantId(
@@ -135,15 +151,10 @@ export class WorkOrderService {
           plantId,
           id,
         );
-        await this.permissionPolicyService.assertCanUpdateOwnTempOrPermission({
-          companyId,
-          roleId: roleId ?? '',
-          userId: operator,
-          module: AppModule.WO,
+        this.permissionPolicyService.assertOwnDraft({
           status: entity.status,
           ownerId: entity.createdBy,
           operatorId: operator,
-          resourceLabel: '작업지시',
         });
         if (entity.status !== DocStatus.TEMP) {
           throw new BadRequestException('임시저장 상태의 작업지시만 수정할 수 있습니다.');
@@ -203,7 +214,6 @@ export class WorkOrderService {
     plantId: string,
     id: string,
     operator: string,
-    roleId: string,
   ): Promise<void> {
     const activePlantId = await resolveActivePlantId(
       this.dataSource,
@@ -218,15 +228,10 @@ export class WorkOrderService {
       where: { companyId, plantId: activePlantId, id, deleteYn: 'N' },
     });
     if (!entity) throw new NotFoundException('작업 지시를 찾을 수 없습니다.');
-    await this.permissionPolicyService.assertCanDeleteOwnTempOrPermission({
-      companyId,
-      roleId,
-      userId: operator,
-      module: AppModule.WO,
+    this.permissionPolicyService.assertOwnDraft({
       status: entity.status,
       ownerId: entity.createdBy,
       operatorId: operator,
-      resourceLabel: '작업지시',
     });
     if (entity.status !== DocStatus.TEMP) {
       throw new BadRequestException('임시저장 상태의 작업지시만 삭제할 수 있습니다.');

@@ -5,7 +5,7 @@ import { requestConfirmation } from '../utils/userActionDialog';
 import ProcurementRequestPrint from '../components/ProcurementRequestPrint';
 import PurchaseOrderPrint from '../components/PurchaseOrderPrint';
 import { useAuthStore } from '../store/useAuthStore';
-import { hasModuleAction, hasModuleCreate, hasModuleRead, hasModuleUpdate } from '../utils/moduleAccess';
+import { hasModuleAction, hasModuleCreate, hasModuleRead } from '../utils/moduleAccess';
 import { ShoppingCart, Plus, Printer, FileText, Link2 } from 'lucide-react';
 import {
   getCommonStatusLabel,
@@ -311,8 +311,8 @@ export default function ProcurementContainer({
       }
       const header = { ...formHeader, status: 'T' };
       const saved = formHeader.id
-        ? await procurementApi.update(formHeader.id, header, saveItems)
-        : await procurementApi.create(header, saveItems);
+        ? await procurementApi.updateRequest(formHeader.id, header, saveItems)
+        : await procurementApi.createRequest(header, saveItems);
       setFormHeader(saved);
       if (action === 'P') {
         setApprovalRef(saved);
@@ -511,17 +511,14 @@ export default function ProcurementContainer({
     warehouses,
   ]);
   const canCreate = hasModuleCreate(user?.moduleAccess, APP_MODULE.PUR);
-  const canUpdate = canRequestRead;
-  const canDelete = canRequestRead;
   const canCreateOrder = hasModuleCreate(user?.moduleAccess, APP_MODULE.POR);
-  const canUpdateOrder = hasModuleUpdate(user?.moduleAccess, APP_MODULE.POR);
   const isRequestDraftLike = !formHeader.id || ['T', 'R'].includes(formHeader.status || '');
-  const isOwnTempRequest = formHeader.status === 'T' && formHeader.requesterId === user?.id;
-  const canEditRequest = !formHeader.id ? canCreate : canUpdate || isOwnTempRequest;
+  const isNewRequest = !formHeader.id;
+  const isOwnDraftRequest = formHeader.status === 'T' && formHeader.requesterId === user?.id;
+  const canEditRequest = isNewRequest ? canCreate : isOwnDraftRequest;
   const canEditOrder = detailMode === 'management'
     && formHeader.status === 'T'
-    && formHeader.createdBy === user?.id
-    && canUpdateOrder;
+    && formHeader.createdBy === user?.id;
   const formEditable = detailMode === 'create-order'
     ? canCreateOrder
     : detailMode === 'management'
@@ -530,11 +527,10 @@ export default function ProcurementContainer({
   const canSaveOrder = detailMode === 'create-order' ? canCreateOrder : canEditOrder;
   const canSaveRequest = detailMode === 'create-order' ? canCreateOrder : canEditRequest;
   const isConfirmedRequest = ['C', 'S'].includes(formHeader.status || '');
-  const canManageFlow = detailMode === 'management' && isConfirmedRequest && canUpdateOrder;
+  const canManageFlow = detailMode === 'management' && isConfirmedRequest;
   const canCloseRequest = detailMode === 'management'
     && isConfirmedRequest
-    && !formHeader.closedAt
-    && canUpdateOrder;
+    && !formHeader.closedAt;
   const detailTitle = !formHeader.id
     ? detailMode === 'create-order' ? '신규 구매오더 입력' : '신규 구매요청 입력'
     : detailMode === 'management'
@@ -746,7 +742,7 @@ export default function ProcurementContainer({
           formEditable={formEditable}
           allocations={allocations}
           setAllocations={setAllocations}
-          canUpdateOrder={canUpdateOrder}
+          canEditOrder={canEditOrder}
           canConfirmOrder={canConfirmOrder}
           canCloseRequest={canCloseRequest}
           canSaveOrder={canSaveOrder}
@@ -773,8 +769,7 @@ export default function ProcurementContainer({
           formEditable={formEditable}
           canManageFlow={canManageFlow}
           detailMode={detailMode === 'request' ? 'request' : 'create'}
-          canDelete={canDelete}
-          isOwnTempRequest={isOwnTempRequest}
+          canDeleteCurrent={!isNewRequest && isOwnDraftRequest}
           canCloseRequest={canCloseRequest}
           canSaveRequest={canSaveRequest}
           deleteRequest={(id) => void deleteRequest(id)}

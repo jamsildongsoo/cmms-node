@@ -8,9 +8,7 @@ export interface WorkPermit {
   id: string;
   plantId: string;
   equipmentId: string;
-  workOrderId: string | null;
   title: string;
-  stepStage: string;
   permitTypeCodes: string;
   startAt: string | null;
   endAt: string | null;

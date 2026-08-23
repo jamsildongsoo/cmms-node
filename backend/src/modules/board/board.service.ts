@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -49,24 +50,14 @@ export class BoardService {
 
   async saveBoard(
     companyId: string,
+    id: number | null,
     input: SaveBoardDto,
     operator: string,
-    roleId: string,
   ): Promise<BoardResponseDto> {
     const repository = this.dataSource.getRepository(Board);
-    const rawId = input.id == null ? null : Number(input.id);
+    const rawId = id == null ? null : Number(id);
     let entity: Board;
     if (rawId == null) {
-      await this.permissionPolicyService.assertActionPermission(
-        {
-          companyId,
-          roleId,
-          userId: operator,
-          module: AppModule.BRD,
-          action: 'C',
-          resourceLabel: '게시판',
-        },
-      );
       entity = repository.create({
         companyId,
         boardTypeCode: input.boardTypeCode,
@@ -86,10 +77,7 @@ export class BoardService {
       }) ?? (() => {
         throw new NotFoundException('게시글을 찾을 수 없습니다.');
       })();
-      await this.permissionPolicyService.assertCanMutateBoard({
-        companyId,
-        roleId,
-        action: 'U',
+      this.permissionPolicyService.assertOwner({
         ownerId: entity.createdBy,
         operatorId: operator,
       });
@@ -128,21 +116,23 @@ export class BoardService {
     companyId: string,
     id: number,
     operator: string,
-    roleId: string,
   ): Promise<void> {
     const repository = this.dataSource.getRepository(Board);
     const entity = await repository.findOne({
       where: { companyId, id, deleteYn: 'N' },
     });
     if (!entity) throw new NotFoundException('게시글을 찾을 수 없습니다.');
-    await this.permissionPolicyService.assertCanMutateBoard({
-      companyId,
-      roleId,
-      action: 'D',
+    this.permissionPolicyService.assertOwner({
       ownerId: entity.createdBy,
       operatorId: operator,
     });
     const fileGroupId = entity.fileGroupId;
+    const commentCount = await this.dataSource.getRepository(BoardComment).count({
+      where: { companyId, boardId: id },
+    });
+    if (commentCount > 0) {
+      throw new BadRequestException('댓글이 등록된 게시글은 삭제할 수 없습니다.');
+    }
     entity.deleteYn = 'Y';
     entity.updatedBy = operator;
     await repository.save(entity);
@@ -151,10 +141,10 @@ export class BoardService {
 
   async saveComment(
     companyId: string,
+    boardId: number,
     input: SaveCommentDto,
     operatorId: string,
   ): Promise<BoardCommentResponseDto> {
-    const boardId = Number(input.boardId);
     const runner = this.dataSource.createQueryRunner();
     await runner.connect();
     await runner.startTransaction();
@@ -201,7 +191,6 @@ export class BoardService {
     boardId: number,
     commentNo: number,
     operatorId: string,
-    roleId: string,
   ): Promise<void> {
     const repository = this.dataSource.getRepository(BoardComment);
     const comment = await repository.findOne({
@@ -209,17 +198,14 @@ export class BoardService {
     });
     if (!comment) throw new NotFoundException('댓글을 찾을 수 없습니다.');
     try {
-      await this.permissionPolicyService.assertCanMutateBoard({
-        companyId,
-        roleId,
-        action: 'D',
+      this.permissionPolicyService.assertOwner({
         ownerId: comment.authorId,
         operatorId,
       });
     } catch (error) {
       if (error instanceof ForbiddenException) {
         throw new ForbiddenException(
-          '본인 댓글이 아니거나 게시판 삭제 권한이 없습니다.',
+          '본인 댓글만 삭제할 수 있습니다.',
         );
       }
       throw error;

@@ -2,9 +2,9 @@ import axiosInstance from '../../api/axios';
 import type { EquipmentReference, InventoryReference } from './master-reference.types';
 
 export const masterLookupApi = {
-  async getEquipments(plantId?: string | null, keyword?: string): Promise<EquipmentReference[]> {
+  async getEquipments(plantId?: string | null, keyword?: string, pmTargetOnly = false): Promise<EquipmentReference[]> {
     const response = await axiosInstance.get<EquipmentReference[]>('/master/equipments', {
-      params: { plantId: plantId || undefined, keyword: keyword?.trim() || undefined, limit: 30 },
+      params: { plantId: plantId || undefined, keyword: keyword?.trim() || undefined, limit: 30, pmTargetOnly: pmTargetOnly || undefined },
     });
     return response.data;
   },

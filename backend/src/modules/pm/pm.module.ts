@@ -5,7 +5,6 @@ import { PmService } from './pm.service';
 import { PmRecord } from '../../entities/pm-record.entity';
 import { PmRecordItem } from '../../entities/pm-record-item.entity';
 import { PmCheckTemplate } from '../../entities/pm-check-template.entity';
-import { EquipmentCheckCycle } from '../../entities/equipment-check-cycle.entity';
 import { PmRepository } from './pm.repository';
 import { FileModule } from '../file/file.module';
 
@@ -16,7 +15,6 @@ import { FileModule } from '../file/file.module';
       PmRecord,
       PmRecordItem,
       PmCheckTemplate,
-      EquipmentCheckCycle,
     ]),
   ],
   controllers: [PmController],

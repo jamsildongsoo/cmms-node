@@ -8,7 +8,7 @@
 
 *   동일한 성격의 기능은 동일한 URI, 메서드, 권한 처리 규칙을 사용합니다.
 *   문서형 자원은 CRUD와 상태 전이(Action)를 분리합니다.
-*   권한 예외는 컨트롤러보다 서비스 계층에서 판단합니다.
+*   권한 관리 대상 API만 `PermissionGuard`/`ModulePermission`을 적용하고, 업무 상태·소유권·결재선 검증은 서비스 계층에서 판단합니다.
 *   FE는 API wrapper를 통해서만 백엔드와 통신하며, 화면 컴포넌트에서 URI를 직접 조합하지 않습니다.
 
 ---
@@ -50,7 +50,7 @@
 ## 4. Path / Query 사용 원칙
 
 *   자원 식별자는 path param으로 표현합니다.
-*   검색 조건, 정렬, 필터, 접근 컨텍스트는 query param으로 전달합니다.
+*   검색 조건, 정렬, 필터, 접근 컨텍스트는 query param으로 전달합니다. FE는 typed query object를 사용하고 URLSearchParams를 직접 mutate하지 않습니다.
 *   동일한 값을 body와 path에 중복 전달하지 않습니다.
 
 API의 `path/query/body/actions` 구분과 `companyId`·`plantId` 범위 규칙은
@@ -59,7 +59,7 @@ API의 `path/query/body/actions` 구분과 `companyId`·`plantId` 범위 규칙�
 예시:
 
 *   자원 식별: `GET /work-permit/:id`
-*   검색 조건: `GET /pm/records?stepStage=P&showAll=Y`
+*   검색 조건: `GET /pm/records?searchType=id&searchValue=PM-001`
 *   접근 컨텍스트: `GET /pm/records/:id?plantId=P1`
 
 ---
@@ -75,8 +75,8 @@ API의 `path/query/body/actions` 구분과 `companyId`·`plantId` 범위 규칙�
 
 권한 예외는 서비스 계층에서 처리합니다.
 
-*   본인 작성 임시저장(`T`) 문서는 해당 모듈의 `U/D` 권한과 작성자 본인 여부를 모두 확인한 뒤 수정/삭제합니다.
-*   타인 문서 수정/삭제는 기본 `U/D` 권한 규칙을 따릅니다.
+*   기준정보·마스터는 C/R/U/D를 검사합니다. 일반 업무문서는 C/R 진입 권한을 검사하고, T 문서 수정·삭제는 Service의 본인 소유·상태 검증으로 처리합니다.
+*   업무문서의 P/C/S/R/X/E 상태는 일반 수정이 아니라 명시적 업무 action으로 변경합니다. 타인 문서나 T가 아닌 문서는 일반 수정·삭제하지 않습니다.
 *   반려(`R`) 문서는 삭제하지 않고 이력을 유지합니다.
 
 ---
@@ -87,6 +87,8 @@ API의 `path/query/body/actions` 구분과 `companyId`·`plantId` 범위 규칙�
 *   페이지/컴포넌트는 axios 경로를 직접 작성하지 않습니다.
 *   BE 라우트 변경 시 FE API wrapper를 함께 수정합니다.
 *   FE 타입과 BE DTO는 자원 식별 방식(path/query/body)이 일치해야 합니다.
+*   수정 요청은 `update(id, request)`로 표현하고 ID는 path에만 전달합니다. Controller가 request DTO를 수정하지 않습니다.
+*   Controller 메서드는 `createX`, `updateX`, `getX`, `deleteX`처럼 업무행위를 명시하고, `save(mode)`는 Service 내부 공통 구현에만 사용합니다.
 
 권장 방식:
 
@@ -151,6 +153,7 @@ API의 `path/query/body/actions` 구분과 `companyId`·`plantId` 범위 규칙�
 *   PUR·POR는 기반 테이블과 업무 흐름이 다르므로 각각 `PurchaseRequestFormModal`, `PurchaseOrderFormModal`이 자신의 필드와 버튼을 소유합니다. 모듈 간에는 공통 `Modal` 껍데기만 공유합니다.
 *   단일 FormModal에서만 사용하는 `FormField`, FormBody, Context, 별도 form types 파일은 만들지 않습니다. 실제 재사용처가 둘 이상이고 상태·UI 계약이 동일한 경우에만 공통 컴포넌트를 둡니다.
 *   입력 하나 수준의 짧은 업무 action은 별도 FormModal을 만들지 않고 공통 `Modal`을 직접 사용합니다. `ApprovalDraftModal`은 결재선·첨부·자동저장·중첩 표시가 결합된 독립 업무 흐름이므로 별도 업무 Modal 예외로 유지합니다.
+*   FormModal 내부의 반복 표시·입력·테이블 JSX는 파일 내부 보조 컴포넌트로 분리할 수 있습니다. 보조 컴포넌트는 화면 표현을 바꾸지 않는 범위에서만 사용하고, 실제 재사용이 없으면 전역 공통화하지 않습니다.
 *   출력물은 업무 화면과 분리된 `*Print` 컴포넌트 또는 출력 전용 렌더링으로 관리합니다.
 *   목록은 업무별 컬럼·상태·권한 분기를 유지합니다. 데이터 구조와 업무 규칙이 다른 화면을 무리하게 공통화하지 않습니다.
 *   PM·WO·WP처럼 목록 패널 구조가 동일한 경우에는 레이아웃만 공통화하고, 행 표시와 업무 분기는 각 모듈에 둡니다.
@@ -171,7 +174,7 @@ API의 `path/query/body/actions` 구분과 `companyId`·`plantId` 범위 규칙�
 *   FE 페이지는 API URI를 직접 조합하지 않고 `features/*/*.api.ts` wrapper의 함수만 호출합니다.
 *   요청 DTO와 FE payload에는 BE DTO의 필수 식별자·item 순번·첨부파일 그룹 식별자를 누락하지 않습니다. item 순번은 저장 직전에 `itemNo` 기준으로 정규화할 수 있습니다.
 *   문서 목록의 기본조건은 회사·허용 plant·`deleteYn='N'`입니다. 임시저장 필터 OFF는 `status<>'T'`와 일반 검색조건을 적용하고, ON은 `status='T' AND createdBy=현재 사용자`만 적용해 검색조건을 무시합니다.
-*   신규 임시저장 `POST`는 C, 기존 임시저장 `PUT`은 U, 저장된 T 문서의 직접확정 `T→S` action은 A 권한으로 구분합니다. 현재 직접확정 A는 결재연계 전인 POR에서만 사용하지만 A 권한 모델은 향후 다른 모듈의 확장 action에도 사용할 수 있습니다. 결재 승인·반려는 직접확정이 아니므로 APR 결재선 담당자 검증을 따릅니다.
+*   신규 임시저장 `POST`는 C, 기존 임시저장 `PUT`은 업무별 Service의 소유권·상태 정책을 따릅니다. 직접확정 `T→S` action은 현재 PO(POR)에만 A 권한으로 제공합니다. 결재 승인·반려와 결재 완료 후 원문서 갱신은 CRUD와 분리된 업무 절차로 처리합니다.
 
 ## 11. 용어·권한·범위 기준
 
@@ -196,7 +199,7 @@ API의 `path/query/body/actions` 구분과 `companyId`·`plantId` 범위 규칙�
 ## 13. BE 트랜잭션·동시성 원칙
 
 *   하나의 업무 요청이 두 개 이상의 header/item/status/allocation을 변경하면 하나의 TypeORM transaction으로 처리합니다.
-*   재고 입고·출고·이동·조정은 all-or-nothing으로 처리합니다. `inventory_status` 대상 행은 `pessimistic_write`로 잠근 뒤 잔량·금액·평균단가를 갱신합니다.
+*   재고 입고·출고·이동·조정은 all-or-nothing으로 처리합니다. 존재하는 `inventory_status` 대상 행은 `pessimistic_write`로 잠근 뒤 잔량·금액·평균단가를 갱신하고, 행이 없는 최초 입고·조정은 신규 행을 생성합니다. 최초 동시 생성 충돌은 전체 rollback 후 사용자 재시도로 처리합니다.
 *   재고 원장 `inventory_history`는 실제 처리 결과를 append-only로 기록합니다. 기존 원장 행을 수정·삭제하지 않고, 취소는 반대 방향의 신규 전표로 처리합니다.
 *   재고 처리 전 마감월, 창고·자재 유효성, 출고 가능 수량, 취소 가능 여부를 검증합니다.
 *   구매 allocation과 PO 입고 참조 검증은 관련 PO/item/allocation을 잠그고 수량 검증을 같은 transaction에서 수행합니다. 창고 이동은 구매문서·allocation과 분리합니다.

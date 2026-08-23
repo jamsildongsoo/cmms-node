@@ -20,65 +20,54 @@ import {
 import { SaveBoardDto } from './dto/save-board.dto';
 import { SaveCommentDto } from './dto/save-comment.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { PermissionGuard, ModulePermission } from '../../common/guards/permission.guard';
-import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
 @Controller('api/board')
-@UseGuards(JwtAuthGuard, PermissionGuard)
+@UseGuards(JwtAuthGuard)
 export class BoardController {
   constructor(private readonly boardService: BoardService) {}
 
   @Get()
-  @ModulePermission(AppModule.BRD, 'R')
   async getBoards(): Promise<BoardResponseDto[]> {
     const { companyId } = getTenantContext();
     return this.boardService.getBoards(companyId);
   }
 
   @Get(':id')
-  @ModulePermission(AppModule.BRD, 'R')
   async getBoardDetails(@Param('id', ParseIntPipe) id: number): Promise<BoardDetailResponseDto> {
     const { companyId } = getTenantContext();
     return this.boardService.getBoardDetails(companyId, id);
   }
 
   @Post()
-  @ModulePermission(AppModule.BRD, 'C')
   async saveBoard(@Body() board: SaveBoardDto): Promise<BoardResponseDto> {
-    const { companyId, userId, roleId } = getTenantContext();
-    return this.boardService.saveBoard(companyId, board, userId, roleId);
+    const { companyId, userId } = getTenantContext();
+    return this.boardService.saveBoard(companyId, null, board, userId);
   }
 
   @Put(':id')
-  @ModulePermission(AppModule.BRD, 'U')
   async updateBoard(@Param('id', ParseIntPipe) id: number, @Body() board: SaveBoardDto): Promise<BoardResponseDto> {
-    const { companyId, userId, roleId } = getTenantContext();
-    board.id = id;
-    return this.boardService.saveBoard(companyId, board, userId, roleId);
+    const { companyId, userId } = getTenantContext();
+    return this.boardService.saveBoard(companyId, id, board, userId);
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ModulePermission(AppModule.BRD, 'D')
   async deleteBoard(@Param('id', ParseIntPipe) id: number): Promise<void> {
-    const { companyId, userId, roleId } = getTenantContext();
-    await this.boardService.deleteBoard(companyId, id, userId, roleId);
+    const { companyId, userId } = getTenantContext();
+    await this.boardService.deleteBoard(companyId, id, userId);
   }
 
   @Post(':id/comments')
-  @ModulePermission(AppModule.BRD, 'C')
   async saveComment(@Param('id', ParseIntPipe) boardId: number, @Body() comment: SaveCommentDto): Promise<BoardCommentResponseDto> {
     const { companyId, userId } = getTenantContext();
-    comment.boardId = boardId;
-    return this.boardService.saveComment(companyId, comment, userId);
+    return this.boardService.saveComment(companyId, boardId, comment, userId);
   }
 
   @Delete(':id/comments/:commentNo')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ModulePermission(AppModule.BRD, 'D')
   async deleteComment(@Param('id', ParseIntPipe) boardId: number, @Param('commentNo', ParseIntPipe) commentNo: number): Promise<void> {
-    const { companyId, userId, roleId } = getTenantContext();
-    await this.boardService.deleteComment(companyId, boardId, commentNo, userId, roleId);
+    const { companyId, userId } = getTenantContext();
+    await this.boardService.deleteComment(companyId, boardId, commentNo, userId);
   }
 }

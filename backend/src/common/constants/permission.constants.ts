@@ -4,7 +4,7 @@
 
 /**
  * 권한 액션 (role_detail.perm_c/r/u/d/a)
- * A는 직접확정 등 모듈별 확장 업무 action에 사용한다.
+ * A는 직접확정 등 모듈별 확장 업무 action에 사용한다. 승인권한이 아니며, 결재연계모듈 연계없어 직접 확정 시 사용한다.
  */
 export type PermAction = 'C' | 'R' | 'U' | 'D' | 'A';
 

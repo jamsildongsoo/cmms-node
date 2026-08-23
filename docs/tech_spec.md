@@ -141,7 +141,7 @@ Base path는 `/api`다.
 ### 5.3 자재·재고
 
 - inventory는 회사 공통 자재 마스터다.
-- inventory_status는 회사·창고·자재별 현재 수량·금액이다.
+- inventory_status는 실제 거래가 발생한 회사·창고·자재별 현재 수량·금액을 저장한다. 행이 없는 조합은 수량·금액 0으로 간주하며, 최초 입고·조정 시 행을 생성한다.
 - 신규 자재와 신규 창고 생성 시 관련 status를 0으로 초기화한다.
 - inventory_document는 전표 header이며 id, tx_date, ref_module, ref_no, remarks를 가진다.
 - inventory_document_item은 warehouse_id, inventory_id, tx_type_code, tx_reason_code, qty, unit_price를 가진다.
@@ -185,8 +185,8 @@ BE의 공통 상수를 단일 원천으로 하고 FE는 표시 라벨과 화면 
 ### 7.1 재고
 
 - 입고·출고·이동·조정은 all-or-nothing transaction이다.
-- inventory_status의 회사·창고·자재 행을 pessimistic_write로 잠근다.
-- 월마감 키는 `pg_advisory_xact_lock`으로 마감과 거래의 경합을 방지하고, 재고 행은 `pessimistic_write`로 보호한다.
+- inventory_status의 회사·창고·자재 행이 존재하면 `pessimistic_write`로 잠근다. 행이 없는 최초 입고는 새 행 생성 시도 중 PK 충돌이 발생할 수 있으며, 해당 거래 전체를 rollback하고 사용자 재시도로 처리한다.
+- 월마감과 수불 간 별도 Lock은 적용하지 않는다.
 - 출고 부족, 마감 월 거래, 잘못된 창고·자재는 처리 전에 거부한다.
 
 ### 7.2 구매

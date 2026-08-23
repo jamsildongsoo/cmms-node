@@ -15,6 +15,7 @@ import {
   ProcurementService,
   RequestDetail,
   PurchaseRequestResponse,
+  PurchaseOrderResponse,
   PurchaseOrderAllocationResponse,
   PurchaseOrderLinkResponse,
   PurchaseOrderInventoryDocumentResponse,
@@ -32,12 +33,13 @@ import { AppModule } from '../../common/constants/module.constants';
 import { getTenantContext } from '../../common/context/tenant.context';
 
 @Controller('api/procurement')
-@UseGuards(JwtAuthGuard, PermissionGuard)
+@UseGuards(JwtAuthGuard)
 export class ProcurementController {
   constructor(private readonly procurementService: ProcurementService) {}
 
   /** 확정 여부와 무관하게 권한 범위 내 PUR 목록을 조회한다. */
   @Get('requests')
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.PUR, 'R')
   async getRequests(
     @Query('plantId') plantId?: string,
@@ -57,6 +59,7 @@ export class ProcurementController {
 
   /** PUR 상세와 항목을 조회한다. */
   @Get('requests/:id')
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.PUR, 'R')
   async getRequest(
     @Param('id') id: string,
@@ -68,6 +71,7 @@ export class ProcurementController {
 
   /** PUR에 연결된 POR 번호와 상태만 지연 조회한다. */
   @Get('requests/:id/order-links')
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.PUR, 'R')
   async getPurchaseOrderLinks(@Param('id') id: string): Promise<PurchaseOrderLinkResponse[]> {
     const { companyId } = getTenantContext();
@@ -75,31 +79,31 @@ export class ProcurementController {
   }
 
   @Post('requests')
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.PUR, 'C')
-  async saveRequest(@Body() request: SaveProcurementDto): Promise<PurchaseRequestResponse> {
+  async createRequest(@Body() request: SaveProcurementDto): Promise<PurchaseRequestResponse> {
     const { companyId, userId } = getTenantContext();
-    return this.procurementService.createOrUpdate(companyId, {
+    return this.procurementService.createRequest(companyId, {
       ...request,
       items: request.items?.map((item) => ({ ...item, qty: item.qty.toString() })),
-    }, userId, 'create');
+    }, userId);
   }
 
   @Put('requests/:id')
-  @ModulePermission(AppModule.PUR, 'U')
   async updateRequest(
     @Param('id') id: string,
     @Body() request: SaveProcurementDto,
   ): Promise<PurchaseRequestResponse> {
-    const { companyId, userId, roleId } = getTenantContext();
-    request.header.id = id;
-    return this.procurementService.createOrUpdate(companyId, {
+    const { companyId, userId } = getTenantContext();
+    return this.procurementService.updateRequest(companyId, id, {
       ...request,
       items: request.items?.map((item) => ({ ...item, qty: item.qty.toString() })),
-    }, userId, 'update', roleId);
+    }, userId);
   }
 
   /** STK에서 구매입고 대상 POR를 조회한다. */
   @Get('orders/receivable/:id')
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.STK, 'R')
   async getReceivableOrder(
     @Param('id') id: string,
@@ -110,10 +114,11 @@ export class ProcurementController {
   }
 
   @Get('orders/receivable')
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.STK, 'R')
   async getReceivableOrders(
     @Query('plantId') plantId?: string,
-  ): Promise<PurchaseRequestResponse[]> {
+  ): Promise<PurchaseOrderResponse[]> {
     const { companyId, userId, roleId } = getTenantContext();
     return this.procurementService.getPurchaseOrders(
       companyId,
@@ -126,12 +131,13 @@ export class ProcurementController {
   }
 
   @Get('orders')
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.POR, 'R')
   async getOrders(
     @Query('plantId') plantId?: string,
     @Query('receivable') receivable?: string,
     @Query('tempOnly') tempOnly?: string,
-  ): Promise<PurchaseRequestResponse[]> {
+  ): Promise<PurchaseOrderResponse[]> {
     const { companyId, userId, roleId } = getTenantContext();
     return this.procurementService.getPurchaseOrders(
       companyId,
@@ -146,8 +152,9 @@ export class ProcurementController {
 
   /** 여러 PUR 항목을 Allocation으로 묶어 임시 POR를 생성한다. */
   @Post('orders')
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.POR, 'C')
-  async createIntegratedOrder(@Body() request: CreateIntegratedOrderDto): Promise<PurchaseRequestResponse> {
+  async createIntegratedOrder(@Body() request: CreateIntegratedOrderDto): Promise<PurchaseOrderResponse> {
     const { companyId, userId } = getTenantContext();
     return this.procurementService.createIntegratedOrder(companyId, {
       ...request,
@@ -157,8 +164,9 @@ export class ProcurementController {
 
   /** PUR와 무관한 독립 POR와 품목을 임시저장한다. */
   @Post('orders/standalone')
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.POR, 'C')
-  async createStandaloneOrder(@Body() request: CreateStandaloneOrderDto): Promise<PurchaseRequestResponse> {
+  async createStandaloneOrder(@Body() request: CreateStandaloneOrderDto): Promise<PurchaseOrderResponse> {
     const { companyId, userId } = getTenantContext();
     return this.procurementService.createStandaloneOrder(companyId, {
       ...request,
@@ -168,7 +176,6 @@ export class ProcurementController {
 
   /** 임시저장 상태의 POR 헤더와 독립 POR 품목을 수정한다. */
   @Put('orders/:id')
-  @ModulePermission(AppModule.POR, 'U')
   async updateOrder(
     @Param('id') id: string,
     @Body() request: UpdatePurchaseOrderDto,
@@ -182,6 +189,7 @@ export class ProcurementController {
 
   /** POR 상세와 Allocation 대상 항목을 조회한다. */
   @Get('orders/:id')
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.POR, 'R')
   async getOrder(
     @Param('id') id: string,
@@ -192,6 +200,7 @@ export class ProcurementController {
   }
 
   @Get('orders/:id/allocations')
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.POR, 'R')
   async getOrderAllocations(
     @Param('id') id: string,
@@ -201,6 +210,7 @@ export class ProcurementController {
   }
 
   @Get('orders/:id/inventory-documents')
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.POR, 'R')
   async getOrderInventoryDocuments(@Param('id') id: string): Promise<PurchaseOrderInventoryDocumentResponse[]> {
     const { companyId } = getTenantContext();
@@ -209,7 +219,6 @@ export class ProcurementController {
 
   /** 임시 POR의 Allocation을 저장한다. */
   @Put('orders/:id/allocations')
-  @ModulePermission(AppModule.POR, 'U')
   async saveOrderAllocations(
     @Param('id') id: string,
     @Body() request: SaveProcurementAllocationsDto,
@@ -223,6 +232,7 @@ export class ProcurementController {
 
   /** Allocation이 있는 임시 POR를 자체확정한다. */
   @Post('orders/:id/actions/confirm')
+  @UseGuards(PermissionGuard)
   @ModulePermission(AppModule.POR, 'A')
   async confirmOrder(@Param('id') id: string): Promise<RequestDetail> {
     const { companyId, userId } = getTenantContext();
@@ -232,14 +242,12 @@ export class ProcurementController {
   /** 임시 POR를 논리삭제한다. */
   @Delete('orders/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ModulePermission(AppModule.POR, 'D')
   async deleteOrder(@Param('id') id: string): Promise<void> {
     const { companyId, userId } = getTenantContext();
     await this.procurementService.deleteOrder(companyId, id, userId);
   }
 
   @Post('orders/:id/actions/close')
-  @ModulePermission(AppModule.POR, 'U')
   async close(@Param('id') id: string): Promise<PurchaseRequestResponse> {
     const { companyId, userId } = getTenantContext();
     return this.procurementService.close(companyId, id, userId);
@@ -247,9 +255,8 @@ export class ProcurementController {
 
   @Delete('requests/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ModulePermission(AppModule.PUR, 'D')
   async deleteRequest(@Param('id') id: string): Promise<void> {
-    const { companyId, userId, roleId } = getTenantContext();
-    await this.procurementService.deleteRequest(companyId, id, userId, roleId);
+    const { companyId, userId } = getTenantContext();
+    await this.procurementService.deleteRequest(companyId, id, userId);
   }
 }

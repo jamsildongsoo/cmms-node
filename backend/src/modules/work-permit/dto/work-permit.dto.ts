@@ -7,9 +7,7 @@ export class SaveWorkPermitDto {
   @IsOptional() @IsString() id?: string | null;
   @IsString() plantId!: string;
   @IsString() equipmentId!: string;
-  @IsOptional() @IsString() workOrderId?: string | null;
   @IsString() title!: string;
-  @IsIn(['P', 'R']) stepStage!: string;
   @IsString() permitTypeCodes!: string;
   @IsOptional() @IsDateString() startAt?: string | null;
   @IsOptional() @IsDateString() endAt?: string | null;
@@ -43,9 +41,7 @@ export class WorkPermitResponseDto {
   id!: string;
   equipmentId!: string;
   equipmentName!: string | null;
-  workOrderId!: string | null;
   title!: string;
-  stepStage!: string;
   permitTypeCodes!: string;
   startAt!: string | null;
   endAt!: string | null;
